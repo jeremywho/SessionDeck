@@ -1,0 +1,62 @@
+using System.Text;
+using System.Windows.Automation;
+
+namespace ClaudeSessionMonitor;
+
+/// <summary>
+/// UI Automation matching of Windows Terminal tabs. WT exposes every tab (including inactive ones)
+/// as a TabItem whose accessible Name is the tab title Claude Code set. We match that against the
+/// session's name/title to find both the host window AND the tab to activate.
+/// </summary>
+internal static class TabSelector
+{
+    /// <summary>Across the given top-level windows, find a tab whose UIA name matches a candidate.</summary>
+    public static (IntPtr WindowHwnd, AutomationElement Tab)? FindTab(
+        IEnumerable<IntPtr> windows, IReadOnlyList<string> normalizedCandidates)
+    {
+        var all = new List<(IntPtr Hwnd, string Norm, AutomationElement El)>();
+        foreach (var hwnd in windows)
+        {
+            AutomationElement? root;
+            try { root = AutomationElement.FromHandle(hwnd); } catch { continue; }
+            if (root == null) continue;
+
+            AutomationElementCollection tabs;
+            try
+            {
+                tabs = root.FindAll(TreeScope.Descendants,
+                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.TabItem));
+            }
+            catch { continue; }
+
+            foreach (AutomationElement t in tabs)
+            {
+                string n = Normalize(t.Current.Name);
+                if (n.Length > 0) all.Add((hwnd, n, t));
+            }
+        }
+
+        foreach (var c in normalizedCandidates)            // exact match first
+            foreach (var e in all)
+                if (e.Norm == c) return (e.Hwnd, e.El);
+        foreach (var c in normalizedCandidates)            // then containment (handles glyph prefixes)
+            foreach (var e in all)
+                if (e.Norm.Contains(c) || c.Contains(e.Norm)) return (e.Hwnd, e.El);
+        return null;
+    }
+
+    public static void Select(AutomationElement tab)
+    {
+        if (tab.TryGetCurrentPattern(SelectionItemPattern.Pattern, out object sip)) ((SelectionItemPattern)sip).Select();
+        else if (tab.TryGetCurrentPattern(InvokePattern.Pattern, out object ip)) ((InvokePattern)ip).Invoke();
+    }
+
+    /// <summary>Lowercase, alphanumerics only — strips the spinner/check glyph prefixes WT shows.</summary>
+    public static string Normalize(string? s)
+    {
+        if (string.IsNullOrEmpty(s)) return "";
+        var sb = new StringBuilder(s.Length);
+        foreach (char c in s) if (char.IsLetterOrDigit(c)) sb.Append(char.ToLowerInvariant(c));
+        return sb.ToString();
+    }
+}

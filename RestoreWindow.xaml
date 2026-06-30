@@ -1,0 +1,51 @@
+<ui:FluentWindow x:Class="ClaudeSessionMonitor.RestoreWindow"
+                 x:ClassModifier="internal"
+                 xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                 xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+                 Title="Restore sessions"
+                 Width="540" Height="440"
+                 MinWidth="420" MinHeight="280"
+                 WindowStartupLocation="CenterScreen"
+                 ExtendsContentIntoTitleBar="True"
+                 WindowBackdropType="Mica"
+                 FontFamily="Segoe UI Variable, Segoe UI"
+                 FontSize="14">
+  <Grid>
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto"/>
+      <RowDefinition Height="*"/>
+    </Grid.RowDefinitions>
+
+    <ui:TitleBar Grid.Row="0" Title="Restore sessions" Height="36"/>
+
+    <Border Grid.Row="1" Background="{DynamicResource SurfaceBrush}">
+      <DockPanel Margin="18,14">
+        <TextBlock DockPanel.Dock="Top" Margin="0,0,0,12" FontSize="14"
+                   Foreground="{DynamicResource FgBrush}"
+                   Text="These sessions were running before but aren't now. Resume them?"
+                   TextWrapping="Wrap"/>
+
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+          <ui:Button Content="Not now" Appearance="Secondary" Click="Cancel_Click" Margin="0,0,8,0"/>
+          <ui:Button Content="Resume selected" Appearance="Primary" Click="Resume_Click"/>
+        </StackPanel>
+
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+          <ItemsControl ItemsSource="{Binding Items}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <CheckBox IsChecked="{Binding IsChecked, Mode=TwoWay}" Margin="0,5">
+                  <StackPanel Margin="6,0,0,0">
+                    <TextBlock Text="{Binding Name}" FontSize="14" Foreground="{DynamicResource FgBrush}"/>
+                    <TextBlock Text="{Binding Cwd}" FontSize="11.5" Foreground="{DynamicResource Fg3Brush}"/>
+                  </StackPanel>
+                </CheckBox>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+      </DockPanel>
+    </Border>
+  </Grid>
+</ui:FluentWindow>
