@@ -26,7 +26,9 @@ matching the omc status-line thresholds), and **Idle** time humanized (`42m`, `1
 row's Idle column** for the rest — model, context tokens, status, last tool, folder, PID/Id/version
 (and the API-error text when it's in that state). Sessions whose terminal sits on a **different
 virtual desktop** get a small colored pip at the row's left edge — one color per desktop, the
-current desktop shows none (hover it for "Desktop N"). A footer shows the live count and a color legend.
+current desktop shows none (hover it for "Desktop N"). A session running **subagents** shows a small
+**⚙ N** badge after its name — how many are working right now (hover for the total spawned this
+session). A footer shows the live count and a color legend.
 
 The **title bar** holds a **theme toggle** (sun/moon) and an **always-on-top pin** (accents when
 active), beside the min/max/close buttons. Dark/Light Fluent theme, remembered.

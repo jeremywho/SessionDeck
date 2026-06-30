@@ -17,6 +17,8 @@ internal sealed class SessionInfo
     public long OutputTokens;      // output tokens of latest assistant turn
     public bool ApiError;          // most recent assistant message is a synthetic API-error message
     public string ErrorText = "";  // the error text (e.g. "API Error: … Rate limited")
+    public int SubagentsActive;    // subagent transcript files touched in the last ~30s (working now)
+    public int SubagentsTotal;     // subagent files this session has spawned (cumulative)
     public DateTime StartedAt;
     public DateTime UpdatedAt;
     public DateTime StatusUpdatedAt;   // when the status field last changed (sessions/<pid>.json)

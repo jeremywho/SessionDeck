@@ -42,6 +42,7 @@ internal static class SessionScanner
             var s = TryReadSession(file);
             if (s == null || !IsAlive(s.Pid)) continue;   // skip dead/stale registry files
             Enrich(s);
+            CountSubagents(s);
             list.Add(s);
         }
 
@@ -194,6 +195,42 @@ internal static class SessionScanner
                             .FirstOrDefault() ?? "";
         }
         catch { return ""; }
+    }
+
+    const double SubagentActiveSeconds = 30;
+
+    /// <summary>
+    /// Count this session's subagents from &lt;transcriptDir&gt;/&lt;sessionId&gt;/subagents/agent-*.jsonl —
+    /// total ever spawned, plus how many were written in the last ~30s (actively streaming = working now).
+    /// Done on every scan (NOT gated by the transcript mtime cache): subagents stream while the parent's
+    /// own transcript sits idle, so the subagents dir is the live signal.
+    /// </summary>
+    static void CountSubagents(SessionInfo s)
+    {
+        try
+        {
+            string dir = SubagentsDir(s);
+            if (dir.Length == 0 || !Directory.Exists(dir)) return;
+            var now = DateTime.UtcNow;
+            int total = 0, active = 0;
+            foreach (var f in Directory.EnumerateFiles(dir, "agent-*.jsonl"))
+            {
+                total++;
+                try { if ((now - File.GetLastWriteTimeUtc(f)).TotalSeconds < SubagentActiveSeconds) active++; }
+                catch { }
+            }
+            s.SubagentsTotal = total;
+            s.SubagentsActive = active;
+        }
+        catch { }
+    }
+
+    static string SubagentsDir(SessionInfo s)
+    {
+        string baseDir = s.TranscriptPath.Length > 0
+            ? Path.GetDirectoryName(s.TranscriptPath) ?? ""
+            : Path.Combine(ProjectsDir, Regex.Replace(s.Cwd, "[^a-zA-Z0-9]", "-"));
+        return baseDir.Length > 0 ? Path.Combine(baseDir, s.SessionId, "subagents") : "";
     }
 
     static void ParseAssistant(string line, SessionInfo s)

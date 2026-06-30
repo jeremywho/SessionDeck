@@ -32,6 +32,7 @@ internal sealed class SessionRow : INotifyPropertyChanged
         nameof(ContextPct), nameof(ContextDisplay), nameof(ContextTokensDisplay),
         nameof(IdleDisplay), nameof(LastTool), nameof(Cwd), nameof(Version),
         nameof(ApiError), nameof(RowTooltip), nameof(LastChanged),
+        nameof(SubagentsActive), nameof(HasActiveSubagents), nameof(SubagentTooltip),
     };
 
     public SessionInfo Info => _s;
@@ -64,6 +65,13 @@ internal sealed class SessionRow : INotifyPropertyChanged
         h(this, new PropertyChangedEventArgs(nameof(RowTooltip)));
     }
 
+    // --- subagents (background Task agents this session is running) ---
+    public int SubagentsActive => _s.SubagentsActive;
+    public bool HasActiveSubagents => _s.SubagentsActive > 0;
+    public string SubagentTooltip => _s.SubagentsTotal > 0
+        ? $"{_s.SubagentsActive} subagent{(_s.SubagentsActive == 1 ? "" : "s")} working · {_s.SubagentsTotal} this session"
+        : "";
+
     /// <summary>Multi-line hover summary so you can eyeball anything odd (model / context / cwd / ids).</summary>
     public string RowTooltip
     {
@@ -79,6 +87,7 @@ internal sealed class SessionRow : INotifyPropertyChanged
                 $"PID {_s.Pid} · {ShortId} · v{_s.Version}",
             };
             if (OnOtherDesktop) lines.Add($"On {DesktopLabel}");
+            if (_s.SubagentsActive > 0) lines.Add($"Subagents: {_s.SubagentsActive} working / {_s.SubagentsTotal} this session");
             if (_s.ApiError && _s.ErrorText.Length > 0) lines.Add(_s.ErrorText);
             return string.Join("\n", lines);
         }

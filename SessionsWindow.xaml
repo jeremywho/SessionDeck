@@ -156,8 +156,26 @@
             <DataGridTemplateColumn x:Name="ColSession" Width="*" CanUserResize="False" Header="SESSION" HeaderStyle="{StaticResource Hdr}">
               <DataGridTemplateColumn.CellTemplate>
                 <DataTemplate>
-                  <TextBlock Text="{Binding Name}" FontSize="14.5" VerticalAlignment="Center" Margin="0,0,18,0"
-                             Foreground="{DynamicResource FgBrush}" TextTrimming="CharacterEllipsis"/>
+                  <Grid Margin="0,0,18,0">
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="*"/>
+                      <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="{Binding Name}" FontSize="14.5" VerticalAlignment="Center"
+                               Foreground="{DynamicResource FgBrush}" TextTrimming="CharacterEllipsis"/>
+                    <!-- live-subagent count: shown only while the session has agents working -->
+                    <Border Grid.Column="1" VerticalAlignment="Center" Margin="8,0,0,0" Padding="6,1"
+                            CornerRadius="8" Background="{DynamicResource BlueBrush}"
+                            Visibility="{Binding HasActiveSubagents, Converter={StaticResource BoolToVis}}"
+                            ToolTip="{Binding SubagentTooltip}">
+                      <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE713;" FontFamily="Segoe MDL2 Assets" FontSize="9.5" Foreground="White"
+                                   VerticalAlignment="Center" Margin="0,0,4,0"/>
+                        <TextBlock Text="{Binding SubagentsActive}" FontSize="11" FontWeight="SemiBold"
+                                   Foreground="White" VerticalAlignment="Center"/>
+                      </StackPanel>
+                    </Border>
+                  </Grid>
                 </DataTemplate>
               </DataGridTemplateColumn.CellTemplate>
             </DataGridTemplateColumn>
