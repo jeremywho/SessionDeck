@@ -73,6 +73,9 @@
     <Style x:Key="HdrRight" TargetType="DataGridColumnHeader" BasedOn="{StaticResource Hdr}">
       <Setter Property="HorizontalContentAlignment" Value="Right"/>
     </Style>
+    <Style x:Key="HdrRightInset" TargetType="DataGridColumnHeader" BasedOn="{StaticResource HdrRight}">
+      <Setter Property="Padding" Value="0,0,16,6"/>
+    </Style>
   </ui:FluentWindow.Resources>
 
   <Grid>
@@ -141,10 +144,10 @@
             <DataGridTemplateColumn x:Name="ColGlyph" Width="40" CanUserSort="False"
                                     CellTemplate="{StaticResource StatusGlyphTemplate}"/>
 
-            <DataGridTemplateColumn x:Name="ColSession" Width="*" Header="SESSION" HeaderStyle="{StaticResource Hdr}">
+            <DataGridTemplateColumn x:Name="ColSession" Width="*" CanUserResize="False" Header="SESSION" HeaderStyle="{StaticResource Hdr}">
               <DataGridTemplateColumn.CellTemplate>
                 <DataTemplate>
-                  <TextBlock Text="{Binding Name}" FontSize="14.5" VerticalAlignment="Center"
+                  <TextBlock Text="{Binding Name}" FontSize="14.5" VerticalAlignment="Center" Margin="0,0,18,0"
                              Foreground="{DynamicResource FgBrush}" TextTrimming="CharacterEllipsis"/>
                 </DataTemplate>
               </DataGridTemplateColumn.CellTemplate>
@@ -160,12 +163,16 @@
               </DataGridTemplateColumn.CellTemplate>
             </DataGridTemplateColumn>
 
-            <DataGridTemplateColumn x:Name="ColIdle" Width="64" Header="IDLE" HeaderStyle="{StaticResource HdrRight}">
+            <DataGridTemplateColumn x:Name="ColIdle" Width="94" Header="IDLE" HeaderStyle="{StaticResource HdrRightInset}">
               <DataGridTemplateColumn.CellTemplate>
                 <DataTemplate>
-                  <TextBlock Text="{Binding IdleDisplay}" FontFamily="Cascadia Mono, Consolas" FontSize="12"
-                             HorizontalAlignment="Right" VerticalAlignment="Center"
-                             Foreground="{DynamicResource Fg3Brush}"/>
+                  <!-- transparent Border = full-cell hover target for the per-row details tooltip -->
+                  <Border Background="Transparent" ToolTip="{Binding RowTooltip}"
+                          ToolTipService.InitialShowDelay="250" ToolTipService.ShowDuration="60000">
+                    <TextBlock Text="{Binding IdleDisplay}" FontFamily="Cascadia Mono, Consolas" FontSize="12"
+                               HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,16,0"
+                               Foreground="{DynamicResource Fg3Brush}"/>
+                  </Border>
                 </DataTemplate>
               </DataGridTemplateColumn.CellTemplate>
             </DataGridTemplateColumn>
@@ -185,18 +192,6 @@
                                 HeaderStyle="{StaticResource Hdr}" Visibility="Collapsed"/>
             <DataGridTextColumn x:Name="ColVersion" Header="VERSION" Binding="{Binding Version}" Width="84"
                                 HeaderStyle="{StaticResource Hdr}" Visibility="Collapsed"/>
-
-            <!-- always-visible info icon: per-row details on hover (replaces the whole-row tooltip) -->
-            <DataGridTemplateColumn x:Name="ColInfo" Width="42" CanUserSort="False" CanUserReorder="False">
-              <DataGridTemplateColumn.CellTemplate>
-                <DataTemplate>
-                  <ui:SymbolIcon Symbol="Info24" FontSize="15" Foreground="{DynamicResource Fg3Brush}"
-                                 HorizontalAlignment="Center" VerticalAlignment="Center" Cursor="Help"
-                                 ToolTip="{Binding RowTooltip}"
-                                 ToolTipService.InitialShowDelay="250" ToolTipService.ShowDuration="60000"/>
-                </DataTemplate>
-              </DataGridTemplateColumn.CellTemplate>
-            </DataGridTemplateColumn>
           </DataGrid.Columns>
         </DataGrid>
 

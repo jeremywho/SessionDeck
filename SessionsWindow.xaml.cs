@@ -156,7 +156,6 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             new Col("LastTool", "Last Tool", ColLastTool, true, false),
             new Col("Cwd", "CWD", ColCwd, true, false),
             new Col("Version", "Version", ColVersion, true, false),
-            new Col("Info", "", ColInfo, false, true),
         };
 
         foreach (var c in _columns)
@@ -165,7 +164,9 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
                 ? true
                 : _app.Settings.ColumnVisible.TryGetValue(c.Key, out var v) ? v : c.DefaultVisible;
             c.Column.Visibility = vis ? Visibility.Visible : Visibility.Collapsed;
-            if (_app.Settings.ColumnWidth.TryGetValue(c.Key, out var w) && w > 20)
+            // Only the optional (toggleable) columns persist a user-set width. Curated columns keep
+            // their designed XAML widths — so the * Session stays flexible and the right columns pin right.
+            if (c.Toggleable && _app.Settings.ColumnWidth.TryGetValue(c.Key, out var w) && w > 20)
                 c.Column.Width = new DataGridLength(w);
         }
 
@@ -220,7 +221,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         foreach (var c in _columns)
         {
             _app.Settings.ColumnOrder[c.Key] = c.Column.DisplayIndex;
-            if (c.Column.ActualWidth > 0) _app.Settings.ColumnWidth[c.Key] = c.Column.ActualWidth;
+            if (c.Toggleable && c.Column.ActualWidth > 0) _app.Settings.ColumnWidth[c.Key] = c.Column.ActualWidth;
         }
     }
 
