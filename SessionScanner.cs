@@ -79,6 +79,7 @@ internal static class SessionScanner
             };
             s.StartedAt = FromUnixMs(GetLong(r, "startedAt"));
             s.UpdatedAt = FromUnixMs(GetLong(r, "updatedAt"));
+            s.StatusUpdatedAt = FromUnixMs(GetLong(r, "statusUpdatedAt"));
 
             if (s.Pid == 0 || s.SessionId.Length == 0) return null;
             return s;

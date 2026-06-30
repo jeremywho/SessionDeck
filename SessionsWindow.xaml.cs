@@ -125,14 +125,17 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         base.OnPreviewKeyDown(e);
     }
 
-    /// <summary>Attention-first live sort: Completed → Awaiting → Idle → Working, tiebreak by name.</summary>
+    /// <summary>Attention-first live sort (Error → Awaiting → Working → Completed → Idle); within each
+    /// group, most-recently-changed first, then name.</summary>
     void SetupSort()
     {
         var view = (ListCollectionView)CollectionViewSource.GetDefaultView(Rows);
         view.SortDescriptions.Add(new SortDescription(nameof(SessionRow.SortPriority), ListSortDirection.Ascending));
+        view.SortDescriptions.Add(new SortDescription(nameof(SessionRow.LastChanged), ListSortDirection.Descending));
         view.SortDescriptions.Add(new SortDescription(nameof(SessionRow.Name), ListSortDirection.Ascending));
         view.IsLiveSorting = true;
         view.LiveSortingProperties.Add(nameof(SessionRow.SortPriority));
+        view.LiveSortingProperties.Add(nameof(SessionRow.LastChanged));
         view.LiveSortingProperties.Add(nameof(SessionRow.Name));
     }
 

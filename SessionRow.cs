@@ -31,7 +31,7 @@ internal sealed class SessionRow : INotifyPropertyChanged
         nameof(ShortId), nameof(Model), nameof(ModelChip),
         nameof(ContextPct), nameof(ContextDisplay), nameof(ContextTokensDisplay),
         nameof(IdleDisplay), nameof(LastTool), nameof(Cwd), nameof(Version),
-        nameof(ApiError), nameof(RowTooltip),
+        nameof(ApiError), nameof(RowTooltip), nameof(LastChanged),
     };
 
     public SessionInfo Info => _s;
@@ -41,6 +41,9 @@ internal sealed class SessionRow : INotifyPropertyChanged
     public string Status => _s.Status;                            // raw status (optional column)
     public SessionState State => _s.ApiError ? SessionState.Error : SessionStateMap.FromStatus(_s.Status);
     public bool ApiError => _s.ApiError;
+
+    /// <summary>When the status last changed — secondary sort key (most-recent-first within each group).</summary>
+    public DateTime LastChanged => _s.StatusUpdatedAt > DateTime.MinValue ? _s.StatusUpdatedAt : _s.UpdatedAt;
 
     /// <summary>Multi-line hover summary so you can eyeball anything odd (model / context / cwd / ids).</summary>
     public string RowTooltip

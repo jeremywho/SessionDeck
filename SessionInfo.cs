@@ -19,6 +19,7 @@ internal sealed class SessionInfo
     public string ErrorText = "";  // the error text (e.g. "API Error: … Rate limited")
     public DateTime StartedAt;
     public DateTime UpdatedAt;
+    public DateTime StatusUpdatedAt;   // when the status field last changed (sessions/<pid>.json)
     public string TranscriptPath = "";
 
     public string ShortId => SessionId.Length >= 8 ? SessionId.Substring(0, 8) : SessionId;
