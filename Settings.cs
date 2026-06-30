@@ -19,7 +19,6 @@ internal sealed class Settings
     public string DockPosition { get; set; } = "Free";                      // Free | LeftEdge | RightEdge | TopLeft | TopRight | BottomLeft | BottomRight
     public double? WindowLeft { get; set; }
     public double? WindowTop { get; set; }
-    public bool InstantUpdates { get; set; }                                // push via Claude Code hooks (installs hooks in settings.json)
     public double Zoom { get; set; } = 1.0;                                 // content zoom (Ctrl+wheel), 0.6–2.5
 
     static string Dir => Path.Combine(

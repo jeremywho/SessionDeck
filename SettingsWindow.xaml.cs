@@ -12,7 +12,6 @@ internal partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         InitializeComponent();
         ResumeFlagsBox.Text = _app.Settings.ResumeFlags;
         ContextWindowBox.Text = _app.Settings.ContextWindowTokens.ToString();
-        InstantUpdatesCheck.IsChecked = _app.Settings.InstantUpdates;
     }
 
     void Save_Click(object sender, RoutedEventArgs e)
@@ -24,12 +23,7 @@ internal partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
             SessionRow.ContextWindow = ctx;   // takes effect on the next refresh
         }
 
-        bool wantInstant = InstantUpdatesCheck.IsChecked == true;
-        bool instantChanged = wantInstant != _app.Settings.InstantUpdates;
-        _app.Settings.InstantUpdates = wantInstant;
-
         _app.Settings.Save();
-        if (instantChanged) _app.ApplyInstantUpdates();
         Close();
     }
 

@@ -18,9 +18,18 @@ internal static class SessionScanner
     static readonly string SessionsDir = Path.Combine(Home, "sessions");
     static readonly string ProjectsDir = Path.Combine(Home, "projects");
 
+    /// <summary>The live-session registry directory — watched for change-driven refresh.</summary>
+    public static string SessionsDirectory => SessionsDir;
+
     // Last known-good detail per session id. A turn in progress can briefly leave no parseable
-    // assistant line in the tail; we reuse these instead of flashing "no model / 0%".
-    sealed class Detail { public string Model = ""; public long Ctx; public long Out; public string LastTool = ""; public string Title = ""; }
+    // assistant line in the tail; we reuse these instead of flashing "no model / 0%". Also caches the
+    // transcript's mtime/size so an unchanged transcript skips the re-read entirely (see Enrich).
+    sealed class Detail
+    {
+        public string Model = ""; public long Ctx; public long Out; public string LastTool = ""; public string Title = "";
+        public bool ApiError; public string ErrorText = "";
+        public long Mtime; public long Size;
+    }
     static readonly Dictionary<string, Detail> _detailCache = new();
 
     public static List<SessionInfo> Scan()
@@ -96,7 +105,27 @@ internal static class SessionScanner
         string path = TranscriptPath(s);
         s.TranscriptPath = path;
 
-        if (path.Length > 0 && File.Exists(path))
+        long mtime = 0, size = 0;
+        bool haveFile = false;
+        if (path.Length > 0)
+        {
+            try { var fi = new FileInfo(path); if (fi.Exists) { mtime = fi.LastWriteTimeUtc.Ticks; size = fi.Length; haveFile = true; } }
+            catch { }
+        }
+
+        _detailCache.TryGetValue(s.SessionId, out var prev);
+
+        // #1 fast path: the transcript hasn't changed since we last parsed it -> reuse everything and
+        // skip the (expensive) tail read + JSON parse. A cheap stat is all we do for an idle session.
+        if (haveFile && prev != null && prev.Mtime == mtime && prev.Size == size)
+        {
+            s.Model = prev.Model; s.ContextTokens = prev.Ctx; s.OutputTokens = prev.Out;
+            s.LastTool = prev.LastTool; s.Title = prev.Title;
+            s.ApiError = prev.ApiError; s.ErrorText = prev.ErrorText;
+            return;
+        }
+
+        if (haveFile)
         {
             try
             {
@@ -135,7 +164,6 @@ internal static class SessionScanner
         // Sticky last-known-good: a new turn can briefly leave no parseable assistant line in the
         // tail. Reuse cached values for anything we came up empty on, then remember the good ones.
         // (Only fills empties, so a real drop — e.g. after auto-compact — still updates.)
-        _detailCache.TryGetValue(s.SessionId, out var prev);
         if (prev != null)
         {
             if (s.Model.Length == 0) s.Model = prev.Model;
@@ -147,6 +175,7 @@ internal static class SessionScanner
         _detailCache[s.SessionId] = new Detail
         {
             Model = s.Model, Ctx = s.ContextTokens, Out = s.OutputTokens, LastTool = s.LastTool, Title = s.Title,
+            ApiError = s.ApiError, ErrorText = s.ErrorText, Mtime = mtime, Size = size,
         };
     }
 

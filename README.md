@@ -48,7 +48,9 @@ the window's position/size is remembered on close, so it reopens where you left 
 - **Double-click a row** → bring that session's terminal window + tab to the foreground.
 - **Ctrl + mouse wheel** zooms the content larger/smaller (like browser zoom) without resizing the
   window; **Ctrl + 0** resets to 100%. Remembered.
-- **1s live refresh**, updated in place (no flicker) — or **near-instant** with *instant updates* on (below).
+- **Change-driven refresh** — a `FileSystemWatcher` on the sessions registry updates the list within
+  ~120ms of a status change, with a 2s fallback poll. Event-driven, so idle CPU is ~0 — no hooks, no
+  config changes.
 - Settings persist to `%APPDATA%\ClaudeSessionMonitor\settings.json`; unhandled errors are logged to
   `%TEMP%\claude-session-monitor-error.log`.
 - `--list` / `--windows` headless modes dump the session list / focus mapping to `%TEMP%`.
@@ -64,15 +66,6 @@ were running but aren't now, reopening each selected one in a new Windows Termin
 **Settings…** (tray) sets **Resume flags** appended to every resumed session — e.g.
 `--dangerously-skip-permissions` — plus the context-window divisor.
 
-## Instant updates (optional)
-By default the list polls once a second. **Settings… → Enable instant updates** makes it react in well
-under a second instead: the app runs a tiny loopback listener (`127.0.0.1:53127`) and merges a few
-**marked hooks** into `~/.claude/settings.json` (`UserPromptSubmit`, `PostToolUse`, `Notification`,
-`Stop`, `SessionStart`, `SessionEnd`) that ping it on each event (bursts are debounced into one
-refresh). It's **off by default**, backs the file up once (`settings.json.csm-backup`), merges
-*alongside* any existing hooks, and removes only its own entries when you turn it off. When the app
-isn't running the hooks just fast-fail harmlessly.
-
 ## Build / run
 Requires .NET SDK 10.
 
@@ -85,7 +78,11 @@ Requires .NET SDK 10.
   the running `claude.exe` → `claude.exe.old.<ts>`, while still guarding against PID reuse). `status`
   is one of `busy`, `idle`, `waiting`, `shell`.
 - **Detail:** tails `~/.claude/projects/<slug>/<sessionId>.jsonl` for token usage, model, last tool,
-  and the Claude-set title.
+  and the Claude-set title — but only re-reads a transcript when its mtime/size changed since the last
+  scan (an unchanged, idle session costs just a `stat`).
+- **Refresh:** a `FileSystemWatcher` on `~/.claude/sessions/` fires when Claude rewrites a `<pid>.json`
+  (status change / heartbeat) → a debounced re-scan; a 2s timer is the fallback. Event-driven, so idle
+  CPU is ~0, with no hooks or edits to the user's files.
 - **Focus:** finds the session's host process (parent-process-tree walk), enumerates that process's
   top-level windows, then uses UI Automation to find the *tab* whose title matches the session —
   across all those windows — selects that tab and foregrounds its window. Needed because Windows
@@ -94,10 +91,10 @@ Requires .NET SDK 10.
 
 ## Project layout
 - `Program.cs` — entry point (single-instance; `--list` / `--windows` headless modes).
-- `App.cs` — WPF application shell, the (WPF) tray icon + menu, theme-palette swap, instant-updates toggle.
+- `App.cs` — WPF application shell, the (WPF) tray icon + menu, and the theme-palette swap.
 - `SessionsWindow.xaml` / `.xaml.cs` — the Fluent window (status-glyph template, grid, title-bar
   controls, live sort, header-right-click column menu).
-- `SessionScanner.cs` — reads the registry and enriches each session from its transcript.
+- `SessionScanner.cs` — reads the registry and enriches each session from its transcript (mtime-cached).
 - `SessionInfo.cs` — data model. `SessionRow.cs` — observable row VM (derives the display state).
 - `SessionState.cs` — the display states (incl. **Error**) + the Claude-status → state mapping.
 - `WindowActivator.cs` / `Native.cs` / `TabSelector.cs` — focus + Windows Terminal tab selection.
@@ -105,7 +102,6 @@ Requires .NET SDK 10.
 - `SessionRegistry.cs` / `SavedSession.cs` — persist the live set for crash/reboot restore.
 - `SessionLauncher.cs` — reopen a session (`wt … claude --resume …`).
 - `RestoreWindow.xaml` / `.xaml.cs` — restore picker. `SettingsWindow.xaml` / `.xaml.cs` — settings dialog.
-- `HookServer.cs` / `HookInstaller.cs` — loopback listener + settings.json hook install for instant updates.
 - `app.ico` — coral starburst app/tray icon.
 - `Settings.cs`, `Converters.cs`.
 

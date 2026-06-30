@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.IO;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
@@ -16,6 +17,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     readonly App _app;
     readonly DispatcherTimer _timer;
     readonly DispatcherTimer _pushTimer;
+    FileSystemWatcher? _watcher;
     ContextMenu _columnsMenu = new();
 
     public ObservableCollection<SessionRow> Rows { get; } = new();
@@ -49,18 +51,46 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         InitColumns();
         SetupSort();
 
-        _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        // Fallback poll — catches the idle-time counters and anything the watcher misses; the
+        // FileSystemWatcher (below) drives the real-time updates, so this can be slow.
+        _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
         _timer.Tick += (_, _) => Refresh();
         _timer.Start();
 
+        // Debounce: coalesce a burst of change events into one refresh ~120ms later.
         _pushTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(120) };
         _pushTimer.Tick += (_, _) => { _pushTimer.Stop(); Refresh(); };
 
+        StartWatcher();
         Refresh();
     }
 
-    /// <summary>Coalesce a burst of hook pings into one refresh ~120ms later.</summary>
+    /// <summary>Coalesce a burst of change events into one refresh ~120ms later.</summary>
     public void PushRefresh() { if (!_pushTimer.IsEnabled) _pushTimer.Start(); }
+
+    /// <summary>
+    /// Watch the sessions registry dir: Claude rewrites &lt;pid&gt;.json on every status change (and
+    /// heartbeat), so this gives change-driven, near-instant updates at ~0 idle CPU — no polling loop,
+    /// no hooks, no edits to the user's files. The 2s fallback timer covers anything the watcher drops.
+    /// </summary>
+    void StartWatcher()
+    {
+        try
+        {
+            var dir = SessionScanner.SessionsDirectory;
+            if (!Directory.Exists(dir)) return;
+            _watcher = new FileSystemWatcher(dir, "*.json")
+            {
+                NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size,
+                EnableRaisingEvents = true,
+            };
+            _watcher.Changed += (_, _) => Dispatcher.InvokeAsync(() => PushRefresh());
+            _watcher.Created += (_, _) => Dispatcher.InvokeAsync(() => PushRefresh());
+            _watcher.Deleted += (_, _) => Dispatcher.InvokeAsync(() => PushRefresh());
+            _watcher.Renamed += (_, _) => Dispatcher.InvokeAsync(() => PushRefresh());
+        }
+        catch { }   // best-effort; the fallback poll still works without it
+    }
 
     // --- Content zoom: Ctrl + mouse wheel (like a browser), Ctrl+0 resets. ---
     double _zoom = 1.0;

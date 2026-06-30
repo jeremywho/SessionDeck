@@ -15,7 +15,6 @@ internal sealed class App : Application
     NotifyIcon _tray = null!;
     WpfContextMenu _trayMenu = null!;
     SessionsWindow? _window;
-    HookServer? _hookServer;
 
     public Settings Settings { get; private set; } = new();
 
@@ -53,22 +52,6 @@ internal sealed class App : Application
         ShowWindow();
 
         if (orphaned.Count > 0) ShowRestore(orphaned);
-
-        _hookServer = new HookServer(OnHookEvent);
-        if (Settings.InstantUpdates) _hookServer.Start();
-    }
-
-    void OnHookEvent()
-    {
-        try { Dispatcher.InvokeAsync(() => _window?.PushRefresh()); } catch { }
-    }
-
-    /// <summary>Apply the InstantUpdates setting: install/remove our hooks + start/stop the listener.</summary>
-    public void ApplyInstantUpdates()
-    {
-        _hookServer ??= new HookServer(OnHookEvent);
-        if (Settings.InstantUpdates) { HookInstaller.Install(); _hookServer.Start(); }
-        else { HookInstaller.Uninstall(); _hookServer.Stop(); }
     }
 
     static ApplicationTheme ThemeFrom(string s) =>
@@ -206,7 +189,6 @@ internal sealed class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
-        _hookServer?.Stop();
         _tray?.Dispose();
         base.OnExit(e);
     }
