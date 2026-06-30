@@ -156,6 +156,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             new Col("LastTool", "Last Tool", ColLastTool, true, false),
             new Col("Cwd", "CWD", ColCwd, true, false),
             new Col("Version", "Version", ColVersion, true, false),
+            new Col("Info", "", ColInfo, false, true),
         };
 
         foreach (var c in _columns)
