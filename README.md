@@ -73,6 +73,26 @@ Requires .NET SDK 10.
     dotnet build -c Release
     bin\Release\net10.0-windows\ClaudeSessionMonitor.exe
 
+To produce a distributable single `.exe` (self-contained, no .NET install needed, ~74 MB):
+
+    dotnet publish ClaudeSessionMonitor.csproj -c Release -r win-x64 --self-contained true `
+      -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
+      -p:EnableCompressionInSingleFile=true -o bin\publish
+
+(Drop `--self-contained true` for a ~6.5 MB build that needs the .NET 10 Desktop Runtime installed.)
+
+## Releasing
+Releases are **manual** (never on push). Go to **Actions → Release → Run workflow**, enter a tag
+(e.g. `v1.0.0`), and run it — it publishes the self-contained `.exe`, signs it (if a cert is
+configured), and attaches it to a new GitHub Release. See `.github/workflows/release.yml`.
+
+**Signing / SmartScreen:** the exe ships **unsigned** until a code-signing cert is wired up. To sign,
+add secrets `SIGNING_CERT_BASE64` (base64 of a `.pfx`) and `SIGNING_CERT_PASSWORD` — signing then runs
+automatically. To remove the SmartScreen *"unknown publisher"* warning **immediately** you need a
+**trusted** cert (EV, Azure Trusted Signing, or one that already has reputation); a plain OV cert signs
+the file but may still warn until reputation builds. For a cloud/HSM cert (Azure Trusted Signing,
+DigiCert KeyLocker), swap the workflow's *Sign the exe* step for that provider's action.
+
 ## How it works
 - **Discovery:** `~/.claude/sessions/<PID>.json` — one heartbeat file per live session, validated
   against a live process whose name starts with `claude` (tolerates Claude Code's self-update renaming

@@ -1,0 +1,80 @@
+name: Release
+
+# Manual only — never builds on push/check-in. Run it from the Actions tab:
+#   Actions -> Release -> Run workflow -> enter a tag like v1.0.0
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag, e.g. v1.0.0"
+        required: true
+      prerelease:
+        description: "Mark as a pre-release"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write   # create the release + tag
+
+jobs:
+  release:
+    runs-on: windows-latest
+    env:
+      # Signing turns on automatically once SIGNING_CERT_BASE64 is set in repo/org secrets.
+      # Until then the workflow still runs and ships an UNSIGNED exe.
+      SIGNING_AVAILABLE: ${{ secrets.SIGNING_CERT_BASE64 != '' }}
+      ASSET: ClaudeSessionMonitor-${{ inputs.version }}.exe
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Publish self-contained single-file exe
+        run: >
+          dotnet publish ClaudeSessionMonitor.csproj -c Release -r win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true
+          -o publish
+
+      - name: Name the asset with the version
+        shell: pwsh
+        run: Rename-Item "publish\ClaudeSessionMonitor.exe" "$env:ASSET"
+
+      # --- Code signing -------------------------------------------------------------------
+      # Removes the SmartScreen "unknown publisher" warning — but ONLY with a TRUSTED cert
+      # (EV / Azure Trusted Signing / a cert that already has reputation). A plain OV cert
+      # signs the file but SmartScreen may still warn until reputation builds. See README.
+      #
+      # This step is a starting point for a PFX-in-secrets certificate. If the cert lives in
+      # an HSM / cloud signer (Azure Trusted Signing, DigiCert KeyLocker), replace this step
+      # with that provider's action — the rest of the workflow stays the same.
+      - name: Sign the exe
+        if: ${{ env.SIGNING_AVAILABLE == 'true' }}
+        shell: pwsh
+        env:
+          CERT_B64: ${{ secrets.SIGNING_CERT_BASE64 }}
+          CERT_PWD: ${{ secrets.SIGNING_CERT_PASSWORD }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP "cert.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CERT_B64))
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" |
+                      Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signtool) { throw "signtool.exe not found on the runner" }
+          & $signtool.FullName sign /f $pfx /p $env:CERT_PWD /fd SHA256 `
+            /tr http://timestamp.digicert.com /td SHA256 "publish\$env:ASSET"
+          if ($LASTEXITCODE -ne 0) { throw "signtool failed ($LASTEXITCODE)" }
+          Remove-Item $pfx -Force
+
+      - name: Create GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ASSET_TAG: ${{ inputs.version }}
+        run: |
+          $a = @("$env:ASSET_TAG", "publish\$env:ASSET", "--title", "$env:ASSET_TAG", "--generate-notes")
+          if ("${{ inputs.prerelease }}" -eq "true") { $a += "--prerelease" }
+          gh release create @a
