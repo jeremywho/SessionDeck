@@ -45,6 +45,32 @@ internal static class TabSelector
         return null;
     }
 
+    /// <summary>All TabItem accessible names (normalized) across the given windows, paired with their window.
+    /// One UIA pass — used by the virtual-desktop resolver to map every session's tab to its host window.</summary>
+    public static List<(IntPtr Hwnd, string Norm)> EnumerateTabs(IEnumerable<IntPtr> windows)
+    {
+        var all = new List<(IntPtr, string)>();
+        foreach (var hwnd in windows)
+        {
+            AutomationElement? root;
+            try { root = AutomationElement.FromHandle(hwnd); } catch { continue; }
+            if (root == null) continue;
+            AutomationElementCollection tabs;
+            try
+            {
+                tabs = root.FindAll(TreeScope.Descendants,
+                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.TabItem));
+            }
+            catch { continue; }
+            foreach (AutomationElement t in tabs)
+            {
+                string n = Normalize(t.Current.Name);
+                if (n.Length > 0) all.Add((hwnd, n));
+            }
+        }
+        return all;
+    }
+
     public static void Select(AutomationElement tab)
     {
         if (tab.TryGetCurrentPattern(SelectionItemPattern.Pattern, out object sip)) ((SelectionItemPattern)sip).Select();

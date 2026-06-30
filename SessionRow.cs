@@ -45,6 +45,25 @@ internal sealed class SessionRow : INotifyPropertyChanged
     /// <summary>When the status last changed — secondary sort key (most-recent-first within each group).</summary>
     public DateTime LastChanged => _s.StatusUpdatedAt > DateTime.MinValue ? _s.StatusUpdatedAt : _s.UpdatedAt;
 
+    // --- virtual desktop (set by the throttled resolver, independent of the status scan) ---
+    int _desktopIndex = -1;       // 0 = Desktop 1, 1 = Desktop 2, …; -1 = unknown
+    bool _onCurrentDesktop = true;
+    public int DesktopIndex => _desktopIndex;
+    public bool OnOtherDesktop => _desktopIndex >= 0 && !_onCurrentDesktop;
+    public string DesktopLabel => _desktopIndex >= 0 ? $"Desktop {_desktopIndex + 1}" : "";
+
+    public void SetDesktop(int index, bool onCurrent)
+    {
+        if (_desktopIndex == index && _onCurrentDesktop == onCurrent) return;
+        _desktopIndex = index; _onCurrentDesktop = onCurrent;
+        var h = PropertyChanged;
+        if (h == null) return;
+        h(this, new PropertyChangedEventArgs(nameof(DesktopIndex)));
+        h(this, new PropertyChangedEventArgs(nameof(OnOtherDesktop)));
+        h(this, new PropertyChangedEventArgs(nameof(DesktopLabel)));
+        h(this, new PropertyChangedEventArgs(nameof(RowTooltip)));
+    }
+
     /// <summary>Multi-line hover summary so you can eyeball anything odd (model / context / cwd / ids).</summary>
     public string RowTooltip
     {
@@ -59,6 +78,7 @@ internal sealed class SessionRow : INotifyPropertyChanged
                 $"Folder: {_s.Cwd}",
                 $"PID {_s.Pid} · {ShortId} · v{_s.Version}",
             };
+            if (OnOtherDesktop) lines.Add($"On {DesktopLabel}");
             if (_s.ApiError && _s.ErrorText.Length > 0) lines.Add(_s.ErrorText);
             return string.Join("\n", lines);
         }

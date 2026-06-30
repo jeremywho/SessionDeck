@@ -53,8 +53,10 @@ internal static class WindowActivator
 
     /// <summary>First ancestor process (from the session PID upward) that owns a visible titled window.</summary>
     static int FindHostPid(int sessionPid, Dictionary<int, List<(IntPtr Hwnd, string Title)>> byPid)
+        => FindHostPid(sessionPid, byPid, Native.BuildParentMap());
+
+    static int FindHostPid(int sessionPid, Dictionary<int, List<(IntPtr Hwnd, string Title)>> byPid, Dictionary<int, int> parents)
     {
-        var parents = Native.BuildParentMap();
         int cur = sessionPid;
         for (int i = 0; i < 32; i++)
         {
@@ -93,6 +95,51 @@ internal static class WindowActivator
         IntPtr bt = MatchByTitle(windows, candidates);
         if (bt != IntPtr.Zero) return $"window-title match (hwnd {bt.ToInt64()})";
         return windows.Count == 1 ? $"single window (hwnd {windows[0].Hwnd.ToInt64()})" : "(no match)";
+    }
+
+    /// <summary>
+    /// Batch-resolve each session to the top-level window hosting its tab — one UIA pass over all the
+    /// host windows, not one per session. Returns sessionId -> window hwnd. Used by the desktop resolver.
+    /// </summary>
+    public static Dictionary<string, IntPtr> ResolveWindows(IReadOnlyCollection<SessionInfo> sessions)
+    {
+        var result = new Dictionary<string, IntPtr>();
+        if (sessions.Count == 0) return result;
+
+        var byPid = Native.TopWindowsByPid();
+        var parents = Native.BuildParentMap();
+
+        var hostWindows = new HashSet<IntPtr>();
+        var perSession = new Dictionary<string, List<(IntPtr Hwnd, string Title)>>();
+        foreach (var s in sessions)
+        {
+            int host = FindHostPid(s.Pid, byPid, parents);
+            if (host != 0 && byPid.TryGetValue(host, out var ws))
+            {
+                perSession[s.SessionId] = ws;
+                foreach (var w in ws) hostWindows.Add(w.Hwnd);
+            }
+        }
+        if (hostWindows.Count == 0) return result;
+
+        var tabs = TabSelector.EnumerateTabs(hostWindows);
+        foreach (var s in sessions)
+        {
+            if (!perSession.TryGetValue(s.SessionId, out var ws)) continue;
+            var cands = Candidates(s);
+            IntPtr hwnd = MatchTab(tabs, cands);
+            if (hwnd == IntPtr.Zero) hwnd = MatchByTitle(ws, cands);
+            if (hwnd == IntPtr.Zero && ws.Count == 1) hwnd = ws[0].Hwnd;
+            if (hwnd != IntPtr.Zero) result[s.SessionId] = hwnd;
+        }
+        return result;
+    }
+
+    static IntPtr MatchTab(List<(IntPtr Hwnd, string Norm)> tabs, List<string> cands)
+    {
+        foreach (var c in cands) foreach (var t in tabs) if (t.Norm == c) return t.Hwnd;
+        foreach (var c in cands) foreach (var t in tabs) if (t.Norm.Contains(c) || c.Contains(t.Norm)) return t.Hwnd;
+        return IntPtr.Zero;
     }
 
     /// <summary>SetForegroundWindow with the AttachThreadInput dance to bypass focus-stealing limits.</summary>

@@ -18,6 +18,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     readonly DispatcherTimer _timer;
     readonly DispatcherTimer _pushTimer;
     FileSystemWatcher? _watcher;
+    volatile SessionInfo[] _sessionsSnapshot = Array.Empty<SessionInfo>();
     ContextMenu _columnsMenu = new();
 
     public ObservableCollection<SessionRow> Rows { get; } = new();
@@ -63,6 +64,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
 
         StartWatcher();
         Refresh();
+        StartDesktopResolver();
     }
 
     /// <summary>Coalesce a burst of change events into one refresh ~120ms later.</summary>
@@ -90,6 +92,60 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             _watcher.Renamed += (_, _) => Dispatcher.InvokeAsync(() => PushRefresh());
         }
         catch { }   // best-effort; the fallback poll still works without it
+    }
+
+    // --- virtual-desktop resolver: tag each row with the desktop its terminal window is on ---
+
+    /// <summary>
+    /// Background STA loop: map each session to its terminal window (UI Automation) and that window's
+    /// virtual desktop, then tag the rows. Throttled — desktop moves are rare — and off the UI thread
+    /// because the resolution is UIA-heavy. Background thread, so it dies with the process.
+    /// </summary>
+    void StartDesktopResolver()
+    {
+        var t = new System.Threading.Thread(() =>
+        {
+            while (true)
+            {
+                try
+                {
+                    var snap = _sessionsSnapshot;
+                    if (snap.Length > 0)
+                    {
+                        var map = ResolveDesktops(snap);
+                        Dispatcher.InvokeAsync(() => ApplyDesktops(map));
+                    }
+                }
+                catch { }
+                System.Threading.Thread.Sleep(8000);
+            }
+        }) { IsBackground = true, Name = "vd-resolver" };
+        t.SetApartmentState(System.Threading.ApartmentState.STA);
+        t.Start();
+    }
+
+    static Dictionary<string, (int Index, bool Current)> ResolveDesktops(SessionInfo[] sessions)
+    {
+        var result = new Dictionary<string, (int, bool)>();
+        var windows = WindowActivator.ResolveWindows(sessions);
+        if (windows.Count == 0) return result;
+        var (order, current) = VirtualDesktop.Layout();
+        foreach (var kv in windows)
+        {
+            var g = VirtualDesktop.DesktopOf(kv.Value);
+            if (g == Guid.Empty) continue;
+            result[kv.Key] = (order.IndexOf(g), g == current);
+        }
+        return result;
+    }
+
+    void ApplyDesktops(Dictionary<string, (int Index, bool Current)> map)
+    {
+        foreach (var row in Rows)
+        {
+            if (map.TryGetValue(row.SessionId, out var d)) row.SetDesktop(d.Index, d.Current);
+            else row.SetDesktop(-1, true);
+        }
     }
 
     // --- Content zoom: Ctrl + mouse wheel (like a browser), Ctrl+0 resets. ---
@@ -348,6 +404,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
 
         // keep the restore registry in sync with the live interactive set
         SessionRegistry.Snapshot(live.Where(s => s.Kind == "interactive").ToList());
+        _sessionsSnapshot = live.ToArray();
 
         LiveLabel.Text = $"{live.Count} live session{(live.Count == 1 ? "" : "s")}";
     }

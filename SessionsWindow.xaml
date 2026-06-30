@@ -15,17 +15,26 @@
 
   <ui:FluentWindow.Resources>
     <local:PctToBrushConverter x:Key="PctToBrush"/>
+    <local:DesktopColorConverter x:Key="DesktopColor"/>
+    <BooleanToVisibilityConverter x:Key="BoolToVis"/>
 
     <!-- status glyph: disc/ring + check + spinner, driven by SessionState -->
     <DataTemplate x:Key="StatusGlyphTemplate">
-      <Grid Width="18" Height="18" HorizontalAlignment="Center" VerticalAlignment="Center">
-        <Ellipse x:Name="Dot" Width="18" Height="18"/>
-        <TextBlock x:Name="Check" Text="&#x2713;" FontSize="10" FontWeight="Bold" Foreground="White"
-                   HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
-        <TextBlock x:Name="Bang" Text="!" FontSize="11" FontWeight="Bold" Foreground="White"
-                   HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
-        <ui:ProgressRing x:Name="Spin" Width="18" Height="18" IsIndeterminate="True"
-                         Foreground="{DynamicResource BlueBrush}" Visibility="Collapsed"/>
+      <Grid>
+        <!-- desktop pip at the far-left edge — only for sessions on another virtual desktop -->
+        <Ellipse Width="6" Height="6" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="3,0,0,0"
+                 Fill="{Binding DesktopIndex, Converter={StaticResource DesktopColor}}"
+                 Visibility="{Binding OnOtherDesktop, Converter={StaticResource BoolToVis}}"
+                 ToolTip="{Binding DesktopLabel}"/>
+        <Grid Width="18" Height="18" HorizontalAlignment="Center" VerticalAlignment="Center">
+          <Ellipse x:Name="Dot" Width="18" Height="18"/>
+          <TextBlock x:Name="Check" Text="&#x2713;" FontSize="10" FontWeight="Bold" Foreground="White"
+                     HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
+          <TextBlock x:Name="Bang" Text="!" FontSize="11" FontWeight="Bold" Foreground="White"
+                     HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
+          <ui:ProgressRing x:Name="Spin" Width="18" Height="18" IsIndeterminate="True"
+                           Foreground="{DynamicResource BlueBrush}" Visibility="Collapsed"/>
+        </Grid>
       </Grid>
       <DataTemplate.Triggers>
         <DataTrigger Binding="{Binding State}" Value="Completed">

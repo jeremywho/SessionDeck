@@ -22,3 +22,22 @@ internal sealed class PctToBrushConverter : IValueConverter
     public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
         => Binding.DoNothing;
 }
+
+/// <summary>Virtual-desktop index -> a subtle dot color (non-status hues). -1 => transparent (no dot).</summary>
+internal sealed class DesktopColorConverter : IValueConverter
+{
+    static readonly Brush[] Palette =
+    {
+        new SolidColorBrush(Color.FromRgb(0x33, 0xC4, 0xC4)),  // teal
+        new SolidColorBrush(Color.FromRgb(0xA7, 0x7C, 0xE8)),  // purple
+        new SolidColorBrush(Color.FromRgb(0xE8, 0x7C, 0xB0)),  // pink
+        new SolidColorBrush(Color.FromRgb(0xD8, 0x6A, 0xD8)),  // magenta
+    };
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+    {
+        int i = value is int n ? n : -1;
+        return i < 0 ? Brushes.Transparent : Palette[i % Palette.Length];
+    }
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        => Binding.DoNothing;
+}

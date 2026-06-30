@@ -24,7 +24,9 @@ still reports `idle` — and it clears itself when the session's next real turn 
 Each row shows the session **name**, the **Context %** (colored by fullness: amber > 70, red > 85 —
 matching the omc status-line thresholds), and **Idle** time humanized (`42m`, `1h 5m`). **Hover a
 row's Idle column** for the rest — model, context tokens, status, last tool, folder, PID/Id/version
-(and the API-error text when it's in that state). A footer shows the live count and a color legend.
+(and the API-error text when it's in that state). Sessions whose terminal sits on a **different
+virtual desktop** get a small colored pip at the row's left edge — one color per desktop, the
+current desktop shows none (hover it for "Desktop N"). A footer shows the live count and a color legend.
 
 The **title bar** holds a **theme toggle** (sun/moon) and an **always-on-top pin** (accents when
 active), beside the min/max/close buttons. Dark/Light Fluent theme, remembered.
