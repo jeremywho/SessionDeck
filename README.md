@@ -45,7 +45,8 @@ the window's position/size is remembered on close, so it reopens where you left 
 - **System tray** — double-click the tray icon to open; closing the window hides it back to the tray.
   Right-click for the (Fluent) menu: **Open**, **Settings…**, **Restore sessions…**, **Toggle theme**,
   **Dock to** (edge/corner), and **Exit**.
-- **Double-click a row** → bring that session's terminal window + tab to the foreground.
+- **Double-click a row** → bring that session's terminal window + tab to the foreground. Rows
+  highlight on hover (with a hand cursor) to show they're clickable.
 - **Ctrl + mouse wheel** zooms the content larger/smaller (like browser zoom) without resizing the
   window; **Ctrl + 0** resets to 100%. Remembered.
 - **Change-driven refresh** — a `FileSystemWatcher` on the sessions registry updates the list within

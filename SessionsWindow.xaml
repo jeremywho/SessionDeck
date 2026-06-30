@@ -109,7 +109,7 @@
                   ItemsSource="{Binding Rows}"
                   AutoGenerateColumns="False" IsReadOnly="True"
                   HeadersVisibility="Column" GridLinesVisibility="None" BorderThickness="0"
-                  Background="Transparent" RowBackground="Transparent" CanUserAddRows="False"
+                  Background="Transparent" CanUserAddRows="False"
                   CanUserSortColumns="False" CanUserReorderColumns="True" CanUserResizeColumns="True"
                   SelectionMode="Single" RowHeight="46" ColumnHeaderHeight="34"
                   Foreground="{DynamicResource FgBrush}"
@@ -127,9 +127,11 @@
               <Setter Property="BorderBrush" Value="{DynamicResource Border2Brush}"/>
               <Setter Property="BorderThickness" Value="0,1,0,0"/>
               <Setter Property="ToolTip" Value="{Binding RowTooltip}"/>
+              <Setter Property="Cursor" Value="Hand"/>
+              <Setter Property="Background" Value="Transparent"/>
               <Style.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
-                  <Setter Property="Background" Value="{DynamicResource Surface2Brush}"/>
+                  <Setter Property="Background" Value="{DynamicResource RowHoverBrush}"/>
                 </Trigger>
               </Style.Triggers>
             </Style>

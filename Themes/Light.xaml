@@ -3,6 +3,7 @@
   <SolidColorBrush x:Key="PageBrush"         Color="#E7E8EC"/>
   <SolidColorBrush x:Key="SurfaceBrush"      Color="#FFFFFF"/>
   <SolidColorBrush x:Key="Surface2Brush"     Color="#F2F3F5"/>
+  <SolidColorBrush x:Key="RowHoverBrush"     Color="#E8F0FC"/>
   <SolidColorBrush x:Key="TitlebarBrush"     Color="#ECEEF0"/>
   <SolidColorBrush x:Key="Border2Brush"      Color="#E3E5E9"/>
   <SolidColorBrush x:Key="BorderStrongBrush" Color="#D2D5DB"/>
