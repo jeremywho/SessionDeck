@@ -6,17 +6,19 @@ one, and restores them after a reboot. It reads Claude Code's on-disk state — 
 
 .NET 10 · WPF + [WPF-UI](https://github.com/lepoco/wpfui) (Fluent / Mica).
 
+<img src="docs/screenshot.png" alt="Claude Sessions window — live sessions with status glyphs, Context %, and idle times" width="440">
+
 ## The window
 A compact ~500px card, **sorted attention-first** (Error → Awaiting → Working → Completed → Idle),
 then **most-recently-changed first within each group**, re-sorting live as states change:
 
 | Glyph | State | Claude status | Meaning |
 |---|---|---|---|
-| red disc + ! | **Error** | *(transcript)* | last turn hit an API error (rate-limit, etc.) — hover the row for the message |
-| amber pulsing ring | **Awaiting** | `waiting` | blocked on you (permission / input) |
-| blue spinner | **Working** | `busy` / `shell` | actively running — including background shell/lane work while the agent "holds" |
-| green disc + ✓ | **Completed** | `idle` | finished its turn, ready for you |
-| slate ring | **Idle** | *(other)* | fallback for any unrecognized status |
+| 🔴 red disc + ! | **Error** | *(transcript)* | last turn hit an API error (rate-limit, etc.) — hover the row for the message |
+| 🟠 amber pulsing ring | **Awaiting** | `waiting` | blocked on you (permission / input) |
+| 🔵 blue spinner | **Working** | `busy` / `shell` | actively running — including background shell/lane work while the agent "holds" |
+| 🟢 green disc + ✓ | **Completed** | `idle` | finished its turn, ready for you |
+| ⚪ slate ring | **Idle** | *(other)* | fallback for any unrecognized status |
 
 **Error** is read from the transcript (a synthetic `isApiErrorMessage` turn), not the registry — which
 still reports `idle` — and it clears itself when the session's next real turn lands.
