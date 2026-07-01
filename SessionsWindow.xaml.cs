@@ -30,8 +30,6 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         InitializeComponent();
         DataContext = this;
 
-        SessionRow.ContextWindow = _app.Settings.ContextWindowTokens > 0 ? _app.Settings.ContextWindowTokens : 1_000_000;
-
         // One-time reset of the pre-redesign (wide) window size, then persist normally.
         if (_app.Settings.LayoutVersion < 1)
         {

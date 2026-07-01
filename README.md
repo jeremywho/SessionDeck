@@ -70,8 +70,8 @@ were running but aren't now, reopening each selected one in a new Windows Termin
 (**Restore sessions…**).
 
 **Settings** — from the title-bar gear or the tray (**Settings…**) — holds the **theme** (Dark/Light),
-**Show in taskbar** (turn off to live in the tray only), the **Resume flags** appended to every
-resumed session (e.g. `--dangerously-skip-permissions`), and the context-window divisor.
+**Show in taskbar** (turn off to live in the tray only), and the **Resume flags** appended to every
+resumed session (e.g. `--dangerously-skip-permissions`).
 
 ## Build / run
 Requires .NET SDK 10.
@@ -141,8 +141,8 @@ DigiCert KeyLocker), swap the workflow's *Sign the exe* step for that provider's
   Claude's auto-title). Identical/empty titles may be ambiguous; it then falls back to a window-title
   match and refuses to focus the wrong window rather than guess.
 - **Context %** is approximate: the true per-session context-window size is only handed to Claude
-  Code *statusline* commands, not to a standalone app — so the divisor is a setting
-  (`ContextWindowTokens`, default 1,000,000).
+  Code *statusline* commands, not to a standalone app — so it's computed against a fixed **1M** (the
+  max-context model these sessions always run).
 - Reads undocumented internal files; the schema may change between Claude Code versions. Parsing is
   isolated in `SessionScanner`, so a schema change is a one-file fix.
 

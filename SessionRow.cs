@@ -9,7 +9,7 @@ namespace ClaudeSessionMonitor;
 /// </summary>
 internal sealed class SessionRow : INotifyPropertyChanged
 {
-    /// <summary>Context-window size used as the % divisor. Set from Settings at startup.</summary>
+    /// <summary>Context-window size used as the Context % divisor — fixed at the 1M max.</summary>
     public static long ContextWindow = 1_000_000;
 
     public string SessionId { get; }

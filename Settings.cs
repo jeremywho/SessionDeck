@@ -13,7 +13,6 @@ internal sealed class Settings
     public Dictionary<string, bool> ColumnVisible { get; set; } = new();    // column key -> visible
     public Dictionary<string, int> ColumnOrder { get; set; } = new();       // column key -> display index
     public Dictionary<string, double> ColumnWidth { get; set; } = new();    // column key -> pixel width
-    public long ContextWindowTokens { get; set; } = 1_000_000;              // divisor for the Ctx % column
     public int LayoutVersion { get; set; }                                  // bumped when the window layout changes (resets stale window size)
     public string ResumeFlags { get; set; } = "";                           // appended to every `claude --resume` (e.g. --dangerously-skip-permissions)
     public string DockPosition { get; set; } = "Free";                      // Free | LeftEdge | RightEdge | TopLeft | TopRight | BottomLeft | BottomRight
