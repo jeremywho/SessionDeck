@@ -31,6 +31,16 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
+      - name: Compute assembly version from the tag
+        id: ver
+        shell: pwsh
+        run: |
+          $v = "${{ inputs.version }}".TrimStart('v','V')
+          if ($v -match '-') { $v = $v.Split('-')[0] }        # strip any -prerelease suffix for AssemblyVersion
+          if ($v -notmatch '^\d+(\.\d+){1,3}$') { $v = "0.0.0" }
+          "num=$v" >> $env:GITHUB_OUTPUT
+          Write-Host "Assembly version: $v"
+
       - name: Publish self-contained single-file exe
         run: >
           dotnet publish ClaudeSessionMonitor.csproj -c Release -r win-x64
@@ -38,6 +48,7 @@ jobs:
           -p:PublishSingleFile=true
           -p:IncludeNativeLibrariesForSelfExtract=true
           -p:EnableCompressionInSingleFile=true
+          -p:Version=${{ steps.ver.outputs.num }}
           -o publish
 
       - name: Name the asset with the version

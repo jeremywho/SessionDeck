@@ -53,6 +53,25 @@ bin\Release\net10.0-windows\ClaudeSessionMonitor.exe
 - Everything here reads **undocumented** Claude Code files; parsing is isolated in `SessionScanner`
   (+ `VirtualDesktop` for the registry desktop list), so a schema change is a one-file fix.
 
+## Auto-update / install (`Installer.cs`, `Updater.cs`)
+- **Dormant unless installed.** Both no-op unless `Installer.IsInstalledInstance()` (running from
+  `%LOCALAPPDATA%\Programs\ClaudeSessionMonitor\`). A `\bin\` dev build never self-installs or
+  self-updates, so your local build/verify loop is unaffected.
+- **First run** anywhere else copies the exe to the install dir (+ Start Menu shortcut via WScript.Shell
+  COM) and relaunches from there. Only correct for the **self-contained single-file** release exe — a
+  framework-dependent dev build is multi-file, so a copied single exe would be missing its DLLs.
+- **Update:** `gh` compares the latest release tag to the assembly version, downloads the staged exe,
+  then Apply renames the running exe → `.old`, copies the new one in, relaunches with `--updated`
+  (Program.cs retries the single-instance mutex so the new instance waits for the old to exit).
+  Renaming a *running* exe is allowed on Windows (delete isn't) — the same trick Claude Code uses.
+- **Rollback:** an `update.pending.json` boot-counter; if a post-update boot never reaches
+  `Updater.ConfirmStartupOk()` (window up ~6s) and the app is relaunched, the next boot reverts to `.old`.
+- **Test hooks:** `CSM_INSTALL_DIR` (redirect install dir to a temp path), `CSM_NO_INSTALL=1` (skip
+  self-install), `CSM_FAKE_UPDATE=<tag>` (force the title-bar button). The full download→swap→relaunch
+  cycle can only be truly validated by cutting a real release.
+- **Version stamping:** release.yml passes `-p:Version=<tag>` so the running assembly version == the
+  release tag; the csproj `<Version>` is only the dev default.
+
 ## Conventions
 - **Worktrees only.** Never edit the main checkout. Branch into
   `C:\Data\Repos\.worktrees\ClaudeSessionMonitor\<branch>`, build + verify there, fast-forward merge to

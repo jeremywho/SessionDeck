@@ -29,11 +29,32 @@ internal static class Program
             return;
         }
 
-        // Single instance: a second launch just exits.
-        using var mutex = new Mutex(true, "ClaudeSessionMonitor_SingleInstance", out bool isNew);
-        if (!isNew) return;
+        // First run from anywhere but the install dir -> copy self to %LOCALAPPDATA%\Programs and relaunch.
+        if (Installer.MaybeSelfInstall(args)) return;
 
-        var app = new App();
-        app.Run();
+        // If a freshly-updated build crash-looped last time, revert to the previous exe before we start.
+        Updater.CheckRollbackOnStartup();
+
+        // Single instance. After an update relaunch the old instance may still be exiting -> brief retry.
+        var mutex = AcquireSingleInstance(args.Contains("--updated"));
+        if (mutex == null) return;
+        using (mutex)
+        {
+            var app = new App();
+            app.Run();
+        }
+    }
+
+    static Mutex? AcquireSingleInstance(bool afterUpdate)
+    {
+        int retries = afterUpdate ? 80 : 0;   // ~8s of 100ms retries to let the old instance release the mutex
+        for (int i = 0; ; i++)
+        {
+            var m = new Mutex(true, "ClaudeSessionMonitor_SingleInstance", out bool isNew);
+            if (isNew) return m;
+            m.Dispose();
+            if (i >= retries) return null;     // held and out of retries -> a genuine second instance, exit
+            Thread.Sleep(100);
+        }
     }
 }

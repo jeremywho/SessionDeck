@@ -286,6 +286,15 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
 
     void SettingsButton_Click(object sender, RoutedEventArgs e) => _app.ShowSettings();
 
+    /// <summary>Reveal the title-bar update button once a new version is staged.</summary>
+    public void ShowUpdateReady(string tag)
+    {
+        UpdateButton.ToolTip = $"Update to {tag} ready — click to restart";
+        UpdateButton.Visibility = Visibility.Visible;
+    }
+
+    void UpdateButton_Click(object sender, RoutedEventArgs e) => _app.ApplyUpdate();
+
     /// <summary>Called after a theme swap so the Context% color converter re-runs against the new palette.</summary>
     public void RefreshAfterThemeChange() => SessionsGrid.Items.Refresh();
 

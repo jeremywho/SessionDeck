@@ -52,6 +52,40 @@ internal sealed class App : Application
         ShowWindow();
 
         if (orphaned.Count > 0) ShowRestore(orphaned);
+
+        StartUpdater();
+    }
+
+    // ---------------- auto-update ----------------
+
+    void StartUpdater()
+    {
+        // A freshly-updated build: once it's been up a few seconds, clear the rollback marker + drop .old.
+        var settle = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(6) };
+        settle.Tick += (_, _) => { settle.Stop(); Updater.ConfirmStartupOk(); };
+        settle.Start();
+
+        // Test hook: force the "update ready" button without cutting a real release.
+        var fake = Environment.GetEnvironmentVariable("CSM_FAKE_UPDATE");
+        if (!string.IsNullOrEmpty(fake)) { _window?.ShowUpdateReady(fake); return; }
+
+        Updater.UpdateStaged += () => Dispatcher.InvokeAsync(() => _window?.ShowUpdateReady(Updater.StagedTag ?? ""));
+
+        _ = Updater.CheckAsync();   // check now,
+        var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromHours(4) };  // then periodically
+        timer.Tick += (_, _) => { _ = Updater.CheckAsync(); };
+        timer.Start();
+    }
+
+    /// <summary>Save state, swap the staged exe into place, and relaunch it.</summary>
+    public void ApplyUpdate()
+    {
+        Settings.Save();
+        if (Updater.Apply())
+        {
+            if (_window != null) _window.AllowClose = true;
+            Shutdown();
+        }
     }
 
     static ApplicationTheme ThemeFrom(string s) =>
@@ -183,7 +217,7 @@ internal sealed class App : Application
         return System.Drawing.SystemIcons.Application;
     }
 
-    static void LogError(Exception? ex)
+    internal static void LogError(Exception? ex)
     {
         try
         {

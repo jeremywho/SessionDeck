@@ -61,6 +61,23 @@ the window's position/size is remembered on close, so it reopens where you left 
   `%TEMP%\claude-session-monitor-error.log`.
 - `--list` / `--windows` headless modes dump the session list / focus mapping to `%TEMP%`.
 
+## Install & updates
+The released exe is **self-installing**. Run it once from anywhere and it copies itself to
+**`%LOCALAPPDATA%\Programs\ClaudeSessionMonitor\`** (per-user — no admin), drops a Start Menu
+shortcut, and relaunches from there. That per-user location is the whole trick to **seamless
+auto-update**: the app can rewrite its own exe without a UAC prompt.
+
+Once installed it checks GitHub Releases in the background (on launch + every few hours) via the
+**`gh` CLI** for auth — so it works against the private repo with **no token baked into the app**.
+When a newer release is found it silently downloads + stages it, then a **↻ button appears in the
+title bar**. Click it to restart into the new version — near-instant, since all state (settings,
+window position, columns, the live list) is already on disk. If a freshly-updated build crash-loops
+on startup, it automatically **rolls back** to the previous exe.
+
+Auto-update is dormant unless the app runs from its install dir, so a `bin\` dev build never
+self-installs or self-updates. (Test hooks: `CSM_INSTALL_DIR` redirects the install dir,
+`CSM_NO_INSTALL=1` skips self-install, `CSM_FAKE_UPDATE=<tag>` forces the update button.)
+
 ## Session restore
 The app keeps `%APPDATA%\ClaudeSessionMonitor\active-sessions.json` in sync with the live interactive
 sessions (snapshot-on-change). If the machine crashes or reboots, that file still holds whatever was
@@ -126,6 +143,7 @@ DigiCert KeyLocker), swap the workflow's *Sign the exe* step for that provider's
 - `SessionState.cs` — the display states (incl. **Error**) + the Claude-status → state mapping.
 - `WindowActivator.cs` / `Native.cs` / `TabSelector.cs` — focus + Windows Terminal tab selection.
 - `VirtualDesktop.cs` — which virtual desktop a window is on (drives the per-row desktop pip).
+- `Installer.cs` / `Updater.cs` — per-user self-install to LocalAppData + `gh`-based auto-update.
 - `Themes/Dark.xaml`, `Themes/Light.xaml` — design-token brushes, swapped on theme toggle.
 - `SessionRegistry.cs` / `SavedSession.cs` — persist the live set for crash/reboot restore.
 - `SessionLauncher.cs` — reopen a session (`wt … claude --resume …`).
