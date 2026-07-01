@@ -71,6 +71,12 @@ bin\Release\net10.0-windows\ClaudeSessionMonitor.exe
   cycle can only be truly validated by cutting a real release.
 - **Version stamping:** release.yml passes `-p:Version=<tag>` so the running assembly version == the
   release tag; the csproj `<Version>` is only the dev default.
+- **Single-file gotcha (this bit us):** dev builds are **framework-dependent** (multi-file); the release
+  is **self-contained single-file** — they behave differently at runtime. `Application.Shutdown()` throws
+  a `System.Diagnostics.Tracing` `FileNotFoundException` from WPF's shutdown telemetry **only in
+  single-file** builds, half-killing the process (mutex still held → update relaunch blocked, rollback
+  marker never clears). Fix: `ApplyUpdate` / `ExitApp` dispose the tray + `Environment.Exit(0)` instead
+  of `Shutdown()`. Lesson: **test the single-file publish for shutdown/update paths**, not just `dotnet build`.
 
 ## Conventions
 - **Worktrees only.** Never edit the main checkout. Branch into

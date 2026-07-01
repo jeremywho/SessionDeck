@@ -83,8 +83,11 @@ internal sealed class App : Application
         Settings.Save();
         if (Updater.Apply())
         {
-            if (_window != null) _window.AllowClose = true;
-            Shutdown();
+            // Shutdown() trips a WPF telemetry crash (System.Diagnostics.Tracing not resolvable) in
+            // single-file self-contained builds, which can leave the process half-alive still holding
+            // the single-instance mutex and block the relaunch. Dispose the tray and hard-exit instead.
+            _tray?.Dispose();
+            Environment.Exit(0);
         }
     }
 
@@ -202,8 +205,9 @@ internal sealed class App : Application
 
     void ExitApp()
     {
-        if (_window != null) _window.AllowClose = true;
-        Shutdown();
+        // Hard-exit rather than Shutdown() — the latter trips a WPF telemetry crash in single-file builds.
+        _tray?.Dispose();
+        Environment.Exit(0);
     }
 
     static System.Drawing.Icon LoadAppIcon()
