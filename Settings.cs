@@ -20,6 +20,7 @@ internal sealed class Settings
     public double? WindowLeft { get; set; }
     public double? WindowTop { get; set; }
     public double Zoom { get; set; } = 1.0;                                 // content zoom (Ctrl+wheel), 0.6–2.5
+    public bool ShowInTaskbar { get; set; } = true;                         // false = tray-only (no taskbar button)
 
     static string Dir => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ClaudeSessionMonitor");

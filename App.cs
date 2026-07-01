@@ -77,6 +77,7 @@ internal sealed class App : Application
         var t = ThemeFrom(Settings.Theme);
         ApplicationThemeManager.Apply(t);   // WPF-UI controls
         ApplyPalette(t);                    // our custom tokens
+        _window?.RefreshAfterThemeChange(); // re-run the Context% color converter against the new palette
         Settings.Save();
     }
 
@@ -89,11 +90,17 @@ internal sealed class App : Application
     }
 
     SettingsWindow? _settingsWindow;
-    void ShowSettings()
+    public void ShowSettings()
     {
         if (_settingsWindow == null || !_settingsWindow.IsLoaded) _settingsWindow = new SettingsWindow(this);
         _settingsWindow.Show();
         _settingsWindow.Activate();
+    }
+
+    /// <summary>Apply the "show in taskbar" preference to the live window.</summary>
+    public void ApplyShowInTaskbar()
+    {
+        if (_window != null) _window.ShowInTaskbar = Settings.ShowInTaskbar;
     }
 
     void RestoreFromTray()

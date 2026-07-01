@@ -45,7 +45,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         RestorePosition();
 
         Topmost = _app.Settings.AlwaysOnTop;
-        UpdateThemeButton();
+        ShowInTaskbar = _app.Settings.ShowInTaskbar;
         UpdateOnTopButton();
         SetZoom(_app.Settings.Zoom);
 
@@ -286,22 +286,10 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
 
     // ---------------- theme / on-top ----------------
 
-    void ThemeButton_Click(object sender, RoutedEventArgs e)
-    {
-        _app.ToggleTheme();
-        UpdateThemeButton();
-        SessionsGrid.Items.Refresh();   // re-run the Context% color converter against the new palette
-    }
+    void SettingsButton_Click(object sender, RoutedEventArgs e) => _app.ShowSettings();
 
-    void UpdateThemeButton()
-    {
-        bool dark = !string.Equals(_app.Settings.Theme, "Light", StringComparison.OrdinalIgnoreCase);
-        ThemeButton.Icon = new Wpf.Ui.Controls.SymbolIcon
-        {
-            Symbol = dark ? Wpf.Ui.Controls.SymbolRegular.WeatherMoon24 : Wpf.Ui.Controls.SymbolRegular.WeatherSunny24
-        };
-        ThemeButton.ToolTip = dark ? "Theme: Dark — click for Light" : "Theme: Light — click for Dark";
-    }
+    /// <summary>Called after a theme swap so the Context% color converter re-runs against the new palette.</summary>
+    public void RefreshAfterThemeChange() => SessionsGrid.Items.Refresh();
 
     void OnTopButton_Click(object sender, RoutedEventArgs e)
     {

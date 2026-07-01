@@ -7,16 +7,16 @@ one, and restores them after a reboot. It reads Claude Code's on-disk state — 
 .NET 10 · WPF + [WPF-UI](https://github.com/lepoco/wpfui) (Fluent / Mica).
 
 ## The window
-A compact ~500px card, **sorted attention-first** (Error → Awaiting → Working → Completed → Idle)
-and re-sorting live as states change:
+A compact ~500px card, **sorted attention-first** (Error → Awaiting → Working → Completed → Idle),
+then **most-recently-changed first within each group**, re-sorting live as states change:
 
 | Glyph | State | Claude status | Meaning |
 |---|---|---|---|
 | red disc + ! | **Error** | *(transcript)* | last turn hit an API error (rate-limit, etc.) — hover the row for the message |
 | amber pulsing ring | **Awaiting** | `waiting` | blocked on you (permission / input) |
-| blue spinner | **Working** | `busy` | actively running |
+| blue spinner | **Working** | `busy` / `shell` | actively running — including background shell/lane work while the agent "holds" |
 | green disc + ✓ | **Completed** | `idle` | finished its turn, ready for you |
-| slate ring | **Idle** | `shell` | sitting at a shell (rare) |
+| slate ring | **Idle** | *(other)* | fallback for any unrecognized status |
 
 **Error** is read from the transcript (a synthetic `isApiErrorMessage` turn), not the registry — which
 still reports `idle` — and it clears itself when the session's next real turn lands.
@@ -30,8 +30,9 @@ current desktop shows none (hover it for "Desktop N"). A session running **subag
 **⚙ N** badge after its name — how many are working right now (hover for the total spawned this
 session). A footer shows the live count and a color legend.
 
-The **title bar** holds a **theme toggle** (sun/moon) and an **always-on-top pin** (accents when
-active), beside the min/max/close buttons. Dark/Light Fluent theme, remembered.
+The **title bar** holds a **settings** gear (opens the Settings window) and an **always-on-top pin**
+(accents when active), beside the min/max/close buttons. The Dark/Light Fluent theme is chosen in
+Settings and remembered.
 
 ## Columns
 The four columns above are the default. **Right-click any column header** to show/hide extra fields
@@ -68,8 +69,9 @@ were running but aren't now, reopening each selected one in a new Windows Termin
 `claude --resume <id> --name <name>` in its original folder. Also available any time from the tray
 (**Restore sessions…**).
 
-**Settings…** (tray) sets **Resume flags** appended to every resumed session — e.g.
-`--dangerously-skip-permissions` — plus the context-window divisor.
+**Settings** — from the title-bar gear or the tray (**Settings…**) — holds the **theme** (Dark/Light),
+**Show in taskbar** (turn off to live in the tray only), the **Resume flags** appended to every
+resumed session (e.g. `--dangerously-skip-permissions`), and the context-window divisor.
 
 ## Build / run
 Requires .NET SDK 10.
@@ -123,6 +125,7 @@ DigiCert KeyLocker), swap the workflow's *Sign the exe* step for that provider's
 - `SessionInfo.cs` — data model. `SessionRow.cs` — observable row VM (derives the display state).
 - `SessionState.cs` — the display states (incl. **Error**) + the Claude-status → state mapping.
 - `WindowActivator.cs` / `Native.cs` / `TabSelector.cs` — focus + Windows Terminal tab selection.
+- `VirtualDesktop.cs` — which virtual desktop a window is on (drives the per-row desktop pip).
 - `Themes/Dark.xaml`, `Themes/Light.xaml` — design-token brushes, swapped on theme toggle.
 - `SessionRegistry.cs` / `SavedSession.cs` — persist the live set for crash/reboot restore.
 - `SessionLauncher.cs` — reopen a session (`wt … claude --resume …`).

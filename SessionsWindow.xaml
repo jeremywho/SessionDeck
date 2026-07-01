@@ -96,9 +96,11 @@
     <ui:TitleBar Grid.Row="0" Title="Claude Sessions" Height="36">
       <ui:TitleBar.TrailingContent>
         <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,2,0">
-          <ui:Button x:Name="ThemeButton" Appearance="Transparent" BorderThickness="0" MinHeight="0" MaxHeight="28" Width="34" Padding="0"
+          <ui:Button x:Name="SettingsButton" Appearance="Transparent" BorderThickness="0" MinHeight="0" MaxHeight="28" Width="34" Padding="0"
                      VerticalAlignment="Center" VerticalContentAlignment="Center" FontSize="15"
-                     Click="ThemeButton_Click" ToolTip="Toggle light / dark theme"/>
+                     Click="SettingsButton_Click" ToolTip="Settings">
+            <ui:Button.Icon><ui:SymbolIcon Symbol="Settings24"/></ui:Button.Icon>
+          </ui:Button>
           <ui:Button x:Name="OnTopButton" Appearance="Transparent" BorderThickness="0" MinHeight="0" MaxHeight="28" Width="34" Padding="0" Margin="2,0,0,0"
                      VerticalAlignment="Center" VerticalContentAlignment="Center" FontSize="15"
                      Click="OnTopButton_Click" ToolTip="Keep window always on top"/>
