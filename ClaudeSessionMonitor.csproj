@@ -26,6 +26,13 @@
     <Resource Include="app.ico" />
   </ItemGroup>
 
+  <!-- Unit tests live under Tests/ (their own project). Keep the test sources out of this
+       project's default **/*.cs glob, and let the test assembly see internal types. -->
+  <ItemGroup>
+    <Compile Remove="Tests/**" />
+    <InternalsVisibleTo Include="ClaudeSessionMonitor.Tests" />
+  </ItemGroup>
+
   <!-- WinForms implicit usings (System.Windows.Forms, System.Drawing) collide with WPF
        (System.Windows.Controls / .Media). Drop them globally; App.cs imports WinForms
        explicitly, just for the tray icon. -->

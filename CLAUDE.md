@@ -8,6 +8,7 @@ user-facing feature tour; this file is for working *on* the code.
 ```
 dotnet build -c Release
 bin\Release\net10.0-windows\ClaudeSessionMonitor.exe
+dotnet test Tests\ClaudeSessionMonitor.Tests.csproj
 ```
 - It's a **tray app with no console** — failures are silent. After a launch, check
   `%TEMP%\claude-session-monitor-error.log`.
@@ -67,8 +68,9 @@ bin\Release\net10.0-windows\ClaudeSessionMonitor.exe
 - **Rollback:** an `update.pending.json` boot-counter; if a post-update boot never reaches
   `Updater.ConfirmStartupOk()` (window up ~6s) and the app is relaunched, the next boot reverts to `.old`.
 - **Test hooks:** `CSM_INSTALL_DIR` (redirect install dir to a temp path), `CSM_NO_INSTALL=1` (skip
-  self-install), `CSM_FAKE_UPDATE=<tag>` (force the title-bar button). The full download→swap→relaunch
-  cycle can only be truly validated by cutting a real release.
+  self-install), `CSM_FAKE_UPDATE=<tag>` (force the title-bar button), `CSM_DATA_DIR` (redirect the
+  `active-sessions.json` dir — the unit tests set it). The full download→swap→relaunch cycle can
+  only be truly validated by cutting a real release.
 - **Version stamping:** release.yml passes `-p:Version=<tag>` so the running assembly version == the
   release tag; the csproj `<Version>` is only the dev default.
 - **Single-file gotcha (this bit us):** dev builds are **framework-dependent** (multi-file); the release

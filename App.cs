@@ -56,6 +56,18 @@ internal sealed class App : Application
         StartUpdater();
     }
 
+    /// <summary>
+    /// OS shutdown / restart / logoff (WM_QUERYENDSESSION). Windows kills the claude processes
+    /// while this app keeps pumping — the tray window cancels its close — so the next scan would
+    /// see an emptying live set and overwrite active-sessions.json with it, seconds before the
+    /// app itself dies. Freeze the registry so the file keeps the last real set for restore.
+    /// </summary>
+    protected override void OnSessionEnding(SessionEndingCancelEventArgs e)
+    {
+        SessionRegistry.Frozen = true;
+        base.OnSessionEnding(e);
+    }
+
     // ---------------- auto-update ----------------
 
     void StartUpdater()
@@ -156,13 +168,15 @@ internal sealed class App : Application
         if (orphaned.Count > 0) new RestoreWindow(this, orphaned).Show();
     }
 
-    /// <summary>Sessions saved last run that aren't live now (and seen within the last day).</summary>
+    /// <summary>Sessions saved last run that aren't live now (and seen within the last week).</summary>
     static List<SavedSession> ComputeOrphaned()
     {
         var saved = SessionRegistry.Load();
         if (saved.Count == 0) return new();
         var liveIds = new HashSet<string>(SessionScanner.Scan().Select(s => s.SessionId));
-        long cutoff = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - 24L * 60 * 60 * 1000;
+        // A week, not a day: a machine can sit wedged/powered-off well past 24h, and the restore
+        // offer is an opt-in checklist — a stale entry costs one unticked row.
+        long cutoff = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - 7L * 24 * 60 * 60 * 1000;
         return saved.Where(s => !liveIds.Contains(s.Id) && s.LastSeen >= cutoff).ToList();
     }
 
