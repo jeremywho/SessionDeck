@@ -39,12 +39,18 @@
         <TextBlock Text="Resume flags" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource FgBrush}" Margin="0,20,0,0"/>
         <TextBlock Text="Appended to every resumed session (space-separated)." FontSize="11.5"
                    Foreground="{DynamicResource Fg3Brush}" Margin="0,2,0,6"/>
-        <ui:TextBox x:Name="ResumeFlagsBox" PlaceholderText="--dangerously-skip-permissions"/>
+        <!-- "e.g." matters: a bare flag as placeholder reads as a SAVED value, and users try to edit it. -->
+        <ui:TextBox x:Name="ResumeFlagsBox" PlaceholderText="e.g. --dangerously-skip-permissions"/>
 
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,22,0,0">
-          <ui:Button Content="Cancel" Appearance="Secondary" Click="Cancel_Click" Margin="0,0,8,0"/>
-          <ui:Button Content="Save" Appearance="Primary" Click="Save_Click"/>
-        </StackPanel>
+        <Grid Margin="0,22,0,0">
+          <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+          <TextBlock x:Name="VersionText" Grid.Column="0" VerticalAlignment="Center" FontSize="11.5"
+                     Foreground="{DynamicResource Fg3Brush}"/>
+          <StackPanel Grid.Column="1" Orientation="Horizontal">
+            <ui:Button Content="Cancel" Appearance="Secondary" Click="Cancel_Click" Margin="0,0,8,0"/>
+            <ui:Button Content="Save" Appearance="Primary" Click="Save_Click"/>
+          </StackPanel>
+        </Grid>
       </StackPanel>
     </Border>
   </Grid>

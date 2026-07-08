@@ -13,6 +13,10 @@ internal partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         ThemeToggle.IsChecked = !string.Equals(_app.Settings.Theme, "Light", StringComparison.OrdinalIgnoreCase);
         TaskbarToggle.IsChecked = _app.Settings.ShowInTaskbar;
         ResumeFlagsBox.Text = _app.Settings.ResumeFlags;
+
+        // Assembly version == the release tag (release.yml stamps -p:Version); dev builds show the csproj default.
+        var v = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
+        VersionText.Text = v == null ? "" : $"v{v.ToString(3)}";
     }
 
     void Save_Click(object sender, RoutedEventArgs e)
