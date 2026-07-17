@@ -28,6 +28,7 @@ internal sealed class App : Application
 
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
         Settings = Settings.Load();
+        ApplyRunOnLogin();   // also refreshes the registered path if the install dir ever moves
 
         var theme = ThemeFrom(Settings.Theme);
         Resources.MergedDictionaries.Add(new ControlsDictionary());
@@ -144,6 +145,12 @@ internal sealed class App : Application
         if (_settingsWindow == null || !_settingsWindow.IsLoaded) _settingsWindow = new SettingsWindow(this);
         _settingsWindow.Show();
         _settingsWindow.Activate();
+    }
+
+    /// <summary>Sync the HKCU Run registration. Installed instance only — dev builds leave the key alone.</summary>
+    public void ApplyRunOnLogin()
+    {
+        if (Installer.IsInstalledInstance()) Installer.SyncRunAtLogin(Settings.RunOnLogin);
     }
 
     /// <summary>Apply the "show in taskbar" preference to the live window.</summary>

@@ -89,8 +89,9 @@ were running but aren't now, reopening each selected one in a new Windows Termin
 (**Restore sessions…**).
 
 **Settings** — from the title-bar gear or the tray (**Settings…**) — holds the **theme** (Dark/Light),
-**Show in taskbar** (turn off to live in the tray only), and the **Resume flags** appended to every
-resumed session (e.g. `--dangerously-skip-permissions`).
+**Show in taskbar** (turn off to live in the tray only), **Run at login** (on by default; registers the
+installed exe under `HKCU\...\CurrentVersion\Run` — dev builds never touch it), and the **Resume flags**
+appended to every resumed session (e.g. `--dangerously-skip-permissions`).
 
 ## Build / run
 Requires .NET SDK 10.
@@ -169,4 +170,4 @@ DigiCert KeyLocker), swap the workflow's *Sign the exe* step for that provider's
 ## Ideas / next
 - AppBar docking (reserve screen space, taskbar-style) instead of floating.
 - Codex support (`~/.codex`).
-- Quick filter box; cumulative token totals; run on login.
+- Quick filter box; cumulative token totals.

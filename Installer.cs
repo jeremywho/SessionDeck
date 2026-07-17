@@ -53,6 +53,25 @@ internal static class Installer
         catch (Exception ex) { App.LogError(ex); return false; }   // install failed -> just run in place
     }
 
+    const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
+    const string RunValueName = "ClaudeSessionMonitor";
+
+    /// <summary>
+    /// Register (or unregister) the installed exe under HKCU ...\CurrentVersion\Run — per-user,
+    /// no admin. Always points at InstalledExe; callers gate on IsInstalledInstance() so dev
+    /// builds never touch the key.
+    /// </summary>
+    public static void SyncRunAtLogin(bool enabled)
+    {
+        try
+        {
+            using var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(RunKeyPath);
+            if (enabled) key.SetValue(RunValueName, $"\"{InstalledExe}\"");
+            else if (key.GetValue(RunValueName) != null) key.DeleteValue(RunValueName);
+        }
+        catch (Exception ex) { App.LogError(ex); }
+    }
+
     static void TryCreateStartMenuShortcut()
     {
         try

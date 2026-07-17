@@ -12,6 +12,7 @@ internal partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         InitializeComponent();
         ThemeToggle.IsChecked = !string.Equals(_app.Settings.Theme, "Light", StringComparison.OrdinalIgnoreCase);
         TaskbarToggle.IsChecked = _app.Settings.ShowInTaskbar;
+        RunOnLoginToggle.IsChecked = _app.Settings.RunOnLogin;
         ResumeFlagsBox.Text = _app.Settings.ResumeFlags;
 
         // Assembly version == the release tag (release.yml stamps -p:Version); dev builds show the csproj default.
@@ -28,6 +29,9 @@ internal partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
 
         _app.Settings.ShowInTaskbar = TaskbarToggle.IsChecked == true;
         _app.ApplyShowInTaskbar();
+
+        _app.Settings.RunOnLogin = RunOnLoginToggle.IsChecked == true;
+        _app.ApplyRunOnLogin();
 
         _app.Settings.ResumeFlags = ResumeFlagsBox.Text?.Trim() ?? "";
 
