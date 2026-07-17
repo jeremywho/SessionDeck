@@ -36,11 +36,9 @@ The **title bar** holds a **settings** gear (opens the Settings window) and an *
 (accents when active), beside the min/max/close buttons. The Dark/Light Fluent theme is chosen in
 Settings and remembered.
 
-A small **floating launcher pill** sits at the lower right of the screen, above other windows and
-independent of the main window (it works while the app lives in the tray): **+** starts a fresh
+Two **new-session buttons** float over the lower right of the session list: **+** starts a fresh
 claude in a new terminal; the **rename** icon first prompts for a name and passes `--name`; both
-append the Claude flags from Settings. Drag the pill anywhere — the spot is remembered — or hide
-it in Settings.
+append the Claude flags from Settings.
 
 ## Columns
 The four columns above are the default. **Right-click any column header** to show/hide extra fields
@@ -96,9 +94,8 @@ were running but aren't now, reopening each selected one in a new Windows Termin
 
 **Settings** — from the title-bar gear or the tray (**Settings…**) — holds the **theme** (Dark/Light),
 **Show in taskbar** (turn off to live in the tray only), **Run at login** (on by default; registers the
-installed exe under `HKCU\...\CurrentVersion\Run` — dev builds never touch it), **Floating launch
-buttons** (hide the new-session pill), and the **Claude flags** appended to every new or resumed
-session (e.g. `--dangerously-skip-permissions`).
+installed exe under `HKCU\...\CurrentVersion\Run` — dev builds never touch it), and the **Claude flags**
+appended to every new or resumed session (e.g. `--dangerously-skip-permissions`).
 
 ## Build / run
 Requires .NET SDK 10.
