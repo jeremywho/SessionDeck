@@ -44,8 +44,8 @@
           <ui:ToggleSwitch x:Name="RunOnLoginToggle" Grid.Column="1" VerticalAlignment="Center"/>
         </Grid>
 
-        <TextBlock Text="Resume flags" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource FgBrush}" Margin="0,20,0,0"/>
-        <TextBlock Text="Appended to every resumed session (space-separated)." FontSize="11.5"
+        <TextBlock Text="Claude flags" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource FgBrush}" Margin="0,20,0,0"/>
+        <TextBlock Text="Appended to every new or resumed session (space-separated)." FontSize="11.5"
                    Foreground="{DynamicResource Fg3Brush}" Margin="0,2,0,6"/>
         <!-- "e.g." matters: a bare flag as placeholder reads as a SAVED value, and users try to edit it. -->
         <ui:TextBox x:Name="ResumeFlagsBox" PlaceholderText="e.g. --dangerously-skip-permissions"/>

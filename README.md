@@ -32,9 +32,11 @@ current desktop shows none (hover it for "Desktop N"). A session running **subag
 **⚙ N** badge after its name — how many are working right now (hover for the total spawned this
 session). A footer shows the live count and a color legend.
 
-The **title bar** holds a **settings** gear (opens the Settings window) and an **always-on-top pin**
-(accents when active), beside the min/max/close buttons. The Dark/Light Fluent theme is chosen in
-Settings and remembered.
+The **title bar** holds two **new-session buttons** (**+** starts a fresh claude in a new terminal;
+the **rename** icon first prompts for a name and passes `--name`; both append the Claude flags from
+Settings), a **settings** gear (opens the Settings window), and an **always-on-top pin** (accents
+when active), beside the min/max/close buttons. The Dark/Light Fluent theme is chosen in Settings
+and remembered.
 
 ## Columns
 The four columns above are the default. **Right-click any column header** to show/hide extra fields
@@ -90,8 +92,8 @@ were running but aren't now, reopening each selected one in a new Windows Termin
 
 **Settings** — from the title-bar gear or the tray (**Settings…**) — holds the **theme** (Dark/Light),
 **Show in taskbar** (turn off to live in the tray only), **Run at login** (on by default; registers the
-installed exe under `HKCU\...\CurrentVersion\Run` — dev builds never touch it), and the **Resume flags**
-appended to every resumed session (e.g. `--dangerously-skip-permissions`).
+installed exe under `HKCU\...\CurrentVersion\Run` — dev builds never touch it), and the **Claude flags**
+appended to every new or resumed session (e.g. `--dangerously-skip-permissions`).
 
 ## Build / run
 Requires .NET SDK 10.

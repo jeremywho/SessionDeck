@@ -2,7 +2,7 @@ using System.Diagnostics;
 
 namespace ClaudeSessionMonitor;
 
-/// <summary>Reopens a saved session in a new Windows Terminal window via `claude --resume`.</summary>
+/// <summary>Opens claude sessions in a new Windows Terminal window — resumed or brand-new.</summary>
 internal static class SessionLauncher
 {
     public static bool Resume(SavedSession s, string extraFlags)
@@ -11,13 +11,31 @@ internal static class SessionLauncher
             ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
             : s.Cwd;
 
-        // pwsh wrapper keeps the tab open (and shows any error) after claude exits.
         string cmd = $"claude --resume {s.Id}";
         if (!string.IsNullOrWhiteSpace(s.Name) && !IsShortId(s))
             cmd += $" --name '{s.Name.Replace("'", "''")}'";   // pwsh single-quote escaping
         if (!string.IsNullOrWhiteSpace(extraFlags))
             cmd += " " + extraFlags.Trim();
 
+        return Start(cwd, cmd);
+    }
+
+    /// <summary>Start a brand-new claude session (optionally named) in the user's home directory.</summary>
+    public static bool LaunchNew(string? name, string extraFlags)
+    {
+        string cmd = "claude";
+        if (!string.IsNullOrWhiteSpace(name))
+            cmd += $" --name '{name.Replace("'", "''")}'";
+        if (!string.IsNullOrWhiteSpace(extraFlags))
+            cmd += " " + extraFlags.Trim();
+
+        return Start(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), cmd);
+    }
+
+    /// <summary>Run `pwsh -NoExit -Command <cmd>` in a new terminal window at cwd. The pwsh
+    /// wrapper keeps the tab open (and shows any error) after claude exits.</summary>
+    static bool Start(string cwd, string cmd)
+    {
         // Preferred: a new Windows Terminal window.
         try
         {
