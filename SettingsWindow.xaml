@@ -4,7 +4,7 @@
                  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
                  Title="Settings"
-                 Width="470" Height="412"
+                 Width="470" Height="458"
                  ResizeMode="NoResize"
                  WindowStartupLocation="CenterScreen"
                  ExtendsContentIntoTitleBar="True"
@@ -42,6 +42,14 @@
             <TextBlock Text="Start automatically when you sign in to Windows." FontSize="11.5" Foreground="{DynamicResource Fg3Brush}"/>
           </StackPanel>
           <ui:ToggleSwitch x:Name="RunOnLoginToggle" Grid.Column="1" VerticalAlignment="Center"/>
+        </Grid>
+        <Grid Margin="0,10,0,0">
+          <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+          <StackPanel Grid.Column="0">
+            <TextBlock Text="Floating launch buttons" Foreground="{DynamicResource FgBrush}"/>
+            <TextBlock Text="The new-session pill floating above other windows; drag it to move." FontSize="11.5" Foreground="{DynamicResource Fg3Brush}"/>
+          </StackPanel>
+          <ui:ToggleSwitch x:Name="LauncherToggle" Grid.Column="1" VerticalAlignment="Center"/>
         </Grid>
 
         <TextBlock Text="Claude flags" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource FgBrush}" Margin="0,20,0,0"/>

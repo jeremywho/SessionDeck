@@ -284,16 +284,6 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
 
     // ---------------- theme / on-top ----------------
 
-    void NewSessionButton_Click(object sender, RoutedEventArgs e) =>
-        SessionLauncher.LaunchNew(null, _app.Settings.ResumeFlags);
-
-    void NewNamedSessionButton_Click(object sender, RoutedEventArgs e)
-    {
-        var prompt = new NamePromptWindow(this);
-        if (prompt.ShowDialog() == true)
-            SessionLauncher.LaunchNew(prompt.SessionName, _app.Settings.ResumeFlags);
-    }
-
     void SettingsButton_Click(object sender, RoutedEventArgs e) => _app.ShowSettings();
 
     /// <summary>Reveal the title-bar update button once a new version is staged.</summary>

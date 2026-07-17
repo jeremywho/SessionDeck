@@ -7,7 +7,7 @@
                  Width="360" Height="176"
                  MinWidth="360" MinHeight="176"
                  ResizeMode="NoResize"
-                 WindowStartupLocation="CenterOwner"
+                 WindowStartupLocation="CenterScreen"
                  ExtendsContentIntoTitleBar="True"
                  WindowBackdropType="Mica"
                  FontFamily="Segoe UI Variable, Segoe UI"

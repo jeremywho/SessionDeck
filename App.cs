@@ -51,6 +51,7 @@ internal sealed class App : Application
         var orphaned = ComputeOrphaned();
 
         ShowWindow();
+        ApplyLauncher();
 
         if (orphaned.Count > 0) ShowRestore(orphaned);
 
@@ -145,6 +146,22 @@ internal sealed class App : Application
         if (_settingsWindow == null || !_settingsWindow.IsLoaded) _settingsWindow = new SettingsWindow(this);
         _settingsWindow.Show();
         _settingsWindow.Activate();
+    }
+
+    LauncherWindow? _launcher;
+
+    /// <summary>Show or hide the floating new-session pill per the setting.</summary>
+    public void ApplyLauncher()
+    {
+        if (Settings.ShowLauncher)
+        {
+            _launcher ??= new LauncherWindow(this);
+            _launcher.Show();
+        }
+        else
+        {
+            _launcher?.Hide();
+        }
     }
 
     /// <summary>Sync the HKCU Run registration. Installed instance only — dev builds leave the key alone.</summary>

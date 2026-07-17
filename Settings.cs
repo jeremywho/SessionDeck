@@ -21,6 +21,9 @@ internal sealed class Settings
     public double Zoom { get; set; } = 1.0;                                 // content zoom (Ctrl+wheel), 0.6–2.5
     public bool ShowInTaskbar { get; set; } = true;                         // false = tray-only (no taskbar button)
     public bool RunOnLogin { get; set; } = true;                            // HKCU Run registration (installed instance only)
+    public bool ShowLauncher { get; set; } = true;                          // floating new-session pill
+    public double? LauncherLeft { get; set; }                               // launcher pill position (unset = lower right)
+    public double? LauncherTop { get; set; }
 
     static string Dir => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ClaudeSessionMonitor");
