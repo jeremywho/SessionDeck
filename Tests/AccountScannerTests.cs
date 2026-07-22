@@ -83,8 +83,6 @@ public class AccountScannerTests
         Assert.Equal("someone@example.com", info!.Email);
         Assert.Empty(info.Meters);
         Assert.Equal(DateTime.MinValue, info.FetchedAt);
-        // No fetch ever happened, so there's nothing to call stale.
-        Assert.False(info.IsStale);
     }
 
     // An unknown limit kind is a schema change, not a bug — render it under its raw name instead of
@@ -107,27 +105,57 @@ public class AccountScannerTests
         Assert.Equal("Scoped", info.Meters[1].Label);
     }
 
-    [Fact]
-    public void Usage_older_than_the_threshold_is_flagged_stale()
+    // The API returns the same object the config caches under cachedUsageUtilization.utilization,
+    // so one parser serves both. This is that response, captured live.
+    const string ApiResponse = """
     {
-        Assert.False(new AccountInfo { FetchedAt = DateTime.Now.AddMinutes(-1) }.IsStale);
-        Assert.False(new AccountInfo
-        {
-            FetchedAt = DateTime.Now - AccountInfo.StaleAfter + TimeSpan.FromMinutes(1),
-        }.IsStale);
-        Assert.True(new AccountInfo
-        {
-            FetchedAt = DateTime.Now - AccountInfo.StaleAfter - TimeSpan.FromMinutes(1),
-        }.IsStale);
+      "five_hour": { "utilization": 6.0, "resets_at": "2026-07-22T18:09:59.703915+00:00" },
+      "seven_day": { "utilization": 75.0, "resets_at": "2026-07-25T22:59:59.703935+00:00" },
+      "seven_day_opus": null,
+      "limits": [
+        { "kind": "session", "group": "session", "percent": 6, "severity": "normal",
+          "resets_at": "2026-07-22T18:09:59.703915+00:00", "scope": null, "is_active": false },
+        { "kind": "weekly_all", "group": "weekly", "percent": 75, "severity": "warning",
+          "resets_at": "2026-07-25T22:59:59.703935+00:00", "scope": null, "is_active": false },
+        { "kind": "weekly_scoped", "group": "weekly", "percent": 100, "severity": "critical",
+          "resets_at": "2026-07-25T22:59:59.704193+00:00",
+          "scope": { "model": { "id": null, "display_name": "Fable" }, "surface": null },
+          "is_active": true }
+      ]
+    }
+    """;
+
+    [Fact]
+    public void Api_response_parses_through_the_same_path_as_the_cache()
+    {
+        var live = AccountScanner.ParseApiUsage(ApiResponse);
+
+        Assert.NotNull(live);
+        Assert.Equal(3, live!.Count);
+        Assert.Equal(new[] { "Session", "Week", "Fable" }, live.ConvertAll(m => m.Label));
+        Assert.Equal(new[] { 6, 75, 100 }, live.ConvertAll(m => m.Percent));
+        Assert.Equal(new[] { "normal", "warning", "critical" }, live.ConvertAll(m => m.Severity));
     }
 
-    // Regression: the threshold started at 15 minutes and cried stale during ordinary use — the
-    // cache refresh is activity-driven, and observed gaps ran past 16 minutes with live-but-idle
-    // sessions. A false "stale" on a working box is the worse failure, so keep real headroom.
+    // The two sources must not drift: same limits in, same meters out, whichever door they came
+    // through. Only the percentages differ here (the cache sample is older).
     [Fact]
-    public void Stale_threshold_clears_the_normal_refresh_gap()
+    public void Cache_and_api_agree_on_labels_and_severities()
     {
-        Assert.True(AccountInfo.StaleAfter > TimeSpan.FromMinutes(30));
+        var cached = AccountScanner.Parse(Config)!.Meters;
+        var live = AccountScanner.ParseApiUsage(ApiResponse)!;
+
+        Assert.Equal(cached.ConvertAll(m => m.Label), live.ConvertAll(m => m.Label));
+        Assert.Equal(cached.ConvertAll(m => m.Severity), live.ConvertAll(m => m.Severity));
+    }
+
+    [Fact]
+    public void Api_garbage_is_rejected_rather_than_shown()
+    {
+        Assert.Null(AccountScanner.ParseApiUsage("not json"));
+        Assert.Null(AccountScanner.ParseApiUsage(""));
+        Assert.Null(AccountScanner.ParseApiUsage("[1,2,3]"));          // wrong root kind
+        Assert.Empty(AccountScanner.ParseApiUsage("{}")!);             // valid, just no limits
     }
 
     [Fact]

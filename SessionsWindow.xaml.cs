@@ -23,8 +23,19 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
 
     public ObservableCollection<SessionRow> Rows { get; } = new();
     public ObservableCollection<UsageMeter> Meters { get; } = new();
-    AccountInfo? _account;
+    List<UsageMeter>? _liveMeters;      // last successful API fetch; null until one lands
+    DateTime _liveAt;                   // when that fetch succeeded
+    object? _appliedMeters;             // which list is currently mirrored into Meters
     string _accountText = "";
+    string _usageState = "";
+    string _accountTip = "";
+
+    /// <summary>
+    /// How long after our last successful poll the numbers stop being presentable as current.
+    /// Unlike the thresholds tried against the on-disk cache, this one is derived rather than
+    /// guessed: we own the interval, so this is "two polls in a row failed".
+    /// </summary>
+    static readonly TimeSpan StaleAfter = UsageApi.PollInterval * 2.5;
     internal bool AllowClose;
 
     public SessionsWindow(App app)
@@ -66,6 +77,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         StartWatcher();
         Refresh();
         StartDesktopResolver();
+        StartUsagePolling();
     }
 
     /// <summary>Coalesce a burst of change events into one refresh ~120ms later.</summary>
@@ -419,27 +431,66 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         RefreshAccount();
     }
 
+    /// <summary>Poll the usage endpoint now, then on <see cref="UsageApi.PollInterval"/>.</summary>
+    void StartUsagePolling()
+    {
+        _ = PollUsageAsync();
+        var timer = new DispatcherTimer { Interval = UsageApi.PollInterval };
+        timer.Tick += (_, _) => { _ = PollUsageAsync(); };
+        timer.Start();
+    }
+
+    async System.Threading.Tasks.Task PollUsageAsync()
+    {
+        var meters = await UsageApi.FetchAsync();
+        // A failed call keeps the previous numbers rather than blanking the bar; RefreshAccount
+        // ages them, and two consecutive misses is what surfaces as stale.
+        if (meters == null || meters.Count == 0) return;
+        _liveMeters = meters;
+        _liveAt = DateTime.Now;
+        RefreshAccount();
+    }
+
     /// <summary>
-    /// Repopulate the account/usage bar. The scanner hands back the same instance while the config
-    /// file is untouched, so the meters are rebuilt only on a real change — rebuilding every tick
-    /// would restart the bindings under the cursor and kill any open tooltip.
+    /// Repopulate the account/usage bar. The meters are rebuilt only when the source list actually
+    /// changes — rebuilding every tick would restart the bindings under the cursor and kill any
+    /// open tooltip.
     /// </summary>
     void RefreshAccount()
     {
         var acct = AccountScanner.Read();
-        if (!ReferenceEquals(acct, _account))
+
+        // Live numbers win. The on-disk cache is the fallback for a failed/never-run poll, and is
+        // labelled as cached rather than passed off as current — its age can't be interpreted.
+        bool live = _liveMeters != null;
+        var chosen = live ? _liveMeters! : acct.Meters;
+
+        if (!ReferenceEquals(chosen, _appliedMeters))
         {
-            _account = acct;
+            _appliedMeters = chosen;
             Meters.Clear();
-            foreach (var m in acct.Meters) Meters.Add(m);
-            AccountLabel.ToolTip = acct.Tooltip;
+            foreach (var m in chosen) Meters.Add(m);
         }
 
-        // Staleness is a function of the clock, not the file, so it's re-evaluated every tick.
+        var age = DateTime.Now - _liveAt;
+        bool stale = live && age > StaleAfter;
+
         var text = acct.Email.Length > 0 ? acct.Email : "Not signed in";
-        if (acct.IsStale) text += $"  ·  usage {acct.AgeDisplay} old";
         if (text != _accountText) { _accountText = text; AccountLabel.Text = text; }
-        UsageBar.Opacity = acct.IsStale ? 0.5 : 1.0;
+
+        var state = stale ? $"· {AccountInfo.AgeText(age)} old" : !live ? "· cached" : "";
+        if (state != _usageState) { _usageState = state; UsageStateLabel.Text = state; }
+
+        var tip = acct.Email.Length > 0 ? acct.Email : "Not signed in";
+        if (acct.Organization.Length > 0) tip += $"\n{acct.Organization}";
+        tip += live
+            ? $"\nUsage updated {_liveAt:h:mm tt}"
+            : acct.FetchedAt == DateTime.MinValue
+                ? "\nNo usage data available"
+                : $"\nFrom Claude Code's cache, written {acct.FetchedAt:h:mm tt}";
+        if (tip != _accountTip) { _accountTip = tip; AccountGroup.ToolTip = tip; }
+
+        UsageBar.Opacity = stale ? 0.5 : 1.0;
     }
 
     void Grid_MouseDoubleClick(object sender, MouseButtonEventArgs e)

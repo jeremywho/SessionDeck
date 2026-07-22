@@ -1,8 +1,13 @@
 # ClaudeSessionMonitor — agent guide
 
 Windows system-tray app (**.NET 10, WPF + [WPF-UI](https://github.com/lepoco/wpfui)/Fluent**) that
-lists live local Claude Code sessions, read entirely from `~/.claude/` on disk. `README.md` is the
+lists live local Claude Code sessions, read from `~/.claude/` on disk. `README.md` is the
 user-facing feature tour; this file is for working *on* the code.
+
+**One exception to "all local".** The footer's plan-usage meters come from a network call
+(`UsageApi` → `GET api.anthropic.com/api/oauth/usage`, bearer token read from
+`~/.claude/.credentials.json`). Everything else is still pure disk reads. See *Usage bar* below
+before adding anything else that touches the network or those credentials.
 
 ## Build, run, verify
 ```
@@ -32,6 +37,29 @@ dotnet test Tests\ClaudeSessionMonitor.Tests.csproj
 5. Refresh is **event-driven**: a `FileSystemWatcher` on the sessions dir + a 2s fallback `DispatcherTimer`.
 6. A background **STA thread** tags each row with its virtual desktop every ~8s
    (`VirtualDesktop` + `WindowActivator.ResolveWindows`, which is UIA-heavy — hence off the UI thread).
+
+## Usage bar (`UsageApi.cs`, `AccountScanner.cs`)
+The second footer bar: signed-in address on the left, one fill-behind pill per plan limit on the right.
+- **Account** (email / org) comes from `~/.claude.json` → `oauthAccount`. Note that's `~/.claude.json`,
+  the **file**, not the `~/.claude/` **directory** everything else reads.
+- **Meters** come from the API, polled every 15 min. `~/.claude.json` → `cachedUsageUtilization` is
+  only the **fallback** when a poll fails, and is labelled `· cached` when shown.
+- Both sources hit the same parser: the API response body *is* the object the config caches under
+  `utilization`, so `AccountScanner.ParseLimits` serves both. Keep it that way.
+- Parse the self-describing **`limits` array**, never the `five_hour` / `seven_day_opus` siblings —
+  per-model limits appear *only* in `limits` (as `weekly_scoped` + a model scope) while
+  `seven_day_opus` and friends sit `null`. Each entry carries its own `severity`, so don't invent
+  colour thresholds. The scoped pill is named from `scope.model.display_name` — don't hardcode "Fable".
+- **Don't judge the cache's freshness — it can't be done.** Two thresholds (15 then 45 min) both cried
+  stale during normal use; the cache was measured 52 minutes old while a session ran flat out. It
+  refreshes on nothing observable from outside. This is *why* the app polls: staleness is now measured
+  against **our own** interval (`PollInterval * 2.5` = two missed polls), which is a fact, not a guess.
+- **`.credentials.json` is read-only, always.** It's Claude Code's live auth state; writing it — even
+  to refresh an expired token — can break the user's sign-in. An expired token just means the fetch
+  returns null and the cache shows instead.
+- Layout: the meters are docked **before** the account label (DockPanel allocates in child order), and
+  the address trims before the state note does. Both orderings were bugs first — at the 460px minimum
+  width there is not room for everything.
 
 ## Status → display state (`SessionState.cs`)
 `busy`→Working · `waiting`→Awaiting · `idle`→Completed (green ✓) · `shell`→Working · default→Idle.
@@ -69,8 +97,9 @@ dotnet test Tests\ClaudeSessionMonitor.Tests.csproj
   `Updater.ConfirmStartupOk()` (window up ~6s) and the app is relaunched, the next boot reverts to `.old`.
 - **Test hooks:** `CSM_INSTALL_DIR` (redirect install dir to a temp path), `CSM_NO_INSTALL=1` (skip
   self-install), `CSM_FAKE_UPDATE=<tag>` (force the title-bar button), `CSM_DATA_DIR` (redirect the
-  `active-sessions.json` dir — the unit tests set it). The full download→swap→relaunch cycle can
-  only be truly validated by cutting a real release.
+  `active-sessions.json` dir — the unit tests set it), `CSM_NO_USAGE_API=1` (force the usage fetch to
+  fail, so the cache fallback can be verified without unplugging anything). The full
+  download→swap→relaunch cycle can only be truly validated by cutting a real release.
 - **Version stamping:** release.yml passes `-p:Version=<tag>` so the running assembly version == the
   release tag; the csproj `<Version>` is only the dev default.
 - **Single-file gotcha (this bit us):** dev builds are **framework-dependent** (multi-file); the release

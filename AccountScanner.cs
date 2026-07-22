@@ -46,42 +46,22 @@ internal sealed class AccountInfo
     public List<UsageMeter> Meters = new();
     public DateTime FetchedAt;       // local; MinValue when the file carried no usage cache
 
-    /// <summary>
-    /// The usage block is a *cache* — only a running Claude Code process refreshes it. With no live
-    /// session the numbers sit there going quietly wrong, so past this age we say so in the UI
-    /// rather than present them as current.
-    /// <para>The refresh is activity-driven, not a fixed tick: observed gaps ran ~10 minutes while
-    /// turns were in flight but stretched past 16 with every session sitting idle. 15 minutes was
-    /// tried first and cried stale during ordinary use, so this is set well clear of the idle case —
-    /// a false "stale" on a live box is worse than being slow to flag a genuinely cold one.</para>
-    /// </summary>
-    public static readonly TimeSpan StaleAfter = TimeSpan.FromMinutes(45);
+    // No staleness threshold lives here any more, deliberately. Two were tried against this cache
+    // (15 then 45 minutes) and both cried stale during ordinary use: the refresh answers to nothing
+    // observable from outside — it was caught sitting 52 minutes old while a session was flat out.
+    // Judging this file's freshness means inventing a number, so the app polls the API itself
+    // (UsageApi) and judges freshness against its own interval instead. What's left here is the
+    // fallback for when that call fails, and it reports itself as cached rather than as current.
 
     public TimeSpan Age => FetchedAt == DateTime.MinValue ? TimeSpan.Zero : DateTime.Now - FetchedAt;
-    public bool IsStale => FetchedAt != DateTime.MinValue && Age > StaleAfter;
 
-    /// <summary>
-    /// Hover text for the account label, which ellipsizes on a narrow window. Deliberately carries
-    /// the absolute fetch time rather than a relative age, so the string only changes when the data
-    /// does — re-assigning it every tick would dismiss the tooltip the user is trying to read.
-    /// </summary>
-    public string Tooltip
-    {
-        get
-        {
-            var s = Email.Length > 0 ? Email : "Not signed in";
-            if (Organization.Length > 0) s += $"\n{Organization}";
-            s += FetchedAt == DateTime.MinValue
-                ? "\nNo usage data cached yet"
-                : $"\nUsage last updated {FetchedAt:h:mm tt}";
-            return s;
-        }
-    }
+    public string AgeDisplay => AgeText(Age);
 
-    public string AgeDisplay =>
-        Age.TotalHours >= 24 ? $"{(int)Age.TotalDays}d" :
-        Age.TotalMinutes >= 60 ? $"{(int)Age.TotalHours}h" :
-        $"{(int)Age.TotalMinutes}m";
+    /// <summary>Coarse "how long ago", largest useful unit only.</summary>
+    public static string AgeText(TimeSpan age) =>
+        age.TotalHours >= 24 ? $"{(int)age.TotalDays}d" :
+        age.TotalMinutes >= 60 ? $"{(int)age.TotalHours}h" :
+        $"{(int)age.TotalMinutes}m";
 }
 
 /// <summary>
@@ -150,33 +130,56 @@ internal static class AccountScanner
             if (cache.TryGetProperty("fetchedAtMs", out var f) && f.TryGetInt64(out var ms))
                 info.FetchedAt = DateTimeOffset.FromUnixTimeMilliseconds(ms).LocalDateTime;
 
-            if (!cache.TryGetProperty("utilization", out var util) ||
-                util.ValueKind != JsonValueKind.Object) return info;
-
-            // Read the self-describing `limits` array rather than the sibling `five_hour` /
-            // `seven_day_opus` fields: the per-model limits show up *only* here (as weekly_scoped
-            // with a model scope, while seven_day_opus and friends stay null), and each entry
-            // carries the server's own severity, so nothing here has to guess a threshold.
-            if (!util.TryGetProperty("limits", out var limits) ||
-                limits.ValueKind != JsonValueKind.Array) return info;
-
-            foreach (var l in limits.EnumerateArray())
-            {
-                if (l.ValueKind != JsonValueKind.Object) continue;
-                var kind = Str(l, "kind");
-                var meter = new UsageMeter
-                {
-                    Label = LabelFor(kind, l),
-                    Percent = l.TryGetProperty("percent", out var p) && p.TryGetInt32(out var pv) ? pv : 0,
-                    Severity = Str(l, "severity"),
-                };
-                if (DateTimeOffset.TryParse(Str(l, "resets_at"), out var r))
-                    meter.ResetsAt = r.LocalDateTime;
-                info.Meters.Add(meter);
-            }
+            if (cache.TryGetProperty("utilization", out var util) && util.ValueKind == JsonValueKind.Object)
+                info.Meters = ParseLimits(util);
 
             return info;
         }
+    }
+
+    /// <summary>
+    /// Parses the API's usage response. Its body is the same object the config caches under
+    /// <c>cachedUsageUtilization.utilization</c>, so this is the cache parser pointed at a different
+    /// source. Returns null if the body isn't valid JSON.
+    /// </summary>
+    public static List<UsageMeter>? ParseApiUsage(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            return doc.RootElement.ValueKind == JsonValueKind.Object
+                ? ParseLimits(doc.RootElement)
+                : null;
+        }
+        catch (JsonException) { return null; }
+    }
+
+    /// <summary>
+    /// Reads the self-describing <c>limits</c> array off a utilization object, rather than the
+    /// sibling <c>five_hour</c> / <c>seven_day_opus</c> fields: the per-model limits show up *only*
+    /// here (as weekly_scoped with a model scope, while seven_day_opus and friends stay null), and
+    /// each entry carries the server's own severity, so nothing here has to guess a threshold.
+    /// </summary>
+    static List<UsageMeter> ParseLimits(JsonElement utilization)
+    {
+        var meters = new List<UsageMeter>();
+        if (!utilization.TryGetProperty("limits", out var limits) ||
+            limits.ValueKind != JsonValueKind.Array) return meters;
+
+        foreach (var l in limits.EnumerateArray())
+        {
+            if (l.ValueKind != JsonValueKind.Object) continue;
+            var meter = new UsageMeter
+            {
+                Label = LabelFor(Str(l, "kind"), l),
+                Percent = l.TryGetProperty("percent", out var p) && p.TryGetInt32(out var pv) ? pv : 0,
+                Severity = Str(l, "severity"),
+            };
+            if (DateTimeOffset.TryParse(Str(l, "resets_at"), out var r))
+                meter.ResetsAt = r.LocalDateTime;
+            meters.Add(meter);
+        }
+        return meters;
     }
 
     /// <summary>

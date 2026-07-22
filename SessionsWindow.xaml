@@ -339,9 +339,18 @@
                 </DataTemplate>
               </ItemsControl.ItemTemplate>
             </ItemsControl>
-            <TextBlock x:Name="AccountLabel" DockPanel.Dock="Left" VerticalAlignment="Center" FontSize="11.5"
-                       Margin="0,0,10,0" Foreground="{DynamicResource Fg3Brush}"
-                       TextTrimming="CharacterEllipsis"/>
+            <!-- The address trims, the state note does not: at the minimum window width there isn't
+                 room for both, and "cached" / "42m old" is the part that changes what you trust. -->
+            <Grid x:Name="AccountGroup" DockPanel.Dock="Left" VerticalAlignment="Center" Margin="0,0,10,0">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+              </Grid.ColumnDefinitions>
+              <TextBlock x:Name="AccountLabel" Grid.Column="0" VerticalAlignment="Center" FontSize="11.5"
+                         Foreground="{DynamicResource Fg3Brush}" TextTrimming="CharacterEllipsis"/>
+              <TextBlock x:Name="UsageStateLabel" Grid.Column="1" VerticalAlignment="Center" FontSize="11.5"
+                         Margin="6,0,0,0" Foreground="{DynamicResource Fg3Brush}"/>
+            </Grid>
           </DockPanel>
         </Border>
 
