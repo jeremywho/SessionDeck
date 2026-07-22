@@ -300,13 +300,22 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     // ---------------- theme / on-top ----------------
 
     void NewSessionButton_Click(object sender, RoutedEventArgs e) =>
-        SessionLauncher.LaunchNew(null, _app.Settings.ResumeFlags);
+        SessionLauncher.LaunchNew(null, _app.Settings.ResumeFlags, LaunchTarget.NewWindow);
 
-    void NewNamedSessionButton_Click(object sender, RoutedEventArgs e)
+    void NewTabButton_Click(object sender, RoutedEventArgs e) =>
+        SessionLauncher.LaunchNew(null, _app.Settings.ResumeFlags, LaunchTarget.LastWindow);
+
+    void NewNamedSessionButton_Click(object sender, RoutedEventArgs e) =>
+        PromptThenLaunch(LaunchTarget.NewWindow);
+
+    void NewNamedTabButton_Click(object sender, RoutedEventArgs e) =>
+        PromptThenLaunch(LaunchTarget.LastWindow);
+
+    void PromptThenLaunch(LaunchTarget target)
     {
         var prompt = new NamePromptWindow(this);
         if (prompt.ShowDialog() == true)
-            SessionLauncher.LaunchNew(prompt.SessionName, _app.Settings.ResumeFlags);
+            SessionLauncher.LaunchNew(prompt.SessionName, _app.Settings.ResumeFlags, target);
     }
 
     void SettingsButton_Click(object sender, RoutedEventArgs e) => _app.ShowSettings();

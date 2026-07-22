@@ -2,7 +2,17 @@ using System.Diagnostics;
 
 namespace ClaudeSessionMonitor;
 
-/// <summary>Opens claude sessions in a new Windows Terminal window — resumed or brand-new.</summary>
+/// <summary>Where a launched session's terminal should land.</summary>
+internal enum LaunchTarget
+{
+    /// <summary>Its own new Windows Terminal window.</summary>
+    NewWindow,
+
+    /// <summary>A new tab in the terminal window you used last.</summary>
+    LastWindow,
+}
+
+/// <summary>Opens claude sessions in Windows Terminal — resumed or brand-new.</summary>
 internal static class SessionLauncher
 {
     public static bool Resume(SavedSession s, string extraFlags)
@@ -17,11 +27,13 @@ internal static class SessionLauncher
         if (!string.IsNullOrWhiteSpace(extraFlags))
             cmd += " " + extraFlags.Trim();
 
-        return Start(cwd, cmd);
+        // Restores always get their own window: a restore can fire several at once, and stacking
+        // them as tabs in whatever window you were using would bury it.
+        return Start(cwd, cmd, LaunchTarget.NewWindow);
     }
 
     /// <summary>Start a brand-new claude session (optionally named) in the user's home directory.</summary>
-    public static bool LaunchNew(string? name, string extraFlags)
+    public static bool LaunchNew(string? name, string extraFlags, LaunchTarget target)
     {
         string cmd = "claude";
         if (!string.IsNullOrWhiteSpace(name))
@@ -29,23 +41,28 @@ internal static class SessionLauncher
         if (!string.IsNullOrWhiteSpace(extraFlags))
             cmd += " " + extraFlags.Trim();
 
-        return Start(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), cmd);
+        return Start(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), cmd, target);
     }
 
-    /// <summary>Run `pwsh -NoExit -Command <cmd>` in a new terminal window at cwd. The pwsh
-    /// wrapper keeps the tab open (and shows any error) after claude exits.</summary>
-    static bool Start(string cwd, string cmd)
+    /// <summary>Run `pwsh -NoExit -Command <cmd>` in a terminal at cwd. The pwsh wrapper keeps the
+    /// tab open (and shows any error) after claude exits.</summary>
+    static bool Start(string cwd, string cmd, LaunchTarget target)
     {
-        // Preferred: a new Windows Terminal window.
+        // Preferred: Windows Terminal. `-w -1` forces a new window; `-w 0` targets its most recently
+        // used window — verified to follow the last *focused* terminal, not the invoking one, which
+        // is what makes it the right answer when the click comes from this app's window.
         try
         {
+            string window = target == LaunchTarget.NewWindow ? "-1" : "0";
             var wt = new ProcessStartInfo("wt.exe") { UseShellExecute = false };
-            foreach (var a in new[] { "-w", "-1", "new-tab", "-d", cwd, "pwsh", "-NoExit", "-Command", cmd })
+            foreach (var a in new[] { "-w", window, "new-tab", "-d", cwd, "pwsh", "-NoExit", "-Command", cmd })
                 wt.ArgumentList.Add(a);
             Process.Start(wt);
             return true;
         }
         catch { /* Windows Terminal not available — fall back to a bare pwsh window */ }
+
+        // No Windows Terminal means no tabs to open, so a LastWindow request degrades to a window.
 
         try
         {
