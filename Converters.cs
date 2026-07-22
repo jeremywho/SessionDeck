@@ -23,6 +23,49 @@ internal sealed class PctToBrushConverter : IValueConverter
         => Binding.DoNothing;
 }
 
+/// <summary>
+/// Server-reported usage severity -> themed brush. The server owns the thresholds, so unlike
+/// <see cref="PctToBrushConverter"/> this maps a label rather than picking a cutoff; an unknown
+/// severity falls back to the neutral color.
+/// <para>ConverterParameter "text" brightens the "normal" case: the neutral bar color is dim by
+/// design as a fill, but as a numeral it ends up dimmer than the label beside it — which reads
+/// backwards, since the number is the point.</para>
+/// </summary>
+internal sealed class SeverityToBrushConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+    {
+        string neutral = (parameter as string) == "text" ? "FgBrush" : "BarBrush";
+        string key = (value as string) switch
+        {
+            "critical" => "RedBrush",
+            "warning" => "AmberBrush",
+            _ => neutral,
+        };
+        return (Application.Current?.TryFindResource(key) as Brush) ?? Brushes.Gray;
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        => Binding.DoNothing;
+}
+
+/// <summary>
+/// Percent -> a star <see cref="GridLength"/>, so a two-column Grid draws a proportional fill
+/// without anyone measuring a pixel. ConverterParameter "rest" yields the complement.
+/// </summary>
+internal sealed class PctToStarConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+    {
+        double pct = value is int i ? Math.Clamp(i, 0, 100) : 0;
+        if ((parameter as string) == "rest") pct = 100 - pct;
+        return new GridLength(pct, GridUnitType.Star);
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        => Binding.DoNothing;
+}
+
 /// <summary>Virtual-desktop index -> a subtle dot color (non-status hues). -1 => transparent (no dot).</summary>
 internal sealed class DesktopColorConverter : IValueConverter
 {

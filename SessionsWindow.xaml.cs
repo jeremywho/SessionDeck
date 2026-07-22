@@ -22,6 +22,9 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     ContextMenu _columnsMenu = new();
 
     public ObservableCollection<SessionRow> Rows { get; } = new();
+    public ObservableCollection<UsageMeter> Meters { get; } = new();
+    AccountInfo? _account;
+    string _accountText = "";
     internal bool AllowClose;
 
     public SessionsWindow(App app)
@@ -412,6 +415,31 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         _sessionsSnapshot = live.ToArray();
 
         LiveLabel.Text = $"{live.Count} live session{(live.Count == 1 ? "" : "s")}";
+
+        RefreshAccount();
+    }
+
+    /// <summary>
+    /// Repopulate the account/usage bar. The scanner hands back the same instance while the config
+    /// file is untouched, so the meters are rebuilt only on a real change — rebuilding every tick
+    /// would restart the bindings under the cursor and kill any open tooltip.
+    /// </summary>
+    void RefreshAccount()
+    {
+        var acct = AccountScanner.Read();
+        if (!ReferenceEquals(acct, _account))
+        {
+            _account = acct;
+            Meters.Clear();
+            foreach (var m in acct.Meters) Meters.Add(m);
+            AccountLabel.ToolTip = acct.Tooltip;
+        }
+
+        // Staleness is a function of the clock, not the file, so it's re-evaluated every tick.
+        var text = acct.Email.Length > 0 ? acct.Email : "Not signed in";
+        if (acct.IsStale) text += $"  ·  usage {acct.AgeDisplay} old";
+        if (text != _accountText) { _accountText = text; AccountLabel.Text = text; }
+        UsageBar.Opacity = acct.IsStale ? 0.5 : 1.0;
     }
 
     void Grid_MouseDoubleClick(object sender, MouseButtonEventArgs e)

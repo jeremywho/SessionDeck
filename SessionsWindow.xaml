@@ -16,6 +16,8 @@
   <ui:FluentWindow.Resources>
     <local:PctToBrushConverter x:Key="PctToBrush"/>
     <local:DesktopColorConverter x:Key="DesktopColor"/>
+    <local:SeverityToBrushConverter x:Key="SeverityToBrush"/>
+    <local:PctToStarConverter x:Key="PctToStar"/>
     <BooleanToVisibilityConverter x:Key="BoolToVis"/>
 
     <!-- status glyph: disc/ring + check + spinner, driven by SessionState -->
@@ -121,6 +123,7 @@
         </Grid.LayoutTransform>
         <Grid.RowDefinitions>
           <RowDefinition Height="*"/>
+          <RowDefinition Height="Auto"/>
           <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
@@ -294,6 +297,51 @@
                            Foreground="{DynamicResource Fg2Brush}"/>
               </StackPanel>
             </StackPanel>
+          </DockPanel>
+        </Border>
+
+        <!-- account + plan usage, read from ~/.claude.json (not ~/.claude/) — see AccountScanner -->
+        <Border x:Name="UsageBar" Grid.Row="2" Background="{DynamicResource TitlebarBrush}"
+                BorderBrush="{DynamicResource Border2Brush}" BorderThickness="0,1,0,0" Padding="18,7">
+          <!-- The meters are docked FIRST so they always get their width; DockPanel hands space out
+               in child order, and with the account label first a long address clipped the last pill. -->
+          <DockPanel LastChildFill="False">
+            <ItemsControl DockPanel.Dock="Right" ItemsSource="{Binding Meters}" VerticalAlignment="Center">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Border MinWidth="88" Height="21" Margin="7,0,0,0" CornerRadius="10"
+                          Background="{DynamicResource TrackBrush}" ToolTip="{Binding Tooltip}"
+                          ToolTipService.InitialShowDelay="250">
+                    <Grid>
+                      <!-- proportional fill. It's a translucent wash rather than a solid severity
+                           color so the label on top stays legible in both themes. -->
+                      <Grid>
+                        <Grid.ColumnDefinitions>
+                          <ColumnDefinition Width="{Binding Percent, Converter={StaticResource PctToStar}}"/>
+                          <ColumnDefinition Width="{Binding Percent, Converter={StaticResource PctToStar}, ConverterParameter=rest}"/>
+                        </Grid.ColumnDefinitions>
+                        <Border Grid.Column="0" CornerRadius="10" Opacity="0.32"
+                                Background="{Binding Severity, Converter={StaticResource SeverityToBrush}}"/>
+                      </Grid>
+                      <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                  Margin="9,0">
+                        <TextBlock Text="{Binding Label}" FontSize="11" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource Fg2Brush}"/>
+                        <TextBlock Text="{Binding PercentDisplay}" FontSize="11" FontWeight="SemiBold"
+                                   Margin="5,0,0,0" VerticalAlignment="Center"
+                                   Foreground="{Binding Severity, Converter={StaticResource SeverityToBrush}, ConverterParameter=text}"/>
+                      </StackPanel>
+                    </Grid>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <TextBlock x:Name="AccountLabel" DockPanel.Dock="Left" VerticalAlignment="Center" FontSize="11.5"
+                       Margin="0,0,10,0" Foreground="{DynamicResource Fg3Brush}"
+                       TextTrimming="CharacterEllipsis"/>
           </DockPanel>
         </Border>
 
