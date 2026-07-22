@@ -191,7 +191,10 @@ internal static class AccountScanner
     {
         switch (kind)
         {
-            case "session": return "Session";
+            // "5h", not "Session": the window it means is the one thing you want at a glance, and
+            // the server's own `five_hour` field carries the same percent and reset time as this
+            // limit. "Session" read as ambiguous next to a weekly pill.
+            case "session": return "5h";
             case "weekly_all": return "Week";
             case "weekly_scoped":
                 if (limit.TryGetProperty("scope", out var scope) && scope.ValueKind == JsonValueKind.Object &&

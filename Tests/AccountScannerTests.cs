@@ -45,7 +45,7 @@ public class AccountScannerTests
         Assert.Equal("someone@example.com", info!.Email);
         Assert.Equal(3, info.Meters.Count);
 
-        Assert.Equal("Session", info.Meters[0].Label);
+        Assert.Equal("5h", info.Meters[0].Label);
         Assert.Equal(3, info.Meters[0].Percent);
         Assert.Equal("normal", info.Meters[0].Severity);
 
@@ -132,7 +132,7 @@ public class AccountScannerTests
 
         Assert.NotNull(live);
         Assert.Equal(3, live!.Count);
-        Assert.Equal(new[] { "Session", "Week", "Fable" }, live.ConvertAll(m => m.Label));
+        Assert.Equal(new[] { "5h", "Week", "Fable" }, live.ConvertAll(m => m.Label));
         Assert.Equal(new[] { 6, 75, 100 }, live.ConvertAll(m => m.Percent));
         Assert.Equal(new[] { "normal", "warning", "critical" }, live.ConvertAll(m => m.Severity));
     }
