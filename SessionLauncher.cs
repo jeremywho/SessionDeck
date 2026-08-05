@@ -90,33 +90,102 @@ internal static class SessionLauncher
 
     static string Home => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
-    /// <summary>Run `pwsh -NoExit -Command <cmd>` in a terminal at cwd. The pwsh wrapper keeps the
-    /// tab open (and shows any error) after claude exits.</summary>
+    // ---------------------------------------------------------------- inherited environment
+
+    /// <summary>
+    /// Variables that switch colored output OFF in the CLIs we launch. We start terminals with
+    /// <c>UseShellExecute=false</c>, so the child inherits OUR environment — meaning anything that set
+    /// one of these on this app silently strips the color out of every session it opens.
+    /// <para>This is not hypothetical: an agent harness that sets <c>NO_COLOR=1</c> for clean tool
+    /// output relaunched this app as a child, and from then on every terminal it opened was monochrome.
+    /// The app's own code was untouched, which is exactly why it was hard to see.</para>
+    /// </summary>
+    static readonly string[] ColorKillSwitches = { "NO_COLOR" };
+
+    /// <summary>
+    /// True when a variable is set on THIS process but is not persisted for the user or the machine —
+    /// i.e. whatever launched us injected it, and it is not a preference anyone chose.
+    /// <para>The distinction is the whole point: someone who genuinely sets <c>NO_COLOR</c> in their
+    /// user environment wants no color and must keep getting none, so only the injected case is dropped.</para>
+    /// </summary>
+    public static bool WasInjectedIntoThisProcess(string? processValue, string? userValue, string? machineValue)
+        => !string.IsNullOrEmpty(processValue)
+           && string.IsNullOrEmpty(userValue)
+           && string.IsNullOrEmpty(machineValue);
+
+    /// <summary>Which color kill-switches our own process picked up from whatever launched it.</summary>
+    static IEnumerable<string> InjectedColorKillSwitches()
+    {
+        foreach (var name in ColorKillSwitches)
+        {
+            string? process, user = null, machine = null;
+            try
+            {
+                process = Environment.GetEnvironmentVariable(name);
+                if (string.IsNullOrEmpty(process)) continue;
+                user = Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.User);
+                machine = Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.Machine);
+            }
+            catch { continue; }   // registry read denied — leave the child's environment alone
+            if (WasInjectedIntoThisProcess(process, user, machine)) yield return name;
+        }
+    }
+
+    /// <summary>Remove variables from the child's copy of the environment. Named explicitly so tests
+    /// can drive it without depending on the machine's real environment.</summary>
+    public static void StripFromChild(ProcessStartInfo psi, IEnumerable<string> names)
+    {
+        foreach (var name in names) psi.Environment.Remove(name);
+    }
+
+    // ---------------------------------------------------------------- process start
+
+    /// <summary>
+    /// The Windows Terminal invocation: `wt -w <window> new-tab -d <cwd> pwsh -NoExit -Command <cmd>`.
+    /// `-w -1` forces a new window; `-w 0` targets its most recently used window — verified to follow
+    /// the last *focused* terminal, not the invoking one, which is what makes it the right answer when
+    /// the click comes from this app's window. The pwsh wrapper keeps the tab open (and shows any
+    /// error) after the CLI exits.
+    /// </summary>
+    public static ProcessStartInfo BuildTerminalStart(string cwd, string cmd, LaunchTarget target,
+                                                      IEnumerable<string>? strip = null)
+    {
+        string window = target == LaunchTarget.NewWindow ? "-1" : "0";
+        var psi = new ProcessStartInfo("wt.exe") { UseShellExecute = false };
+        foreach (var a in new[] { "-w", window, "new-tab", "-d", cwd, "pwsh", "-NoExit", "-Command", cmd })
+            psi.ArgumentList.Add(a);
+        StripFromChild(psi, strip ?? InjectedColorKillSwitches());
+        return psi;
+    }
+
+    /// <summary>
+    /// Fallback for machines without Windows Terminal: a bare pwsh window. <c>UseShellExecute</c> is
+    /// FALSE here even though nothing is redirected — it's the only mode that lets us edit the child's
+    /// environment, and a console app started this way from a GUI process still gets its own window.
+    /// </summary>
+    public static ProcessStartInfo BuildFallbackStart(string cwd, string cmd, IEnumerable<string>? strip = null)
+    {
+        var psi = new ProcessStartInfo("pwsh.exe") { UseShellExecute = false, WorkingDirectory = cwd };
+        psi.ArgumentList.Add("-NoExit");
+        psi.ArgumentList.Add("-Command");
+        psi.ArgumentList.Add(cmd);
+        StripFromChild(psi, strip ?? InjectedColorKillSwitches());
+        return psi;
+    }
+
     static bool Start(string cwd, string cmd, LaunchTarget target)
     {
-        // Preferred: Windows Terminal. `-w -1` forces a new window; `-w 0` targets its most recently
-        // used window — verified to follow the last *focused* terminal, not the invoking one, which
-        // is what makes it the right answer when the click comes from this app's window.
         try
         {
-            string window = target == LaunchTarget.NewWindow ? "-1" : "0";
-            var wt = new ProcessStartInfo("wt.exe") { UseShellExecute = false };
-            foreach (var a in new[] { "-w", window, "new-tab", "-d", cwd, "pwsh", "-NoExit", "-Command", cmd })
-                wt.ArgumentList.Add(a);
-            Process.Start(wt);
+            Process.Start(BuildTerminalStart(cwd, cmd, target));
             return true;
         }
         catch { /* Windows Terminal not available — fall back to a bare pwsh window */ }
 
         // No Windows Terminal means no tabs to open, so a LastWindow request degrades to a window.
-
         try
         {
-            var ps = new ProcessStartInfo("pwsh.exe") { UseShellExecute = true, WorkingDirectory = cwd };
-            ps.ArgumentList.Add("-NoExit");
-            ps.ArgumentList.Add("-Command");
-            ps.ArgumentList.Add(cmd);
-            Process.Start(ps);
+            Process.Start(BuildFallbackStart(cwd, cmd));
             return true;
         }
         catch { return false; }

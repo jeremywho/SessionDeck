@@ -108,6 +108,19 @@ The second footer bar: signed-in address on the left, one fill-behind pill per p
 **Error** is *not* a status — it's read from the transcript (`isApiErrorMessage`) and sorts to the top.
 
 ## Gotchas (don't rediscover these)
+- **Launched terminals inherit THIS app's environment.** `Start` uses `UseShellExecute=false`, so
+  whatever environment the app was started with is handed to every session it opens. An agent harness
+  that sets **`NO_COLOR=1`** for clean tool output relaunched the app as a child, and from then on
+  every session opened from the buttons was monochrome — with *no code change anywhere*, which is
+  precisely why it was hard to find. `SessionLauncher` now drops such variables from the child, but
+  only when they were **injected** (set on the process, persisted in neither the User nor Machine
+  environment) — someone who genuinely sets `NO_COLOR` still gets no color. Covered by
+  `LaunchEnvironmentTests`; verified those tests fail when the scrub is removed.
+  **Practical note for agents: don't relaunch the user's app from your own shell** — it inherits your
+  environment. Clear the offending variable first, or let the user start it.
+- **`;` is Windows Terminal's subcommand separator.** A command containing one gets split across
+  multiple tabs rather than passed through (seen for real: a five-statement diagnostic became five
+  tabs). Today's commands have no semicolons; anything that templates flags in must keep it that way.
 - **An `Auto` column that can collapse will move everything beside it.** The subagent badge's column
   did exactly that: it measured to zero on rows with no agents, so the model pill sat further right
   there than on rows with a badge, and pills visibly jumped as agents came and went. Its slot is now
