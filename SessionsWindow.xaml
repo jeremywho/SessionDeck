@@ -273,7 +273,10 @@
                buttons have no Codex equivalent to point at. -->
           <StackPanel>
             <StackPanel Orientation="Horizontal">
-              <TextBlock Text="✳" FontSize="10" VerticalAlignment="Center" Margin="4,0,7,0"
+              <!-- Fixed width, not auto: ✳ and ◆ measure differently, and letting each row's glyph set
+                   its own width knocked the two rows ~4px out of alignment with each other. -->
+              <TextBlock Text="✳" FontSize="10" Width="12" TextAlignment="Center"
+                         VerticalAlignment="Center" Margin="4,0,7,0"
                          ToolTip="Claude Code" Foreground="{DynamicResource ClaudeMarkBrush}"/>
               <ui:Button x:Name="NewSessionButton" Appearance="Transparent" BorderThickness="0" MinHeight="0" MaxHeight="30" Width="36" Padding="0"
                          VerticalAlignment="Center" VerticalContentAlignment="Center" FontSize="15"
@@ -305,13 +308,19 @@
             <Border Height="1" Margin="4,5,4,5" Opacity="0.4" Background="{DynamicResource Fg3Brush}"/>
 
             <StackPanel Orientation="Horizontal">
-              <TextBlock Text="◆" FontSize="10" VerticalAlignment="Center" Margin="4,0,7,0"
+              <TextBlock Text="◆" FontSize="10" Width="12" TextAlignment="Center"
+                         VerticalAlignment="Center" Margin="4,0,7,0"
                          ToolTip="Codex" Foreground="{DynamicResource CodexMarkBrush}"/>
               <ui:Button x:Name="NewCodexSessionButton" Appearance="Transparent" BorderThickness="0" MinHeight="0" MaxHeight="30" Width="36" Padding="0"
                          VerticalAlignment="Center" VerticalContentAlignment="Center" FontSize="15"
                          Click="NewCodexSessionButton_Click" ToolTip="New Codex session — new window">
                 <ui:Button.Icon><ui:SymbolIcon Symbol="WindowNew24"/></ui:Button.Icon>
               </ui:Button>
+
+              <!-- Empty stand-in for Claude's "named" button. Not dead markup: it holds the Codex row's
+                   divider and tab button in the same columns as the row above, which is the only reason
+                   the two rows read as a grid. Its width must track the buttons' (36 + 2 margin). -->
+              <Border Width="36" Margin="2,0,0,0" Background="Transparent" IsHitTestVisible="False"/>
 
               <Border Width="1" Margin="7,4,7,4" Opacity="0.55" Background="{DynamicResource Fg3Brush}"/>
 

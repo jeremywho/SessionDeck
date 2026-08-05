@@ -118,6 +118,10 @@ The second footer bar: signed-in address on the left, one fill-behind pill per p
   `LaunchEnvironmentTests`; verified those tests fail when the scrub is removed.
   **Practical note for agents: don't relaunch the user's app from your own shell** — it inherits your
   environment. Clear the offending variable first, or let the user start it.
+- **The launcher's two rows are aligned by hand, and both mechanisms look deletable.** The Codex row
+  carries an empty 36px `Border` where Claude's "named" button sits, and both provider glyphs have a
+  fixed `Width` because `✳` and `◆` measure differently (~4px, enough to visibly skew the rows). Remove
+  either and the rows stop lining up.
 - **`;` is Windows Terminal's subcommand separator.** A command containing one gets split across
   multiple tabs rather than passed through (seen for real: a five-statement diagnostic became five
   tabs). Today's commands have no semicolons; anything that templates flags in must keep it that way.
