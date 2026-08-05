@@ -74,6 +74,27 @@ public class ResumeCommandTests
     }
 
     [Fact]
+    public void A_new_claude_session_can_be_named_at_launch()
+    {
+        Assert.Equal("claude", SessionLauncher.NewCommand(null, ""));
+        Assert.Equal("claude --name 'sweep'", SessionLauncher.NewCommand("sweep", ""));
+        Assert.Equal("claude --name 'sweep' --dangerously-skip-permissions",
+            SessionLauncher.NewCommand("sweep", "--dangerously-skip-permissions"));
+    }
+
+    // `codex --name x` fails outright ("unexpected argument '--name' found") -- a Codex thread is
+    // named from inside the TUI after it starts. That's why the Codex launcher row has no named
+    // buttons, and why this command builder takes no name to begin with.
+    [Fact]
+    public void A_new_codex_session_takes_flags_but_no_name()
+    {
+        Assert.Equal("codex", SessionLauncher.NewCodexCommand(""));
+        Assert.Equal("codex --dangerously-bypass-approvals-and-sandbox",
+            SessionLauncher.NewCodexCommand("  --dangerously-bypass-approvals-and-sandbox  "));
+        Assert.DoesNotContain("--name", SessionLauncher.NewCodexCommand("--some-flag"));
+    }
+
+    [Fact]
     public void Provider_round_trips_through_the_registry_file_as_a_readable_name()
     {
         string json = JsonSerializer.Serialize(new List<SavedSession> { Codex() });

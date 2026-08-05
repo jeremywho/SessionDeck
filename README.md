@@ -50,9 +50,15 @@ The **title bar** holds a **settings** gear (opens the Settings window) and an *
 (accents when active), beside the min/max/close buttons. The Dark/Light Fluent theme is chosen in
 Settings and remembered.
 
-Two **new-session buttons** float over the lower right of the session list: **+** starts a fresh
-claude in a new terminal; the **rename** icon first prompts for a name and passes `--name`; both
-append the Claude flags from Settings.
+A **new-session launcher** floats over the lower right of the session list, one row per CLI, each led
+by its provider mark. In both rows the left group opens a **new window** and the right group a **new
+tab** in the terminal you used last; each appends that CLI's flags from Settings.
+
+- **✳ Claude** — four buttons: plain and named in each group (the **rename** icon prompts first and
+  passes `--name`).
+- **◆ Codex** — two buttons, plain only. `codex` has **no name argument** — it rejects one outright —
+  because a Codex thread is named from inside the TUI once it's running, so the named variants have no
+  Codex equivalent.
 
 ## Columns
 The four columns above are the default. **Right-click any column header** to show/hide extra fields
@@ -241,6 +247,5 @@ started last week can be the one live in front of you.
 
 ## Ideas / next
 - AppBar docking (reserve screen space, taskbar-style) instead of floating.
-- Launch buttons for new **Codex** sessions (today they're Claude-only); restore for `codex exec` threads,
-  if there's ever a reason to want one back.
+- A Codex **resume-last / picker** button (`codex resume --last`), which has no Claude counterpart.
 - Quick filter box (incl. by provider); cumulative token totals.

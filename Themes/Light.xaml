@@ -17,4 +17,7 @@
   <SolidColorBrush x:Key="BlueBrush"         Color="#2F7FE0"/>
   <SolidColorBrush x:Key="SlateBrush"        Color="#6C727C"/>
   <SolidColorBrush x:Key="RedBrush"          Color="#CF4B32"/>
+  <!-- provider marks: darker than the dark theme's, or they wash out on the near-white track -->
+  <SolidColorBrush x:Key="ClaudeMarkBrush"   Color="#B45430"/>
+  <SolidColorBrush x:Key="CodexMarkBrush"    Color="#0B7D60"/>
 </ResourceDictionary>

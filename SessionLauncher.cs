@@ -56,16 +56,39 @@ internal static class SessionLauncher
     }
 
     /// <summary>Start a brand-new claude session (optionally named) in the user's home directory.</summary>
-    public static bool LaunchNew(string? name, string extraFlags, LaunchTarget target)
+    public static bool LaunchNew(string? name, string extraFlags, LaunchTarget target) =>
+        Start(Home, NewCommand(name, extraFlags), target);
+
+    /// <summary>Start a brand-new codex session in the user's home directory.</summary>
+    public static bool LaunchNewCodex(string extraFlags, LaunchTarget target) =>
+        Start(Home, NewCodexCommand(extraFlags), target);
+
+    /// <summary>Test seam: the command a new-session button runs.</summary>
+    public static string NewCommand(string? name, string extraFlags)
     {
         string cmd = "claude";
         if (!string.IsNullOrWhiteSpace(name))
             cmd += $" --name '{name.Replace("'", "''")}'";
         if (!string.IsNullOrWhiteSpace(extraFlags))
             cmd += " " + extraFlags.Trim();
-
-        return Start(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), cmd, target);
+        return cmd;
     }
+
+    /// <summary>
+    /// Test seam: the command a new-Codex-session button runs. There is deliberately no name
+    /// parameter — <c>codex</c> has no <c>--name</c> (it rejects the argument outright); a Codex thread
+    /// is named from inside the TUI, after it starts. That's why the Codex launcher row is two buttons
+    /// where Claude's is four.
+    /// </summary>
+    public static string NewCodexCommand(string extraFlags)
+    {
+        string cmd = "codex";
+        if (!string.IsNullOrWhiteSpace(extraFlags))
+            cmd += " " + extraFlags.Trim();
+        return cmd;
+    }
+
+    static string Home => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
     /// <summary>Run `pwsh -NoExit -Command <cmd>` in a terminal at cwd. The pwsh wrapper keeps the
     /// tab open (and shows any error) after claude exits.</summary>

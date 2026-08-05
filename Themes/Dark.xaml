@@ -17,4 +17,7 @@
   <SolidColorBrush x:Key="BlueBrush"         Color="#4F9BF0"/>
   <SolidColorBrush x:Key="SlateBrush"        Color="#828892"/>
   <SolidColorBrush x:Key="RedBrush"          Color="#E2664E"/>
+  <!-- provider marks: brand hues, tuned per theme so they read on the pill's track color -->
+  <SolidColorBrush x:Key="ClaudeMarkBrush"   Color="#E08463"/>
+  <SolidColorBrush x:Key="CodexMarkBrush"    Color="#2AC79E"/>
 </ResourceDictionary>

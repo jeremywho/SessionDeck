@@ -126,7 +126,10 @@ The second footer bar: signed-in address on the left, one fill-behind pill per p
   `Toggleable` (extra) columns persist width; curated columns keep their XAML widths.
 - **Theme swap:** `App.ToggleTheme` swaps the palette dictionary **and** calls
   `_window.RefreshAfterThemeChange()` to re-run the Context% brush converter. A converter-resolved
-  brush won't re-theme on its own.
+  brush won't re-theme on its own. The provider marks avoid that entirely where they can: the hues
+  live in the theme dictionaries (`ClaudeMarkBrush` / `CodexMarkBrush`), so the static launcher glyphs
+  bind them by `DynamicResource` and re-theme for free; only the per-row bindings go through
+  `ProviderColorConverter`.
 - **`ShowInTaskbar=false`** hides the taskbar button via a hidden **owner window** (WPF mechanism), not
   `WS_EX_TOOLWINDOW` — check `GW_OWNER`, not the ex-style, if you're verifying it.
 - **`shell` status** = background bash shells running while the agent "holds" idle → it's **Working**,
@@ -142,6 +145,10 @@ The second footer bar: signed-in address on the left, one fill-behind pill per p
   settings for the same reason: nothing is spelled the same, so Claude's
   `--dangerously-skip-permissions` handed to codex just exits on an unknown argument. Assert the shape
   via `SessionLauncher.ResumeCommand`, which exists so this can be tested without launching anything.
+- **`codex` has no name argument at all** — `codex --name x` fails with "unexpected argument"; a thread
+  is named from inside the TUI after it starts. So the launcher's Codex row is two buttons where
+  Claude's is four, and `NewCodexCommand` takes no name parameter. Don't "fix" the asymmetry by
+  inventing a flag.
 - **What counts as restorable differs too**: Claude's `Kind == "interactive"`, Codex's `Kind == "tui"`.
   A `codex exec` thread is a headless one-shot from a script or agent — reopening one in a terminal
   restarts somebody's automation instead of restoring work. See `SessionsWindow.IsRestorable`.

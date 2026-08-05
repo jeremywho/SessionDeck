@@ -328,6 +328,13 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     void NewTabButton_Click(object sender, RoutedEventArgs e) =>
         SessionLauncher.LaunchNew(null, _app.Settings.ResumeFlags, LaunchTarget.LastWindow);
 
+    // Codex has no --name, so there are no named counterparts to these two — see NewCodexCommand.
+    void NewCodexSessionButton_Click(object sender, RoutedEventArgs e) =>
+        SessionLauncher.LaunchNewCodex(_app.Settings.CodexFlags, LaunchTarget.NewWindow);
+
+    void NewCodexTabButton_Click(object sender, RoutedEventArgs e) =>
+        SessionLauncher.LaunchNewCodex(_app.Settings.CodexFlags, LaunchTarget.LastWindow);
+
     void NewNamedSessionButton_Click(object sender, RoutedEventArgs e) =>
         PromptThenLaunch(LaunchTarget.NewWindow);
 
