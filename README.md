@@ -100,16 +100,29 @@ self-installs or self-updates. (Test hooks: `CSM_INSTALL_DIR` redirects the inst
 
 ## Session restore
 The app keeps `%APPDATA%\ClaudeSessionMonitor\active-sessions.json` in sync with the live interactive
-sessions (snapshot-on-change). If the machine crashes or reboots, that file still holds whatever was
-running — so on the next launch the app offers a **restore picker**: a checklist of the sessions that
-were running but aren't now, reopening each selected one in a new Windows Terminal window via
-`claude --resume <id> --name <name>` in its original folder. Also available any time from the tray
-(**Restore sessions…**).
+sessions of **both** CLIs (snapshot-on-change). If the machine crashes or reboots, that file still holds
+whatever was running — so on the next launch the app offers a **restore picker**: a checklist of the
+sessions that were running but aren't now, each marked with its provider, reopening the selected ones in
+new Windows Terminal windows in their original folders:
+
+| | Reopened with |
+|---|---|
+| **✳ Claude** | `claude --resume <id> --name <name>` |
+| **◆ Codex** | `codex resume <id>` — no `--name`, because on Codex's side the name already belongs to the thread |
+
+Also available any time from the tray (**Restore sessions…**).
+
+Only sessions **you were sitting in front of** are recorded: Claude's `interactive` kind and Codex's TUI.
+A `codex exec` thread is a headless one-shot fired by a script or an agent, so reopening one in a terminal
+would restart somebody's automation rather than restore your work.
 
 **Settings** — from the title-bar gear or the tray (**Settings…**) — holds the **theme** (Dark/Light),
 **Show in taskbar** (turn off to live in the tray only), **Run at login** (on by default; registers the
-installed exe under `HKCU\...\CurrentVersion\Run` — dev builds never touch it), and the **Claude flags**
-appended to every new or resumed session (e.g. `--dangerously-skip-permissions`).
+installed exe under `HKCU\...\CurrentVersion\Run` — dev builds never touch it), and a flags box **per CLI**:
+**Claude flags** appended to every new or resumed Claude session (e.g. `--dangerously-skip-permissions`)
+and **Codex flags** appended to every resumed Codex one (e.g. `--dangerously-bypass-approvals-and-sandbox`).
+They're separate because the two CLIs share no flag spelling — one field for both would hand `codex` an
+argument it exits on.
 
 ## Build / run
 Requires .NET SDK 10.
@@ -223,12 +236,11 @@ started last week can be the one live in front of you.
   against the session name, and Codex doesn't set the tab title from its thread name the way Claude
   Code does — so unless the tab happens to be named for it, the match is ambiguous and (by design) it
   declines rather than foregrounding the wrong terminal.
-- **Codex sessions are excluded from restore.** The restore picker relaunches with `claude --resume`;
-  reopening a Codex thread isn't wired up.
 - Reads undocumented internal files; the schema may change between CLI versions. Parsing is isolated in
   `SessionScanner` and `CodexScanner`, so a schema change is a one-file fix.
 
 ## Ideas / next
 - AppBar docking (reserve screen space, taskbar-style) instead of floating.
-- Restore for Codex threads (`codex resume <id>`).
+- Launch buttons for new **Codex** sessions (today they're Claude-only); restore for `codex exec` threads,
+  if there's ever a reason to want one back.
 - Quick filter box (incl. by provider); cumulative token totals.

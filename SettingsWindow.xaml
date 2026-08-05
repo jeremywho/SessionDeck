@@ -45,10 +45,17 @@
         </Grid>
 
         <TextBlock Text="Claude flags" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource FgBrush}" Margin="0,20,0,0"/>
-        <TextBlock Text="Appended to every new or resumed session (space-separated)." FontSize="11.5"
+        <TextBlock Text="Appended to every new or resumed Claude session (space-separated)." FontSize="11.5"
                    Foreground="{DynamicResource Fg3Brush}" Margin="0,2,0,6"/>
         <!-- "e.g." matters: a bare flag as placeholder reads as a SAVED value, and users try to edit it. -->
         <ui:TextBox x:Name="ResumeFlagsBox" PlaceholderText="e.g. --dangerously-skip-permissions"/>
+
+        <!-- Separate from the Claude box on purpose: the two CLIs share no flag spelling, so one field
+             for both would send codex an argument it exits on. -->
+        <TextBlock Text="Codex flags" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource FgBrush}" Margin="0,16,0,0"/>
+        <TextBlock Text="Appended to every resumed Codex session (space-separated)." FontSize="11.5"
+                   Foreground="{DynamicResource Fg3Brush}" Margin="0,2,0,6"/>
+        <ui:TextBox x:Name="CodexFlagsBox" PlaceholderText="e.g. --dangerously-bypass-approvals-and-sandbox"/>
 
         <Grid Margin="0,22,0,0">
           <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>

@@ -53,6 +53,7 @@ internal static class SessionRegistry
         var saved = liveInteractive.Select(s => new SavedSession
         {
             Id = s.SessionId, Cwd = s.Cwd, Name = s.DisplayName, Model = s.Model, LastSeen = now,
+            Provider = s.Provider,
         }).ToList();
 
         try

@@ -136,8 +136,22 @@ The second footer bar: signed-in address on the left, one fill-behind pill per p
 - Everything here reads **undocumented** Claude Code / Codex files; parsing is isolated in
   `SessionScanner` and `CodexScanner` (+ `VirtualDesktop` for the registry desktop list), so a schema
   change is a one-file fix.
-- **Session restore is Claude-only** — it relaunches `claude --resume`, so `Refresh` filters the registry
-  snapshot on `Provider == Claude` as well as `Kind == "interactive"`.
+- **Restore is per-provider, and the two invocations barely rhyme.** Claude gets
+  `claude --resume <id> --name <name>`; Codex gets `codex resume <id>` — a *subcommand*, not a flag, and
+  with **no `--name`** (the name already belongs to the thread on their side). Flags are separate
+  settings for the same reason: nothing is spelled the same, so Claude's
+  `--dangerously-skip-permissions` handed to codex just exits on an unknown argument. Assert the shape
+  via `SessionLauncher.ResumeCommand`, which exists so this can be tested without launching anything.
+- **What counts as restorable differs too**: Claude's `Kind == "interactive"`, Codex's `Kind == "tui"`.
+  A `codex exec` thread is a headless one-shot from a script or agent — reopening one in a terminal
+  restarts somebody's automation instead of restoring work. See `SessionsWindow.IsRestorable`.
+- **The orphan check can't use the ownership map.** `ComputeOrphaned` runs at startup *before* the probe
+  thread exists, so the map is empty and every live Codex session would be offered for restore while
+  it's on screen. `CodexScanner.IsThreadLive(id)` answers for one known id with one Restart Manager
+  call instead — bounded enough for the startup path.
+- **`SavedSession.Provider` must stay optional.** `active-sessions.json` files written before Codex
+  support have no such key; they deserialize to Claude, which is the only thing they could have been.
+  It's written as a name, not the enum's number — that file is indented for humans.
 
 ## Auto-update / install (`Installer.cs`, `Updater.cs`)
 - **Dormant unless installed.** Both no-op unless `Installer.IsInstalledInstance()` (running from

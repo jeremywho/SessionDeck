@@ -455,9 +455,11 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         for (int i = Rows.Count - 1; i >= 0; i--)
             if (!seen.Contains(Rows[i].SessionId)) Rows.RemoveAt(i);
 
-        // keep the restore registry in sync with the live interactive set. Claude only — Restore
-        // relaunches with `claude --resume`, and Codex sessions never carry Kind "interactive".
-        SessionRegistry.Snapshot(live.Where(s => s.Provider == SessionProvider.Claude && s.Kind == "interactive").ToList());
+        // Keep the restore registry in sync with the live *interactive* set of each CLI. Codex's
+        // equivalent of Claude's "interactive" is the TUI: a `codex exec` thread is a headless one-shot
+        // fired by a script or an agent, so reopening one in a terminal would restart somebody's
+        // automation, not restore your work.
+        SessionRegistry.Snapshot(live.Where(IsRestorable).ToList());
         _sessionsSnapshot = live.ToArray();
 
         // The count stays short and the provider split goes in the tooltip: the legend beside it
@@ -468,6 +470,11 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
 
         RefreshAccount();
     }
+
+    /// <summary>Is this a session a human is sitting in front of, and could therefore want back?</summary>
+    static bool IsRestorable(SessionInfo s) => s.Provider == SessionProvider.Codex
+        ? s.Kind == "tui"
+        : s.Kind == "interactive";
 
     /// <summary>Poll the usage endpoint now, then on <see cref="UsageApi.PollInterval"/>.</summary>
     void StartUsagePolling()

@@ -184,7 +184,16 @@ internal sealed class App : Application
         // A week, not a day: a machine can sit wedged/powered-off well past 24h, and the restore
         // offer is an opt-in checklist — a stale entry costs one unticked row.
         long cutoff = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - 7L * 24 * 60 * 60 * 1000;
-        return saved.Where(s => !liveIds.Contains(s.Id) && s.LastSeen >= cutoff).ToList();
+
+        // Claude liveness comes free from the scan above. Codex has no registry to scan, and this runs
+        // before the probe thread exists, so each saved Codex thread is asked about individually —
+        // otherwise a running Codex session would be offered for restore while it's on screen.
+        return saved
+            .Where(s => s.LastSeen >= cutoff)
+            .Where(s => s.Provider == SessionProvider.Codex
+                ? !CodexScanner.IsThreadLive(s.Id)
+                : !liveIds.Contains(s.Id))
+            .ToList();
     }
 
     void OnTrayMouseUp(object? sender, MouseEventArgs e)

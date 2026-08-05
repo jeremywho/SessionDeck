@@ -14,6 +14,7 @@ internal partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         TaskbarToggle.IsChecked = _app.Settings.ShowInTaskbar;
         RunOnLoginToggle.IsChecked = _app.Settings.RunOnLogin;
         ResumeFlagsBox.Text = _app.Settings.ResumeFlags;
+        CodexFlagsBox.Text = _app.Settings.CodexFlags;
 
         // Assembly version == the release tag (release.yml stamps -p:Version); dev builds show the csproj default.
         var v = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
@@ -34,6 +35,7 @@ internal partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         _app.ApplyRunOnLogin();
 
         _app.Settings.ResumeFlags = ResumeFlagsBox.Text?.Trim() ?? "";
+        _app.Settings.CodexFlags = CodexFlagsBox.Text?.Trim() ?? "";
 
         _app.Settings.Save();
         Close();

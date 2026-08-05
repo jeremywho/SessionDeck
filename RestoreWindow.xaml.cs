@@ -27,9 +27,14 @@ internal partial class RestoreWindow : Wpf.Ui.Controls.FluentWindow
     void Resume_Click(object sender, RoutedEventArgs e)
     {
         foreach (var it in Items.Where(i => i.IsChecked))
-            SessionLauncher.Resume(it.Session, _app.Settings.ResumeFlags);
+            SessionLauncher.Resume(it.Session, FlagsFor(it.Session.Provider));
         Close();
     }
+
+    /// <summary>Each CLI gets its own flags. They share no spelling, so handing Claude's
+    /// <c>--dangerously-skip-permissions</c> to codex would just make it exit on an unknown argument.</summary>
+    string FlagsFor(SessionProvider p) =>
+        p == SessionProvider.Codex ? _app.Settings.CodexFlags : _app.Settings.ResumeFlags;
 
     void Cancel_Click(object sender, RoutedEventArgs e) => Close();
 }
@@ -40,4 +45,10 @@ internal sealed class RestoreItem
     public string Name { get; set; } = "";
     public string Cwd { get; set; } = "";
     public bool IsChecked { get; set; }
+
+    // The list can mix the two CLIs, and which one a row reopens with is the thing you can't infer
+    // from a name and a folder — so it's marked the same way the session list marks it.
+    public SessionProvider Provider => Session.Provider;
+    public string ProviderGlyph => Session.Provider == SessionProvider.Codex ? "◆" : "✳";
+    public string ProviderName => Session.Provider == SessionProvider.Codex ? "Codex" : "Claude Code";
 }

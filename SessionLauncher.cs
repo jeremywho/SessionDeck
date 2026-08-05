@@ -15,21 +15,44 @@ internal enum LaunchTarget
 /// <summary>Opens claude sessions in Windows Terminal — resumed or brand-new.</summary>
 internal static class SessionLauncher
 {
+    /// <summary>
+    /// Reopen a saved session with its own CLI. <paramref name="extraFlags"/> must already be the
+    /// right set for that provider — the two CLIs share no flag spelling (Claude's
+    /// <c>--dangerously-skip-permissions</c> vs Codex's <c>--dangerously-bypass-approvals-and-sandbox</c>),
+    /// so passing one to the other just makes it exit on an unknown argument.
+    /// </summary>
     public static bool Resume(SavedSession s, string extraFlags)
     {
         string cwd = string.IsNullOrWhiteSpace(s.Cwd)
             ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
             : s.Cwd;
 
+        // Restores always get their own window: a restore can fire several at once, and stacking
+        // them as tabs in whatever window you were using would bury it.
+        return Start(cwd, ResumeCommand(s, extraFlags), LaunchTarget.NewWindow);
+    }
+
+    /// <summary>The shell command that reopens a saved session. Split out from <see cref="Resume"/>
+    /// so the two CLIs' very different invocations can be asserted without launching anything.</summary>
+    public static string ResumeCommand(SavedSession s, string extraFlags)
+    {
+        // `codex resume <id>` takes the thread id and nothing else — there is no --name to pass,
+        // because on Codex's side the name is already attached to the thread.
+        string cmd = s.Provider == SessionProvider.Codex
+            ? $"codex resume {s.Id}"
+            : ClaudeResumeCommand(s);
+
+        if (!string.IsNullOrWhiteSpace(extraFlags))
+            cmd += " " + extraFlags.Trim();
+        return cmd;
+    }
+
+    static string ClaudeResumeCommand(SavedSession s)
+    {
         string cmd = $"claude --resume {s.Id}";
         if (!string.IsNullOrWhiteSpace(s.Name) && !IsShortId(s))
             cmd += $" --name '{s.Name.Replace("'", "''")}'";   // pwsh single-quote escaping
-        if (!string.IsNullOrWhiteSpace(extraFlags))
-            cmd += " " + extraFlags.Trim();
-
-        // Restores always get their own window: a restore can fire several at once, and stacking
-        // them as tabs in whatever window you were using would bury it.
-        return Start(cwd, cmd, LaunchTarget.NewWindow);
+        return cmd;
     }
 
     /// <summary>Start a brand-new claude session (optionally named) in the user's home directory.</summary>

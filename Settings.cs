@@ -15,6 +15,7 @@ internal sealed class Settings
     public Dictionary<string, double> ColumnWidth { get; set; } = new();    // column key -> pixel width
     public int LayoutVersion { get; set; }                                  // bumped when the window layout changes (resets stale window size)
     public string ResumeFlags { get; set; } = "";                           // "Claude flags": appended to every launched/resumed claude (JSON key kept for compat)
+    public string CodexFlags { get; set; } = "";                            // appended to every resumed codex — separate because the two CLIs share no flag spelling
     public string DockPosition { get; set; } = "Free";                      // Free | LeftEdge | RightEdge | TopLeft | TopRight | BottomLeft | BottomRight
     public double? WindowLeft { get; set; }
     public double? WindowTop { get; set; }

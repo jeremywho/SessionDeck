@@ -164,6 +164,41 @@ internal static class CodexScanner
         return list;
     }
 
+    /// <summary>
+    /// Is this specific thread running right now? Answers the restore question — "was this saved
+    /// session still live?" — without waiting for a probe pass.
+    ///
+    /// The orphan check runs at startup, before the background probe has mapped anything, so consulting
+    /// the ownership map there would report every live Codex session as dead and offer to restore
+    /// sessions that are on screen. This costs one Restart Manager call for one known id instead of a
+    /// full pass, which is what makes it usable on the startup path.
+    /// </summary>
+    public static bool IsThreadLive(string sessionId)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId)) return false;
+
+        // Already known live? Then skip the call entirely.
+        lock (_gate)
+            foreach (var kv in _owner)
+                if (_heads.TryGetValue(kv.Key, out var h) && h.Id == sessionId) return IsAlive(kv.Value);
+
+        string path = RolloutFor(sessionId);
+        return path.Length > 0 && FileHolders.OwnerPid(path, "codex") != 0;
+    }
+
+    /// <summary>The rollout file for a thread id — its filename ends with the id.</summary>
+    static string RolloutFor(string sessionId)
+    {
+        try
+        {
+            foreach (var f in RecentRollouts())
+                if (Path.GetFileNameWithoutExtension(f.Path)
+                        .EndsWith(sessionId, StringComparison.OrdinalIgnoreCase)) return f.Path;
+        }
+        catch { }
+        return "";
+    }
+
     /// <summary>PID is alive AND is actually a codex process (guards against PID reuse).</summary>
     static bool IsAlive(int pid)
     {
