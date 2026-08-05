@@ -29,6 +29,8 @@ internal sealed class SessionRow : INotifyPropertyChanged
     {
         nameof(Pid), nameof(Name), nameof(Status), nameof(State), nameof(SortPriority),
         nameof(ShortId), nameof(Model), nameof(ModelChip),
+        nameof(Effort), nameof(HasEffort), nameof(HasModel), nameof(ModelTooltip),
+        nameof(Provider), nameof(ProviderGlyph), nameof(IsCodex),
         nameof(ContextPct), nameof(ContextDisplay), nameof(ContextTokensDisplay),
         nameof(IdleDisplay), nameof(LastTool), nameof(Cwd), nameof(Version),
         nameof(ApiError), nameof(RowTooltip), nameof(LastChanged),
@@ -80,11 +82,11 @@ internal sealed class SessionRow : INotifyPropertyChanged
             var lines = new List<string>
             {
                 _s.DisplayName,
-                $"Model: {(ModelChip.Length > 0 ? ModelChip : "—")}",
-                $"Context: {ContextPct}% ({ContextTokensDisplay})",
+                $"Model: {(_s.Model.Length > 0 ? _s.Model : "—")}{(HasEffort ? $" · {_s.Effort} effort" : "")}",
+                $"Context: {ContextPct}% ({ContextTokensDisplay} of {Window / 1000}k)",
                 $"Status: {_s.Status}{(_s.ApiError ? " · API ERROR" : "")}{(LastTool.Length > 0 ? $" · {LastTool}" : "")}",
                 $"Folder: {_s.Cwd}",
-                $"PID {_s.Pid} · {ShortId} · v{_s.Version}",
+                $"{ProviderName} · PID {_s.Pid} · {ShortId} · v{_s.Version}",
             };
             if (OnOtherDesktop) lines.Add($"On {DesktopLabel}");
             if (_s.SubagentsActive > 0) lines.Add($"Subagents: {_s.SubagentsActive} working / {_s.SubagentsTotal} this session");
@@ -105,8 +107,29 @@ internal sealed class SessionRow : INotifyPropertyChanged
     public string ShortId => _s.ShortId;
     public string Model => _s.Model;                              // raw model id (optional column)
     public string ModelChip => FriendlyModel(_s.Model);
-    public int ContextPct => ContextWindow > 0
-        ? (int)Math.Min(100.0, Math.Round(_s.ContextTokens * 100.0 / ContextWindow, MidpointRounding.AwayFromZero))  // round (match the status line), not truncate
+    public bool HasModel => _s.Model.Length > 0;
+
+    /// <summary>Reasoning effort, Codex only — Claude Code doesn't record one in the transcript.</summary>
+    public string Effort => _s.Effort;
+    public bool HasEffort => _s.Effort.Length > 0;
+    public string ModelTooltip => HasModel
+        ? $"{ProviderName} · {_s.Model}{(HasEffort ? $" · {_s.Effort} effort" : "")}"
+        : "";
+
+    // --- provider ---
+    public SessionProvider Provider => _s.Provider;
+    public bool IsCodex => _s.Provider == SessionProvider.Codex;
+    public string ProviderName => _s.Provider == SessionProvider.Codex ? "Codex" : "Claude Code";
+    /// <summary>Marker inside the model pill. Two shapes rather than two letters — both CLIs start
+    /// with a C, so a glyph tells them apart faster than initials do.</summary>
+    public string ProviderGlyph => _s.Provider == SessionProvider.Codex ? "◆" : "✳";
+
+    /// <summary>This session's context size — the model's own when we know it (Codex reports it per
+    /// turn), otherwise the app-wide default.</summary>
+    long Window => _s.ContextWindow > 0 ? _s.ContextWindow : ContextWindow;
+
+    public int ContextPct => Window > 0
+        ? (int)Math.Min(100.0, Math.Round(_s.ContextTokens * 100.0 / Window, MidpointRounding.AwayFromZero))  // round (match the status line), not truncate
         : 0;
     public string ContextDisplay => $"{ContextPct}%";
     public string ContextTokensDisplay => _s.ContextDisplay;      // e.g. "173.2k" (optional column)
@@ -123,14 +146,42 @@ internal sealed class SessionRow : INotifyPropertyChanged
         return $"{sec / 3600}h {sec % 3600 / 60}m";
     }
 
+    /// <summary>
+    /// Model id -> short pill text. The minor version is optional on purpose: ids run both
+    /// <c>claude-opus-4-8</c> (-> "Opus 4.8") and <c>claude-opus-5</c> / <c>claude-fable-5</c>
+    /// (-> "Opus 5" / "Fable 5"). Requiring the second number is what made the newer ids fall
+    /// through and render raw. A trailing date (<c>claude-haiku-4-5-20251001</c>) and a bracketed
+    /// variant (<c>claude-opus-5[1m]</c>) are both ignored — the tooltip carries the full id.
+    /// </summary>
     static string FriendlyModel(string id)
     {
         if (string.IsNullOrEmpty(id)) return "";
-        var m = Regex.Match(id, @"(opus|sonnet|haiku|fable)-(\d+)-(\d+)", RegexOptions.IgnoreCase);
-        if (!m.Success) return id;
-        string fam = char.ToUpperInvariant(m.Groups[1].Value[0]) + m.Groups[1].Value.Substring(1).ToLowerInvariant();
-        return $"{fam} {m.Groups[2].Value}.{m.Groups[3].Value}";
+
+        string raw = id;
+        int bracket = raw.IndexOf('[');
+        if (bracket > 0) raw = raw.Substring(0, bracket);
+
+        var m = Regex.Match(raw, @"\b(opus|sonnet|haiku|fable)-(\d+)(?:-(\d+))?", RegexOptions.IgnoreCase);
+        if (m.Success)
+        {
+            string fam = Title(m.Groups[1].Value);
+            string ver = m.Groups[3].Success ? $"{m.Groups[2].Value}.{m.Groups[3].Value}" : m.Groups[2].Value;
+            return $"{fam} {ver}";
+        }
+
+        // Codex: gpt-5.6-sol -> "Sol", gpt-5.6-codex -> "Codex", plain gpt-5.6 -> "GPT-5.6".
+        // The named variant is the part that distinguishes them in practice, so it wins the pill.
+        m = Regex.Match(raw, @"^gpt-([\d.]+)(?:-([a-z0-9]+))?$", RegexOptions.IgnoreCase);
+        if (m.Success)
+            return m.Groups[2].Success && m.Groups[2].Value.Length > 0
+                ? Title(m.Groups[2].Value)
+                : $"GPT-{m.Groups[1].Value}";
+
+        return raw;
     }
+
+    static string Title(string s) =>
+        char.ToUpperInvariant(s[0]) + s.Substring(1).ToLowerInvariant();
 
     public event PropertyChangedEventHandler? PropertyChanged;
 }

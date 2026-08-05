@@ -75,9 +75,32 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         _pushTimer.Tick += (_, _) => { _pushTimer.Stop(); Refresh(); };
 
         StartWatcher();
+        StartCodexProbe();
         Refresh();
         StartDesktopResolver();
         StartUsagePolling();
+    }
+
+    /// <summary>
+    /// Background loop that keeps <see cref="CodexScanner"/>'s rollout-&gt;PID map current.
+    ///
+    /// Codex publishes no live registry, so liveness has to be resolved by asking the OS which process
+    /// holds each rollout file open — ~50ms a call, far too slow for the UI tick. This thread absorbs
+    /// that cost; the scan itself then just reads the map. There's deliberately no FileSystemWatcher on
+    /// the rollout tree either: Codex writes to it constantly while a turn runs, and every one of those
+    /// events would trigger a tail re-read. The 2s poll is the right cadence here.
+    /// </summary>
+    void StartCodexProbe()
+    {
+        var t = new System.Threading.Thread(() =>
+        {
+            while (true)
+            {
+                try { CodexScanner.Probe(); } catch { }
+                System.Threading.Thread.Sleep(3000);
+            }
+        }) { IsBackground = true, Name = "codex-probe" };
+        t.Start();
     }
 
     /// <summary>Coalesce a burst of change events into one refresh ~120ms later.</summary>
@@ -420,6 +443,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     void Refresh()
     {
         var live = SessionScanner.Scan();
+        live.AddRange(CodexScanner.Scan());   // same list, same sort — told apart by the provider mark
         var seen = new HashSet<string>();
         foreach (var s in live)
         {
@@ -431,11 +455,16 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         for (int i = Rows.Count - 1; i >= 0; i--)
             if (!seen.Contains(Rows[i].SessionId)) Rows.RemoveAt(i);
 
-        // keep the restore registry in sync with the live interactive set
-        SessionRegistry.Snapshot(live.Where(s => s.Kind == "interactive").ToList());
+        // keep the restore registry in sync with the live interactive set. Claude only — Restore
+        // relaunches with `claude --resume`, and Codex sessions never carry Kind "interactive".
+        SessionRegistry.Snapshot(live.Where(s => s.Provider == SessionProvider.Claude && s.Kind == "interactive").ToList());
         _sessionsSnapshot = live.ToArray();
 
+        // The count stays short and the provider split goes in the tooltip: the legend beside it
+        // already runs to the window edge at the 460px minimum, so a longer label overlaps it.
+        int codex = live.Count(s => s.Provider == SessionProvider.Codex);
         LiveLabel.Text = $"{live.Count} live session{(live.Count == 1 ? "" : "s")}";
+        LiveLabel.ToolTip = codex > 0 ? $"{live.Count - codex} Claude · {codex} Codex" : null;
 
         RefreshAccount();
     }

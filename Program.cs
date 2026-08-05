@@ -8,9 +8,21 @@ internal static class Program
         // Headless diagnostic: dump live sessions to a temp file and exit (verification / CLI use).
         if (args.Length > 0 && args[0] == "--list")
         {
+            // Codex liveness is resolved by the background probe, which the UI normally runs; do it
+            // inline so the headless dump sees what the window would. Several passes, because "which
+            // subagents are working now" is a size DELTA — one pass has nothing to compare against, and
+            // Codex writes in bursts with quiet stretches of several seconds between them.
+            for (int i = 0; i < 4; i++)
+            {
+                CodexScanner.Probe();
+                if (i < 3) Thread.Sleep(3000);
+            }
+            var all = SessionScanner.Scan();
+            all.AddRange(CodexScanner.Scan());
+
             var sb = new System.Text.StringBuilder();
-            foreach (var s in SessionScanner.Scan())
-                sb.AppendLine($"{s.Pid}\t{(s.ApiError ? "ERROR" : s.Status)}\t{s.ShortId}\t{s.Model}\t{s.ContextDisplay}\t{s.LastTool}\t{s.DisplayName}\t{s.Cwd}");
+            foreach (var s in all)
+                sb.AppendLine($"{s.Provider}\t{s.Pid}\t{(s.ApiError ? "ERROR" : s.Status)}\t{s.ShortId}\t{s.Model}\t{s.Effort}\t{s.ContextDisplay}\t{s.SubagentsActive}/{s.SubagentsTotal}\t{s.LastTool}\t{s.DisplayName}\t{s.Cwd}");
             System.IO.File.WriteAllText(
                 System.IO.Path.Combine(System.IO.Path.GetTempPath(), "claude-sessions-dump.txt"),
                 sb.ToString());
@@ -20,10 +32,14 @@ internal static class Program
         // Headless diagnostic: which terminal window each session maps to.
         if (args.Length > 0 && args[0] == "--windows")
         {
+            CodexScanner.Probe();
             var byPid = Native.TopWindowsByPid();
+            var all = SessionScanner.Scan();
+            all.AddRange(CodexScanner.Scan());   // focus is provider-agnostic — it only needs a PID
+
             var sb = new System.Text.StringBuilder();
-            foreach (var s in SessionScanner.Scan())
-                sb.AppendLine($"{s.DisplayName}\t(pid {s.Pid})\t-> {WindowActivator.DebugPick(s, byPid)}");
+            foreach (var s in all)
+                sb.AppendLine($"{s.Provider}\t{s.DisplayName}\t(pid {s.Pid})\t-> {WindowActivator.DebugPick(s, byPid)}");
             System.IO.File.WriteAllText(
                 System.IO.Path.Combine(System.IO.Path.GetTempPath(), "claude-windows-test.txt"), sb.ToString());
             return;

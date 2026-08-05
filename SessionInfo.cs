@@ -1,19 +1,26 @@
 namespace ClaudeSessionMonitor;
 
+/// <summary>Which CLI a session belongs to. Drives the provider badge and the launch/restore paths —
+/// the two scanners normalise very different on-disk shapes into one <see cref="SessionInfo"/>.</summary>
+internal enum SessionProvider { Claude, Codex }
+
 /// <summary>One live Claude Code (or compatible) session.</summary>
 internal sealed class SessionInfo
 {
+    public SessionProvider Provider = SessionProvider.Claude;
     public int Pid;
     public string SessionId = "";
     public string Cwd = "";
-    public string Name = "";       // user/AI session name from sessions/<pid>.json
+    public string Name = "";       // user/AI session name from sessions/<pid>.json (Codex: session_index.jsonl)
     public string Status = "";     // "busy" / "idle" / ... (treat as open set)
     public string Version = "";
     public string Kind = "";
-    public string Model = "";      // from latest assistant turn
+    public string Model = "";      // from latest assistant turn (Codex: latest turn_context)
+    public string Effort = "";     // reasoning effort — Codex only ("ultra", "high", …)
     public string LastTool = "";   // last tool_use block seen
     public string Title = "";      // Claude-set terminal title (ai-title / custom-title) -> used for tab matching
     public long ContextTokens;     // input + cache_read + cache_creation of latest assistant turn
+    public long ContextWindow;     // this model's context size; 0 = use the app-wide default
     public long OutputTokens;      // output tokens of latest assistant turn
     public bool ApiError;          // most recent assistant message is a synthetic API-error message
     public string ErrorText = "";  // the error text (e.g. "API Error: … Rate limited")

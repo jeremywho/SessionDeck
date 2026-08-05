@@ -66,6 +66,44 @@ internal sealed class PctToStarConverter : IValueConverter
         => Binding.DoNothing;
 }
 
+/// <summary>
+/// Provider -> the model pill's mark color. Brand hues rather than palette brushes — the whole job of
+/// the mark is to be recognisable at a glance — but in two tunings: the values that read on the dark
+/// pill wash out badly against the light theme's near-white track (#E9EBEE), so the light theme gets
+/// darker variants. Resolved at convert time against the live palette, like
+/// <see cref="PctToBrushConverter"/>, so a theme swap plus RefreshAfterThemeChange re-picks correctly.
+/// </summary>
+internal sealed class ProviderColorConverter : IValueConverter
+{
+    static readonly Brush ClaudeDark = new SolidColorBrush(Color.FromRgb(0xE0, 0x84, 0x63));
+    static readonly Brush CodexDark = new SolidColorBrush(Color.FromRgb(0x2A, 0xC7, 0x9E));
+    static readonly Brush ClaudeLight = new SolidColorBrush(Color.FromRgb(0xB4, 0x54, 0x30));
+    static readonly Brush CodexLight = new SolidColorBrush(Color.FromRgb(0x0B, 0x7D, 0x60));
+
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+    {
+        bool light = IsLightTheme();
+        return value is SessionProvider.Codex
+            ? (light ? CodexLight : CodexDark)
+            : (light ? ClaudeLight : ClaudeDark);
+    }
+
+    /// <summary>Which palette is loaded, judged from the surface color rather than a settings lookup —
+    /// the converter has no view of the app object, and the brush is always there.</summary>
+    static bool IsLightTheme()
+    {
+        if (Application.Current?.TryFindResource("SurfaceBrush") is SolidColorBrush b)
+        {
+            var c = b.Color;
+            return (0.299 * c.R + 0.587 * c.G + 0.114 * c.B) > 128;
+        }
+        return false;
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        => Binding.DoNothing;
+}
+
 /// <summary>Virtual-desktop index -> a subtle dot color (non-status hues). -1 => transparent (no dot).</summary>
 internal sealed class DesktopColorConverter : IValueConverter
 {

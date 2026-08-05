@@ -18,6 +18,7 @@
     <local:DesktopColorConverter x:Key="DesktopColor"/>
     <local:SeverityToBrushConverter x:Key="SeverityToBrush"/>
     <local:PctToStarConverter x:Key="PctToStar"/>
+    <local:ProviderColorConverter x:Key="ProviderColor"/>
     <BooleanToVisibilityConverter x:Key="BoolToVis"/>
 
     <!-- status glyph: disc/ring + check + spinner, driven by SessionState -->
@@ -170,11 +171,31 @@
                     <Grid.ColumnDefinitions>
                       <ColumnDefinition Width="*"/>
                       <ColumnDefinition Width="Auto"/>
+                      <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     <TextBlock Grid.Column="0" Text="{Binding Name}" FontSize="14.5" VerticalAlignment="Center"
                                Foreground="{DynamicResource FgBrush}" TextTrimming="CharacterEllipsis"/>
-                    <!-- live-subagent count: shown only while the session has agents working -->
+                    <!-- model pill: provider mark + model, plus reasoning effort where the CLI reports
+                         one (Codex does; Claude Code doesn't put it in the transcript). The provider
+                         mark lives IN the pill rather than beside it — one element to read, not two. -->
                     <Border Grid.Column="1" VerticalAlignment="Center" Margin="8,0,0,0" Padding="6,1"
+                            CornerRadius="4" Background="{DynamicResource TrackBrush}"
+                            BorderBrush="{DynamicResource Border2Brush}" BorderThickness="1"
+                            Visibility="{Binding HasModel, Converter={StaticResource BoolToVis}}"
+                            ToolTip="{Binding ModelTooltip}" ToolTipService.InitialShowDelay="250">
+                      <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="{Binding ProviderGlyph}" FontSize="9.5" VerticalAlignment="Center"
+                                   Margin="0,0,4,0"
+                                   Foreground="{Binding Provider, Converter={StaticResource ProviderColor}}"/>
+                        <TextBlock Text="{Binding ModelChip}" FontSize="10.5" FontWeight="SemiBold"
+                                   VerticalAlignment="Center" Foreground="{DynamicResource Fg2Brush}"/>
+                        <TextBlock Text="{Binding Effort}" FontSize="10" VerticalAlignment="Center" Margin="4,0,0,0"
+                                   Foreground="{DynamicResource Fg3Brush}"
+                                   Visibility="{Binding HasEffort, Converter={StaticResource BoolToVis}}"/>
+                      </StackPanel>
+                    </Border>
+                    <!-- live-subagent count: shown only while the session has agents working -->
+                    <Border Grid.Column="2" VerticalAlignment="Center" Margin="8,0,0,0" Padding="6,1"
                             CornerRadius="8" Background="{DynamicResource BlueBrush}"
                             Visibility="{Binding HasActiveSubagents, Converter={StaticResource BoolToVis}}"
                             ToolTip="{Binding SubagentTooltip}">

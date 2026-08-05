@@ -1,8 +1,8 @@
 # ClaudeSessionMonitor — agent guide
 
 Windows system-tray app (**.NET 10, WPF + [WPF-UI](https://github.com/lepoco/wpfui)/Fluent**) that
-lists live local Claude Code sessions, read from `~/.claude/` on disk. `README.md` is the
-user-facing feature tour; this file is for working *on* the code.
+lists live local Claude Code **and Codex CLI** sessions, read from `~/.claude/` and `~/.codex/` on
+disk. `README.md` is the user-facing feature tour; this file is for working *on* the code.
 
 **One exception to "all local".** The footer's plan-usage meters come from a network call
 (`UsageApi` → `GET api.anthropic.com/api/oauth/usage`, bearer token read from
@@ -37,6 +37,40 @@ dotnet test Tests\ClaudeSessionMonitor.Tests.csproj
 5. Refresh is **event-driven**: a `FileSystemWatcher` on the sessions dir + a 2s fallback `DispatcherTimer`.
 6. A background **STA thread** tags each row with its virtual desktop every ~8s
    (`VirtualDesktop` + `WindowActivator.ResolveWindows`, which is UIA-heavy — hence off the UI thread).
+7. `CodexScanner.Scan()` appends live Codex sessions to the same list (see below). Rows are told apart
+   only by the provider mark in the model pill — sort, focus, columns and tooltips are all shared.
+
+## Codex (`CodexScanner.cs`, `FileHolders.cs`)
+Codex publishes **no live registry**. There is only the append-only rollout per thread,
+`~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<id>.jsonl`, and everything has to be derived from it.
+Four things will bite you, in rough order of how long they take to notice:
+
+- **`codex resume` appends to the ORIGINAL file.** The filename timestamp, the day folder, and the
+  creation time all describe when the thread *started*, not whether it's running. A thread from three
+  weeks ago can be the live one. Never infer liveness from any of them.
+- **Liveness = who holds the file open.** `FileHolders.OwnerPid` (Restart Manager `RmGetList`) answers
+  it exactly, non-admin, and hands back the `codex.exe` PID — which is also what makes double-click-to-
+  focus work, since `WindowActivator` is provider-agnostic and just needs a PID. It costs ~50ms a call,
+  so it lives on the `codex-probe` background thread with a per-pass budget; `Scan()` on the UI tick only
+  reads the map it produces. Don't move a probe onto the UI thread.
+- **Windows does not reliably refresh mtime for a file a process holds open.** A `codex exec` rollout was
+  measured sitting at a **14-minute-old** timestamp while gaining 7KB in 12 seconds (the TUI's own
+  rollout *does* update). So mtime cannot drive idle time or "is this subagent working" — both use
+  **size growth** (`_growth`) and the **record timestamps inside the rollout** instead. Writes are bursty:
+  several seconds of nothing, then a chunk. That's why `--list` probes four times.
+- **The two id fields are not what they sound like.** In `session_meta`, `id` is *this* thread and
+  `session_id` is the **root** thread — so on a subagent's rollout they differ. Reading `session_id` as
+  "this session" makes every subagent masquerade as its parent (it shipped that way for one build: five
+  duplicate rows). The upside: `session_id` is the root at *any* nesting depth, so subagent roll-up needs
+  no parent-chain walk. Note also that `thread_source` is the plain string `"user"`/`"subagent"`; the
+  spawn detail (parent, depth, nickname) is in `source`.
+
+Other Codex notes: model + effort come from `turn_context` (last one wins) and `thread_settings_applied`
+(a mid-thread switch); context is `last_token_usage.input_tokens` against `model_context_window` —
+**not** `total_token_usage`, which is cumulative for the thread and runs to tens of millions. The first
+parse of a session reads the **whole file** because `turn_context` is per-turn and can sit megabytes
+back; after that it's a tail read gated on mtime **and size**. There is deliberately **no**
+`FileSystemWatcher` on the rollout tree — Codex writes to it constantly during a turn.
 
 ## Usage bar (`UsageApi.cs`, `AccountScanner.cs`)
 The second footer bar: signed-in address on the left, one fill-behind pill per plan limit on the right.
@@ -66,6 +100,13 @@ The second footer bar: signed-in address on the left, one fill-behind pill per p
 **Error** is *not* a status — it's read from the transcript (`isApiErrorMessage`) and sorts to the top.
 
 ## Gotchas (don't rediscover these)
+- **The footer bar is full at 460px.** The status legend already runs to the window edge at the minimum
+  width, so the live-count label on the left has almost no slack — a "8 Claude, 1 Codex" breakdown there
+  overlapped the legend and had to move into its tooltip. Verify footer changes at 460px, not at your
+  window size.
+- **`FriendlyModel` must not require a minor version.** Model ids come both ways — `claude-opus-4-8`
+  *and* `claude-opus-5` / `claude-fable-5` — and the original regex demanded `-(\d+)-(\d+)`, so the newer
+  ids fell through and rendered raw. It also strips a bracketed variant (`claude-opus-5[1m]`).
 - **DataGrid `RowBackground` beats the RowStyle trigger.** Set the row Background in the style (base
   Transparent + an `IsMouseOver` trigger) — never a `RowBackground=` attribute — or hover highlight dies.
 - **Column-width persistence** once clobbered the `*` Session column (saved it as a fixed width). Only
@@ -79,8 +120,11 @@ The second footer bar: signed-in address on the left, one fill-behind pill per p
   not Idle. The ⚙ subagent badge won't fire for it (that counts Task *subagents*, a different thing).
 - **`IsAlive`** matches process name `StartsWith("claude")`, because Claude Code's self-update renames
   the running `claude.exe` → `claude.exe.old.<ts>` mid-session.
-- Everything here reads **undocumented** Claude Code files; parsing is isolated in `SessionScanner`
-  (+ `VirtualDesktop` for the registry desktop list), so a schema change is a one-file fix.
+- Everything here reads **undocumented** Claude Code / Codex files; parsing is isolated in
+  `SessionScanner` and `CodexScanner` (+ `VirtualDesktop` for the registry desktop list), so a schema
+  change is a one-file fix.
+- **Session restore is Claude-only** — it relaunches `claude --resume`, so `Refresh` filters the registry
+  snapshot on `Provider == Claude` as well as `Kind == "interactive"`.
 
 ## Auto-update / install (`Installer.cs`, `Updater.cs`)
 - **Dormant unless installed.** Both no-op unless `Installer.IsInstalledInstance()` (running from

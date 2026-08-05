@@ -1,8 +1,9 @@
 # ClaudeSessionMonitor
 
-A Windows tray app that lists every **live local Claude Code session** at a glance, lets you jump to
-one, and restores them after a reboot. It reads Claude Code's on-disk state — no Claude configuration is required to *see* sessions
-(it uses the `~/.claude/sessions/<pid>.json` live registry).
+A Windows tray app that lists every **live local Claude Code and Codex CLI session** at a glance, lets
+you jump to one, and restores them after a reboot. It reads each CLI's on-disk state — no configuration
+is required to *see* sessions (Claude's `~/.claude/sessions/<pid>.json` live registry, and `~/.codex`'s
+rollout logs).
 
 .NET 10 · WPF + [WPF-UI](https://github.com/lepoco/wpfui) (Fluent / Mica).
 
@@ -23,10 +24,16 @@ then **most-recently-changed first within each group**, re-sorting live as state
 **Error** is read from the transcript (a synthetic `isApiErrorMessage` turn), not the registry — which
 still reports `idle` — and it clears itself when the session's next real turn lands.
 
-Each row shows the session **name**, the **Context %** (colored by fullness: amber > 70, red > 85 —
-matching the omc status-line thresholds), and **Idle** time humanized (`42m`, `1h 5m`). **Hover a
-row's Idle column** for the rest — model, context tokens, status, last tool, folder, PID/Id/version
-(and the API-error text when it's in that state). Sessions whose terminal sits on a **different
+Each row shows the session **name**, a **model pill**, the **Context %** (colored by fullness: amber >
+70, red > 85 — matching the omc status-line thresholds), and **Idle** time humanized (`42m`, `1h 5m`).
+
+The **model pill** carries a colored provider mark plus the short model name — **✳ Opus 5**, **✳ Fable
+5**, **✳ Opus 4.8** (clay = Claude Code) or **◆ Sol** (green = Codex). Codex also reports a **reasoning
+effort**, which trails the model in dimmer text (**◆ Sol ultra**); Claude Code doesn't record one in its
+transcript, so Claude pills show the model alone. Hover the pill for the full model id.
+
+**Hover a row's Idle column** for the rest — model, context tokens, status, last tool, folder,
+provider/PID/Id/version (and the API-error text when it's in that state). Sessions whose terminal sits on a **different
 virtual desktop** get a small colored pip at the row's left edge — one color per desktop, the
 current desktop shows none (hover it for "Desktop N"). A session running **subagents** shows a small
 **⚙ N** badge after its name — how many are working right now (hover for the total spawned this
@@ -124,6 +131,8 @@ the file but may still warn until reputation builds. For a cloud/HSM cert (Azure
 DigiCert KeyLocker), swap the workflow's *Sign the exe* step for that provider's action.
 
 ## How it works
+
+### Claude Code
 - **Discovery:** `~/.claude/sessions/<PID>.json` — one heartbeat file per live session, validated
   against a live process whose name starts with `claude` (tolerates Claude Code's self-update renaming
   the running `claude.exe` → `claude.exe.old.<ts>`, while still guarding against PID reuse). `status`
@@ -140,12 +149,35 @@ DigiCert KeyLocker), swap the workflow's *Sign the exe* step for that provider's
   Terminal spreads tabs across several windows under one process, so `Process.MainWindowHandle` can't
   identify the right one. (`--windows` dumps the mapping.)
 
+### Codex
+Codex publishes **no live registry** — there's only an append-only rollout log per thread at
+`~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<id>.jsonl`. And `codex resume` **appends to the original
+file**, so the filename, the day folder, and the mtime all lie about what's running now: the thread you
+started last week can be the one live in front of you.
+
+- **Discovery / liveness:** a running Codex holds its rollout file **open**, so the app asks the OS who
+  that is — the **Restart Manager** API (`RmGetList`, the same non-admin call installers use for "close
+  these apps first"), which returns the owning `codex.exe` PID. That's also what gives Codex rows a real
+  PID, so double-click-to-focus works exactly as it does for Claude. The call costs ~50ms, so it runs on
+  a budgeted background thread; the UI scan just reads the resulting map.
+- **Detail:** `turn_context` → model + reasoning effort · `token_count` → context tokens and the model's
+  own context window (so Codex rows are a percentage of *their* window, not the Claude default) ·
+  `task_started` / `task_complete` → Working / Completed · tool calls → last tool.
+- **Names:** `~/.codex/session_index.jsonl`, falling back to the session's first message.
+- **Subagents:** each Codex subagent is a rollout of its own, tied to its session by the header's
+  `session_id` (which is the **root** thread at any nesting depth), and rolled up into the same **⚙ N**
+  badge Claude's Task agents use.
+- **Refresh:** the 2s poll, deliberately without a `FileSystemWatcher` — Codex writes to the rollout tree
+  continuously while a turn runs, and every one of those events would trigger a re-read.
+
 ## Project layout
 - `Program.cs` — entry point (single-instance; `--list` / `--windows` headless modes).
 - `App.cs` — WPF application shell, the (WPF) tray icon + menu, and the theme-palette swap.
 - `SessionsWindow.xaml` / `.xaml.cs` — the Fluent window (status-glyph template, grid, title-bar
   controls, live sort, header-right-click column menu).
 - `SessionScanner.cs` — reads the registry and enriches each session from its transcript (mtime-cached).
+- `CodexScanner.cs` — the same job for `~/.codex`, where liveness has to be derived rather than read.
+- `FileHolders.cs` — "which process has this file open?" via Restart Manager (how Codex liveness is answered).
 - `SessionInfo.cs` — data model. `SessionRow.cs` — observable row VM (derives the display state).
 - `SessionState.cs` — the display states (incl. **Error**) + the Claude-status → state mapping.
 - `WindowActivator.cs` / `Native.cs` / `TabSelector.cs` — focus + Windows Terminal tab selection.
@@ -165,13 +197,24 @@ DigiCert KeyLocker), swap the workflow's *Sign the exe* step for that provider's
 - **Focus matches by tab title** — relies on each session having a distinct title (`/rename` or
   Claude's auto-title). Identical/empty titles may be ambiguous; it then falls back to a window-title
   match and refuses to focus the wrong window rather than guess.
-- **Context %** is approximate: the true per-session context-window size is only handed to Claude
-  Code *statusline* commands, not to a standalone app — so it's computed against a fixed **1M** (the
-  max-context model these sessions always run).
-- Reads undocumented internal files; the schema may change between Claude Code versions. Parsing is
-  isolated in `SessionScanner`, so a schema change is a one-file fix.
+- **Context % is approximate for Claude:** the true per-session context-window size is only handed to
+  Claude Code *statusline* commands, not to a standalone app — so it's computed against a fixed **1M**
+  (the max-context model these sessions always run). Codex rows are exact, because Codex writes
+  `model_context_window` into every rollout.
+- **Codex liveness lags by up to a few seconds.** With no registry to watch, it's resolved by a
+  background probe rather than a file event, so a session that just started (or just exited) can take a
+  pass or two to appear/disappear.
+- **Double-click-to-focus often can't resolve a Codex row.** Focus matches the terminal *tab title*
+  against the session name, and Codex doesn't set the tab title from its thread name the way Claude
+  Code does — so unless the tab happens to be named for it, the match is ambiguous and (by design) it
+  declines rather than foregrounding the wrong terminal.
+- **Codex sessions are excluded from restore.** The restore picker relaunches with `claude --resume`;
+  reopening a Codex thread isn't wired up.
+- Reads undocumented internal files; the schema may change between CLI versions. Parsing is isolated in
+  `SessionScanner` and `CodexScanner`, so a schema change is a one-file fix.
 
 ## Ideas / next
 - AppBar docking (reserve screen space, taskbar-style) instead of floating.
-- Codex support (`~/.codex`).
-- Quick filter box; cumulative token totals.
+- Restore for Codex threads (`codex resume <id>`); Codex plan usage in the footer (its rollouts carry
+  `rate_limits`, so unlike the Claude meter it needs no network call).
+- Quick filter box (incl. by provider); cumulative token totals.
