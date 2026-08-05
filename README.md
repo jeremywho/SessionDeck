@@ -37,7 +37,14 @@ provider/PID/Id/version (and the API-error text when it's in that state). Sessio
 virtual desktop** get a small colored pip at the row's left edge — one color per desktop, the
 current desktop shows none (hover it for "Desktop N"). A session running **subagents** shows a small
 **⚙ N** badge after its name — how many are working right now (hover for the total spawned this
-session). A footer shows the live count and a color legend.
+session); its slot is reserved on every row, so the model pills stay in a straight column whether or
+not agents are running. A footer shows the live count (hover for the Claude/Codex split) and a color
+legend.
+
+Below that, the **usage bar**: the signed-in Claude account on the left, and one fill-behind meter per
+plan limit on the right — the Claude ones (**5h**, **Week**, and any model-scoped limit), then
+**Codex**. Hover any meter for what it is, when it resets, and — for Codex — the plan and how old the
+reading is.
 
 The **title bar** holds a **settings** gear (opens the Settings window) and an **always-on-top pin**
 (accents when active), beside the min/max/close buttons. The Dark/Light Fluent theme is chosen in
@@ -163,6 +170,11 @@ started last week can be the one live in front of you.
 - **Detail:** `turn_context` → model + reasoning effort · `token_count` → context tokens and the model's
   own context window (so Codex rows are a percentage of *their* window, not the Claude default) ·
   `task_started` / `task_complete` → Working / Completed · tool calls → last tool.
+- **Plan usage:** `rate_limits`, which Codex stamps onto **every** `token_count` record — so the Codex
+  meter costs no API call, no credentials, and no cache to second-guess (the Claude meter needs all
+  three). Read from live sessions as they run, and seeded at startup from the most recent rollout so
+  the number is there before you start a Codex session, not after. Codex reports no severity of its
+  own, so the pill's color uses the same 70/85 thresholds as Context %.
 - **Names:** `~/.codex/session_index.jsonl`, falling back to the session's first message.
 - **Subagents:** each Codex subagent is a rollout of its own, tied to its session by the header's
   `session_id` (which is the **root** thread at any nesting depth), and rolled up into the same **⚙ N**
@@ -204,6 +216,9 @@ started last week can be the one live in front of you.
 - **Codex liveness lags by up to a few seconds.** With no registry to watch, it's resolved by a
   background probe rather than a file event, so a session that just started (or just exited) can take a
   pass or two to appear/disappear.
+- **The Codex meter is only as fresh as your last Codex turn.** It's read from the rollout rather than
+  polled, so with no Codex running it holds the last reading (its age is in the tooltip). The Claude
+  meters are polled and therefore current.
 - **Double-click-to-focus often can't resolve a Codex row.** Focus matches the terminal *tab title*
   against the session name, and Codex doesn't set the tab title from its thread name the way Claude
   Code does — so unless the tab happens to be named for it, the match is ambiguous and (by design) it
@@ -215,6 +230,5 @@ started last week can be the one live in front of you.
 
 ## Ideas / next
 - AppBar docking (reserve screen space, taskbar-style) instead of floating.
-- Restore for Codex threads (`codex resume <id>`); Codex plan usage in the footer (its rollouts carry
-  `rate_limits`, so unlike the Claude meter it needs no network call).
+- Restore for Codex threads (`codex resume <id>`).
 - Quick filter box (incl. by provider); cumulative token totals.

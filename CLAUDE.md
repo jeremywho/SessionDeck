@@ -84,6 +84,14 @@ The second footer bar: signed-in address on the left, one fill-behind pill per p
   per-model limits appear *only* in `limits` (as `weekly_scoped` + a model scope) while
   `seven_day_opus` and friends sit `null`. Each entry carries its own `severity`, so don't invent
   colour thresholds. The scoped pill is named from `scope.model.display_name` — don't hardcode "Fable".
+- **The Codex meter is a different animal** and shares only the `UsageMeter` type. It comes from
+  `rate_limits` on every `token_count` record in the rollout — no network, no credentials, no cache —
+  via `CodexScanner.PlanMeters`, seeded at startup from the newest rollout so it shows before you run
+  Codex. Codex sends **no severity**, so that one *does* derive its colour (the 70/85 Context%
+  thresholds); the "don't invent thresholds" rule above is about not overriding a server that has an
+  opinion, and Codex has none.
+- The bar rebuilds on a **value signature**, not list identity: the Codex meters are rebuilt from the
+  rollout on every read, so a reference check would rebuild every tick and kill any open tooltip.
 - **Don't judge the cache's freshness — it can't be done.** Two thresholds (15 then 45 min) both cried
   stale during normal use; the cache was measured 52 minutes old while a session ran flat out. It
   refreshes on nothing observable from outside. This is *why* the app polls: staleness is now measured
@@ -100,6 +108,11 @@ The second footer bar: signed-in address on the left, one fill-behind pill per p
 **Error** is *not* a status — it's read from the transcript (`isApiErrorMessage`) and sorts to the top.
 
 ## Gotchas (don't rediscover these)
+- **An `Auto` column that can collapse will move everything beside it.** The subagent badge's column
+  did exactly that: it measured to zero on rows with no agents, so the model pill sat further right
+  there than on rows with a badge, and pills visibly jumped as agents came and went. Its slot is now
+  reserved with `MinWidth` (not a fixed `Width` — a two-digit count still has to fit). Same trap for
+  anything else added to that cell.
 - **The footer bar is full at 460px.** The status legend already runs to the window edge at the minimum
   width, so the live-count label on the left has almost no slack — a "8 Claude, 1 Codex" breakdown there
   overlapped the legend and had to move into its tooltip. Verify footer changes at 460px, not at your

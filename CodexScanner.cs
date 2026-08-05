@@ -184,6 +184,9 @@ internal static class CodexScanner
     /// </summary>
     public static void Probe()
     {
+        // Before the liveness check, not after: the plan meter should show even with no Codex running.
+        if (!_seeded) { _seeded = true; SeedPlanUsage(); }
+
         bool anyCodex;
         try { anyCodex = Process.GetProcessesByName("codex").Length > 0; }
         catch { anyCodex = false; }
@@ -499,13 +502,20 @@ internal static class CodexScanner
         {
             Try(line, p =>
             {
-                if (!p.TryGetProperty("info", out var info)) return;
-                // last_token_usage is THIS turn's prompt — i.e. what's actually in the window.
-                // total_token_usage is cumulative for the thread (tens of millions) and is not context.
-                if (info.TryGetProperty("last_token_usage", out var last))
-                    d.Ctx = Num(last, "input_tokens");
-                long w = Num(info, "model_context_window");
-                if (w > 0) d.Window = w;
+                if (p.TryGetProperty("info", out var info))
+                {
+                    // last_token_usage is THIS turn's prompt — i.e. what's actually in the window.
+                    // total_token_usage is cumulative for the thread (tens of millions) and is not context.
+                    if (info.TryGetProperty("last_token_usage", out var last))
+                        d.Ctx = Num(last, "input_tokens");
+                    long w = Num(info, "model_context_window");
+                    if (w > 0) d.Window = w;
+                }
+
+                // The same record carries the account's plan limits — which is why the Codex meter
+                // needs no network call, unlike the Claude one.
+                if (p.TryGetProperty("rate_limits", out var rl) && rl.ValueKind == JsonValueKind.Object)
+                    NotePlanUsage(rl, stamp);
             });
             return;
         }
@@ -560,6 +570,143 @@ internal static class CodexScanner
                    System.Globalization.DateTimeStyles.AssumeUniversal, out var parsed)
             ? parsed.ToLocalTime()
             : DateTime.MinValue;
+    }
+
+    // ================================================================ plan usage
+
+    /// <summary>Codex plan limits, newest first-hand reading wins. Written from both threads.</summary>
+    static List<UsageMeter> _planMeters = new();
+    static DateTime _planAt = DateTime.MinValue;
+    static string _planType = "";
+    static bool _seeded;
+
+    /// <summary>
+    /// The account's Codex plan usage, or an empty list if none has been seen. Free — Codex stamps
+    /// <c>rate_limits</c> onto every <c>token_count</c> record, so unlike the Claude meters this needs
+    /// no API call and no credentials.
+    /// </summary>
+    public static List<UsageMeter> PlanMeters { get { lock (_gate) return new List<UsageMeter>(_planMeters); } }
+
+    /// <summary>When the reading we're showing was written by Codex (not when we read it).</summary>
+    public static DateTime PlanUpdatedAt { get { lock (_gate) return _planAt; } }
+
+    public static string PlanType { get { lock (_gate) return _planType; } }
+
+    /// <summary>
+    /// Record a <c>rate_limits</c> block. Keeps the newest by the record's own timestamp: limits are
+    /// per-account, so every live session reports the same thing and the freshest reading wins.
+    /// </summary>
+    static void NotePlanUsage(JsonElement rl, DateTime at)
+    {
+        lock (_gate)
+        {
+            if (at != DateTime.MinValue && _planAt != DateTime.MinValue && at < _planAt) return;
+
+            var meters = BuildPlanMeters(rl, at);
+            if (meters.Count == 0) return;
+
+            _planMeters = meters;
+            _planAt = at;
+            _planType = Str(rl, "plan_type");
+        }
+    }
+
+    /// <summary>Test seam: build the meters from a <c>rate_limits</c> object's JSON.</summary>
+    public static List<UsageMeter> ParsePlanUsage(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            return doc.RootElement.ValueKind == JsonValueKind.Object
+                ? BuildPlanMeters(doc.RootElement, DateTime.MinValue)
+                : new List<UsageMeter>();
+        }
+        catch (JsonException) { return new List<UsageMeter>(); }
+    }
+
+    static List<UsageMeter> BuildPlanMeters(JsonElement rl, DateTime at)
+    {
+        var meters = new List<UsageMeter>();
+        AddWindow(meters, rl, "primary");
+        AddWindow(meters, rl, "secondary");
+        if (meters.Count == 0) return meters;
+
+        // Two windows need telling apart; a lone one doesn't, and "Codex" is the shorter label —
+        // which matters, the usage bar is already full at the 460px minimum width.
+        if (meters.Count > 1)
+            foreach (var m in meters) m.Label = $"Codex {m.Label}";
+        else
+            meters[0].Label = "Codex";
+
+        string plan = Str(rl, "plan_type");
+        foreach (var m in meters)
+        {
+            m.Note = plan.Length > 0 ? $"Codex {PlanName(plan)} plan" : "Codex";
+            m.ReadAt = at;
+        }
+        return meters;
+    }
+
+    static void AddWindow(List<UsageMeter> into, JsonElement rl, string name)
+    {
+        if (!rl.TryGetProperty(name, out var w) || w.ValueKind != JsonValueKind.Object) return;
+        if (!w.TryGetProperty("used_percent", out var up) || up.ValueKind != JsonValueKind.Number) return;
+
+        int pct = (int)Math.Round(up.GetDouble(), MidpointRounding.AwayFromZero);
+        var meter = new UsageMeter
+        {
+            Label = WindowLabel(Num(w, "window_minutes")),
+            Percent = Math.Clamp(pct, 0, 100),
+            // Codex reports no severity of its own — unlike the Claude limits, where inventing a
+            // threshold would be overriding the server. Reuse the app's existing context thresholds
+            // so one number doesn't mean two different colours in the same window.
+            Severity = pct > 85 ? "critical" : pct > 70 ? "warning" : "normal",
+        };
+        long resets = Num(w, "resets_at");
+        if (resets > 0) meter.ResetsAt = DateTimeOffset.FromUnixTimeSeconds(resets).LocalDateTime;
+        into.Add(meter);
+    }
+
+    /// <summary>Tidy the plan id for display. An unknown value renders as-is rather than vanishing —
+    /// the set is theirs to grow, not ours to enumerate.</summary>
+    static string PlanName(string plan) => plan.ToLowerInvariant() switch
+    {
+        "prolite" => "Pro Lite",
+        "pro" => "Pro",
+        "plus" => "Plus",
+        "team" => "Team",
+        "business" => "Business",
+        "enterprise" => "Enterprise",
+        _ => plan,
+    };
+
+    static string WindowLabel(long minutes) => minutes switch
+    {
+        <= 0 => "",
+        10080 => "wk",
+        300 => "5h",
+        < 1440 => $"{minutes / 60}h",
+        _ => $"{minutes / 1440}d",
+    };
+
+    /// <summary>
+    /// Read the plan limits off the most recent rollouts, once, at startup. Without this the meter
+    /// would stay blank until you next ran Codex — but "how much budget do I have left" is a question
+    /// you ask *before* starting, so it's worth one tail read of a file we're not otherwise touching.
+    /// </summary>
+    static void SeedPlanUsage()
+    {
+        try
+        {
+            var files = RecentRollouts();
+            for (int i = 0; i < files.Count && i < 3; i++)
+            {
+                var d = new Detail();
+                foreach (var line in ReadTail(files[i].Path, 256 * 1024)) ParseLine(line, d);
+                lock (_gate) if (_planMeters.Count > 0) return;
+            }
+        }
+        catch { }
     }
 
     // ================================================================ subagents

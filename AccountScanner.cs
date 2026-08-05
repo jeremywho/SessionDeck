@@ -17,8 +17,18 @@ internal sealed class UsageMeter
     public string Severity { get; set; } = "";   // "normal" / "warning" / "critical" — open set
     public DateTime ResetsAt { get; set; }       // local; MinValue when absent
 
+    /// <summary>Extra tooltip line naming where the number came from (e.g. the Codex plan).</summary>
+    public string Note { get; set; } = "";
+
+    /// <summary>When the source wrote this reading; MinValue to omit. Unlike the Claude meters — which
+    /// the app polls on its own schedule — the Codex numbers are only as fresh as your last Codex turn,
+    /// so the age has to be visible somewhere.</summary>
+    public DateTime ReadAt { get; set; }
+
     public string PercentDisplay => $"{Percent}%";
 
+    // A getter, not a stored string: it's evaluated when the tooltip opens, so "resets in…" and the
+    // reading's age stay true even though the meter object itself is only rebuilt when a value changes.
     public string Tooltip
     {
         get
@@ -33,6 +43,9 @@ internal sealed class UsageMeter
                         ? $"\nResets in {(int)d.TotalHours}h {d.Minutes}m ({ResetsAt:h:mm tt})"
                         : $"\nResets in {(int)d.TotalDays}d {d.Hours}h ({ResetsAt:ddd h:mm tt})";
             }
+            if (Note.Length > 0) s += $"\n{Note}";
+            if (ReadAt != DateTime.MinValue)
+                s += $"\nAs of your last Codex turn, {AccountInfo.AgeText(DateTime.Now - ReadAt)} ago";
             return s;
         }
     }

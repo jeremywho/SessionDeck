@@ -17,10 +17,15 @@ internal static class Program
                 CodexScanner.Probe();
                 if (i < 3) Thread.Sleep(3000);
             }
+            // Printed BEFORE the scan on purpose: at this point nothing has parsed a live session, so
+            // anything here came from the startup seed — the path that has to work when no Codex is running.
+            var sb = new System.Text.StringBuilder();
+            foreach (var m in CodexScanner.PlanMeters)
+                sb.AppendLine($"PLAN\t{m.Label}\t{m.Percent}%\t{m.Severity}\tresets {m.ResetsAt:g}\t{m.Note}");
+
             var all = SessionScanner.Scan();
             all.AddRange(CodexScanner.Scan());
 
-            var sb = new System.Text.StringBuilder();
             foreach (var s in all)
                 sb.AppendLine($"{s.Provider}\t{s.Pid}\t{(s.ApiError ? "ERROR" : s.Status)}\t{s.ShortId}\t{s.Model}\t{s.Effort}\t{s.ContextDisplay}\t{s.SubagentsActive}/{s.SubagentsTotal}\t{s.LastTool}\t{s.DisplayName}\t{s.Cwd}");
             System.IO.File.WriteAllText(

@@ -171,7 +171,11 @@
                     <Grid.ColumnDefinitions>
                       <ColumnDefinition Width="*"/>
                       <ColumnDefinition Width="Auto"/>
-                      <ColumnDefinition Width="Auto"/>
+                      <!-- The subagent badge's slot is reserved whether or not a badge is showing:
+                           as a plain Auto column it collapsed to nothing on most rows, which shoved
+                           the model pill right and left again as agents came and went. MinWidth (not
+                           a fixed Width) so a two-digit count still fits. -->
+                      <ColumnDefinition Width="Auto" MinWidth="42"/>
                     </Grid.ColumnDefinitions>
                     <TextBlock Grid.Column="0" Text="{Binding Name}" FontSize="14.5" VerticalAlignment="Center"
                                Foreground="{DynamicResource FgBrush}" TextTrimming="CharacterEllipsis"/>
@@ -195,7 +199,8 @@
                       </StackPanel>
                     </Border>
                     <!-- live-subagent count: shown only while the session has agents working -->
-                    <Border Grid.Column="2" VerticalAlignment="Center" Margin="8,0,0,0" Padding="6,1"
+                    <Border Grid.Column="2" VerticalAlignment="Center" HorizontalAlignment="Left"
+                            Margin="8,0,0,0" Padding="6,1"
                             CornerRadius="8" Background="{DynamicResource BlueBrush}"
                             Visibility="{Binding HasActiveSubagents, Converter={StaticResource BoolToVis}}"
                             ToolTip="{Binding SubagentTooltip}">

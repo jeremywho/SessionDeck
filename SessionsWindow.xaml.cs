@@ -25,7 +25,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     public ObservableCollection<UsageMeter> Meters { get; } = new();
     List<UsageMeter>? _liveMeters;      // last successful API fetch; null until one lands
     DateTime _liveAt;                   // when that fetch succeeded
-    object? _appliedMeters;             // which list is currently mirrored into Meters
+    object? _appliedMeters;             // value signature of what's currently mirrored into Meters
     string _accountText = "";
     string _usageState = "";
     string _accountTip = "";
@@ -503,11 +503,21 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         bool live = _liveMeters != null;
         var chosen = live ? _liveMeters! : acct.Meters;
 
-        if (!ReferenceEquals(chosen, _appliedMeters))
+        // Codex's limits ride along in its rollout logs, so they cost nothing to add and are always
+        // first-hand — no API call, no credentials, no cache to second-guess. They come last so the
+        // Claude meters keep their established positions.
+        var combined = new List<UsageMeter>(chosen);
+        combined.AddRange(CodexScanner.PlanMeters);
+
+        // Compared by value, not by reference: the Codex meters are rebuilt from the rollout on every
+        // read, so a reference check would rebuild the bar every tick and kill any tooltip under the
+        // cursor. Percentages are whole numbers, so this settles almost immediately.
+        string sig = string.Join("|", combined.ConvertAll(m => $"{m.Label}:{m.Percent}:{m.Severity}"));
+        if (!string.Equals(sig, _appliedMeters as string, StringComparison.Ordinal))
         {
-            _appliedMeters = chosen;
+            _appliedMeters = sig;
             Meters.Clear();
-            foreach (var m in chosen) Meters.Add(m);
+            foreach (var m in combined) Meters.Add(m);
         }
 
         var age = DateTime.Now - _liveAt;
