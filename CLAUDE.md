@@ -190,6 +190,13 @@ The second footer bar: signed-in address on the left, one fill-behind pill per p
   Renaming a *running* exe is allowed on Windows (delete isn't) — the same trick Claude Code uses.
 - **Rollback:** an `update.pending.json` boot-counter; if a post-update boot never reaches
   `Updater.ConfirmStartupOk()` (window up ~6s) and the app is relaunched, the next boot reverts to `.old`.
+- **Update checks fire on launch, every 30 min, and whenever the window is shown.** The window trigger
+  is the one that matters in practice — the periodic tick used to be 4 hours, which meant a release cut
+  between ticks stayed invisible until a restart, and `DispatcherTimer` doesn't tick while the machine
+  sleeps either. All callers go through `Updater.CheckAsync`, which enforces `MinCheckGap` so repeated
+  opens can't respawn `gh`. **The show-trigger is gated on `_updaterStarted`**: the first `ShowWindow`
+  runs *before* `StartUpdater` subscribes to `UpdateStaged`, so checking there could stage a release
+  with nothing listening — and the button would stay hidden, which is the bug this all exists to fix.
 - **Test hooks:** `CSM_INSTALL_DIR` (redirect install dir to a temp path), `CSM_NO_INSTALL=1` (skip
   self-install), `CSM_FAKE_UPDATE=<tag>` (force the title-bar button), `CSM_DATA_DIR` (redirect the
   `active-sessions.json` dir — the unit tests set it), `CSM_NO_USAGE_API=1` (force the usage fetch to

@@ -93,7 +93,9 @@ The released exe is **self-installing**. Run it once from anywhere and it copies
 shortcut, and relaunches from there. That per-user location is the whole trick to **seamless
 auto-update**: the app can rewrite its own exe without a UAC prompt.
 
-Once installed it checks GitHub Releases in the background (on launch + every few hours) via the
+Once installed it checks GitHub Releases in the background — on launch, every 30 minutes, and whenever
+you open the window (so the button is there when you'd actually look for it; repeated opens are
+debounced so they can't respawn `gh`) — via the
 **`gh` CLI** for auth — so it works against the private repo with **no token baked into the app**.
 When a newer release is found it silently downloads + stages it, then a **↻ button appears in the
 title bar**. Click it to restart into the new version — near-instant, since all state (settings,

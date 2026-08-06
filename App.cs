@@ -71,8 +71,11 @@ internal sealed class App : Application
 
     // ---------------- auto-update ----------------
 
+    bool _updaterStarted;
+
     void StartUpdater()
     {
+        _updaterStarted = true;
         // A freshly-updated build: once it's been up a few seconds, clear the rollback marker + drop .old.
         var settle = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(6) };
         settle.Tick += (_, _) => { settle.Stop(); Updater.ConfirmStartupOk(); };
@@ -84,10 +87,24 @@ internal sealed class App : Application
 
         Updater.UpdateStaged += () => Dispatcher.InvokeAsync(() => _window?.ShowUpdateReady(Updater.StagedTag ?? ""));
 
-        _ = Updater.CheckAsync();   // check now,
-        var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromHours(4) };  // then periodically
+        // Check on launch, then every 30 minutes. The old 4-hour tick meant that in practice the
+        // button only ever appeared after a restart — a release cut between two ticks stayed invisible
+        // for hours. Each check is two short-lived `gh` calls, so a shorter period costs ~nothing.
+        // The window-shown trigger below is what actually makes it feel immediate; this covers the
+        // case where the window is left open, and DispatcherTimer doesn't tick while the machine
+        // sleeps, so the periodic one can't be the only answer either.
+        _ = Updater.CheckAsync();
+        var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMinutes(30) };
         timer.Tick += (_, _) => { _ = Updater.CheckAsync(); };
         timer.Start();
+    }
+
+    /// <summary>Opening the window is the moment you'd notice an update button, so look then —
+    /// debounced inside <see cref="Updater.CheckAsync"/> so repeated opens don't re-run `gh`.</summary>
+    void CheckForUpdateOnShow()
+    {
+        if (Environment.GetEnvironmentVariable("CSM_FAKE_UPDATE") is { Length: > 0 }) return;
+        _ = Updater.CheckAsync();
     }
 
     /// <summary>Save state, swap the staged exe into place, and relaunch it.</summary>
@@ -137,6 +154,12 @@ internal sealed class App : Application
         _window.Show();
         if (_window.WindowState == WindowState.Minimized) _window.WindowState = WindowState.Normal;
         _window.Activate();
+
+        // Gated on the updater being wired up: the first ShowWindow happens during startup, BEFORE
+        // StartUpdater subscribes to UpdateStaged. Checking there could stage a release with nothing
+        // listening, and the button would stay hidden until the next check — the exact bug this is
+        // meant to fix. StartUpdater does its own check moments later anyway.
+        if (_updaterStarted) CheckForUpdateOnShow();
     }
 
     SettingsWindow? _settingsWindow;

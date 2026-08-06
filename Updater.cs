@@ -29,10 +29,28 @@ internal static class Updater
 
     static Version Norm(Version v) => new(Math.Max(0, v.Major), Math.Max(0, v.Minor), Math.Max(0, v.Build));
 
+    /// <summary>
+    /// Shortest gap between real checks, whoever asks. The periodic timer alone can't get near this,
+    /// but showing the window also triggers a check — and without a floor, opening and closing the
+    /// window repeatedly would spawn a pair of `gh` processes every time.
+    /// </summary>
+    public static readonly TimeSpan MinCheckGap = TimeSpan.FromMinutes(5);
+
+    static DateTime _lastCheck = DateTime.MinValue;
+
+    /// <summary>Whether enough time has passed since the last check. Pure, so the debounce is testable
+    /// without spawning anything.</summary>
+    public static bool ShouldCheckNow(DateTime lastCheck, DateTime now, TimeSpan gap) =>
+        lastCheck == DateTime.MinValue || now - lastCheck >= gap;
+
     /// <summary>Ask GitHub (via gh) for the latest release; if it's newer, download + stage it. Idempotent.</summary>
     public static async Task CheckAsync()
     {
         if (!Installer.IsInstalledInstance()) return;   // dormant in dev / uninstalled runs
+        if (!ShouldCheckNow(_lastCheck, DateTime.UtcNow, MinCheckGap)) return;
+        // Stamped before the work, not after: a slow or failing `gh` shouldn't let a second trigger
+        // pile another pair of processes on top of the one already running.
+        _lastCheck = DateTime.UtcNow;
         try
         {
             string? tag = (await Gh($"api repos/{Repo}/releases/latest --jq .tag_name"))?.Trim();
