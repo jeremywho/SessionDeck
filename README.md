@@ -94,9 +94,9 @@ shortcut, and relaunches from there. That per-user location is the whole trick t
 auto-update**: the app can rewrite its own exe without a UAC prompt.
 
 Once installed it checks GitHub Releases in the background — on launch, every 30 minutes, and whenever
-you open the window (so the button is there when you'd actually look for it; repeated opens are
-debounced so they can't respawn `gh`) — via the
-**`gh` CLI** for auth — so it works against the private repo with **no token baked into the app**.
+you open the window, so the button is there when you'd actually look for it (repeated opens are
+debounced so they can't respawn `gh`). Auth goes through the **`gh` CLI**, so it works against the
+private repo with **no token baked into the app**.
 When a newer release is found it silently downloads + stages it, then a **↻ button appears in the
 title bar**. Click it to restart into the new version — near-instant, since all state (settings,
 window position, columns, the live list) is already on disk. If a freshly-updated build crash-loops
@@ -173,9 +173,10 @@ DigiCert KeyLocker), swap the workflow's *Sign the exe* step for that provider's
   CPU is ~0, with no hooks or edits to the user's files.
 - **Focus:** finds the session's host process (parent-process-tree walk), enumerates that process's
   top-level windows, then uses UI Automation to find the *tab* whose title matches the session —
-  across all those windows — selects that tab and foregrounds its window. Needed because Windows
-  Terminal spreads tabs across several windows under one process, so `Process.MainWindowHandle` can't
-  identify the right one. (`--windows` dumps the mapping.)
+  across all those windows — selects that tab, foregrounds its window, and finally moves keyboard focus
+  into the terminal pane so you can type straight away (selecting a tab alone leaves focus on the tab
+  header). Needed because Windows Terminal spreads tabs across several windows under one process, so
+  `Process.MainWindowHandle` can't identify the right one. (`--windows` dumps the mapping.)
 
 ### Codex
 Codex publishes **no live registry** — there's only an append-only rollout log per thread at
@@ -240,10 +241,12 @@ started last week can be the one live in front of you.
 - **The Codex meter is only as fresh as your last Codex turn.** It's read from the rollout rather than
   polled, so with no Codex running it holds the last reading (its age is in the tooltip). The Claude
   meters are polled and therefore current.
-- **Double-click-to-focus often can't resolve a Codex row.** Focus matches the terminal *tab title*
-  against the session name, and Codex doesn't set the tab title from its thread name the way Claude
-  Code does — so unless the tab happens to be named for it, the match is ambiguous and (by design) it
-  declines rather than foregrounding the wrong terminal.
+- **Codex sessions started by older Codex builds can't be focused.** Focus matches the terminal *tab
+  title*; current Codex sets it to the thread's UUID (which the app matches), but older builds left it
+  at the shell default, and matching on that would collide with unrelated tabs. Restarting such a
+  session fixes it.
+- **A Codex session isn't listed until its first turn.** An idle Codex TUI writes no rollout, and the
+  rollout is the only thing there is to discover.
 - Reads undocumented internal files; the schema may change between CLI versions. Parsing is isolated in
   `SessionScanner` and `CodexScanner`, so a schema change is a one-file fix.
 

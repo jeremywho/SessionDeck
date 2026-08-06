@@ -151,7 +151,15 @@ internal static class SessionLauncher
                                                       IEnumerable<string>? strip = null)
     {
         string window = target == LaunchTarget.NewWindow ? "-1" : "0";
-        var psi = new ProcessStartInfo("wt.exe") { UseShellExecute = false };
+        var psi = new ProcessStartInfo("wt.exe")
+        {
+            UseShellExecute = false,
+            // wt.exe is a short-lived launcher that hands off to WindowsTerminal.exe and exits —
+            // measured at ~90ms. Started from a GUI process without this, Windows gives it a console
+            // of its own, so you see a window flash up and vanish just before the real terminal
+            // appears. WindowsTerminal.exe is a separate GUI process and is unaffected.
+            CreateNoWindow = true,
+        };
         foreach (var a in new[] { "-w", window, "new-tab", "-d", cwd, "pwsh", "-NoExit", "-Command", cmd })
             psi.ArgumentList.Add(a);
         StripFromChild(psi, strip ?? InjectedColorKillSwitches());

@@ -108,6 +108,18 @@ The second footer bar: signed-in address on the left, one fill-behind pill per p
 **Error** is *not* a status — it's read from the transcript (`isApiErrorMessage`) and sorts to the top.
 
 ## Gotchas (don't rediscover these)
+- **Codex titles its terminal tab with the thread UUID**, not with anything human-readable — that's why
+  `SessionInfo.SessionId` is one of `WindowActivator.Candidates`. Without it nothing matched and
+  double-clicking a Codex row did nothing at all. Sessions started by older Codex builds leave the tab
+  at the shell's default (the cwd leaf, e.g. `Jeremy`) and still can't be matched; don't "fix" that by
+  matching on the cwd leaf, which collides with any Claude tab whose name contains it.
+- **Selecting a tab focuses its HEADER, not the session.** After `TabSelector.Select`, keystrokes go to
+  the tab strip until something focuses the pane — the element classed `TermControl`. That's what
+  `TabSelector.FocusTerminal` is for, and it must run *after* the window is foregrounded, since
+  `SetFocus` on a background window is refused.
+- **An idle Codex TUI writes no rollout at all** until its first turn, so a freshly opened Codex session
+  is invisible to the app (and therefore un-focusable) until you actually send it something. Discovery
+  is rollout-based; there is nothing else to see.
 - **Launched terminals inherit THIS app's environment.** `Start` uses `UseShellExecute=false`, so
   whatever environment the app was started with is handed to every session it opens. An agent harness
   that sets **`NO_COLOR=1`** for clean tool output relaunched the app as a child, and from then on

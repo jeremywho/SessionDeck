@@ -77,6 +77,36 @@ internal static class TabSelector
         else if (tab.TryGetCurrentPattern(InvokePattern.Pattern, out object ip)) ((InvokePattern)ip).Invoke();
     }
 
+    /// <summary>The class name Windows Terminal gives the control that actually holds the session.</summary>
+    const string TerminalPaneClass = "TermControl";
+
+    /// <summary>
+    /// Put keyboard focus in the terminal itself so you can start typing.
+    ///
+    /// Selecting a tab focuses its HEADER — the tab is visibly highlighted, keystrokes go to the tab
+    /// strip, and you have to click the terminal before typing does anything. In WT's UIA tree the
+    /// session lives in a sibling of the tab strip, a keyboard-focusable element classed
+    /// <c>TermControl</c>; focusing that is what makes double-click land you at the prompt.
+    ///
+    /// Call AFTER the window is foregrounded — SetFocus on a background window is refused.
+    /// </summary>
+    public static void FocusTerminal(IntPtr windowHwnd)
+    {
+        try
+        {
+            var root = AutomationElement.FromHandle(windowHwnd);
+            if (root == null) return;
+
+            // Re-queried after the tab switch rather than cached: WT realizes the content of the
+            // active tab, so this resolves to the session we just brought forward.
+            var pane = root.FindFirst(TreeScope.Descendants, new AndCondition(
+                new PropertyCondition(AutomationElement.ClassNameProperty, TerminalPaneClass),
+                new PropertyCondition(AutomationElement.IsKeyboardFocusableProperty, true)));
+            pane?.SetFocus();
+        }
+        catch { }   // best-effort: the window is already foreground, which is most of the win
+    }
+
     /// <summary>Lowercase, alphanumerics only — strips the spinner/check glyph prefixes WT shows.</summary>
     public static string Normalize(string? s)
     {

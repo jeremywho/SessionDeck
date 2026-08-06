@@ -29,21 +29,30 @@ internal static class WindowActivator
             {
                 try { TabSelector.Select(hit.Value.Tab); } catch { }
                 ForceForeground(hit.Value.WindowHwnd);
+                TabSelector.FocusTerminal(hit.Value.WindowHwnd);
                 return true;
             }
         }
 
         // Fallback: match the window title (single-tab windows where UIA didn't enumerate tabs).
         IntPtr byTitle = MatchByTitle(windows, candidates);
-        if (byTitle != IntPtr.Zero) { ForceForeground(byTitle); return true; }
+        if (byTitle != IntPtr.Zero) { ForceForeground(byTitle); TabSelector.FocusTerminal(byTitle); return true; }
 
         // Last resort: exactly one window -> use it; otherwise don't focus the wrong one.
-        if (windows.Count == 1) { ForceForeground(windows[0].Hwnd); return true; }
+        if (windows.Count == 1) { ForceForeground(windows[0].Hwnd); TabSelector.FocusTerminal(windows[0].Hwnd); return true; }
         return false;
     }
 
+    /// <summary>
+    /// Strings that might be the terminal's tab title, longest first.
+    ///
+    /// <see cref="SessionInfo.SessionId"/> is in here for Codex: it sets the terminal title to its
+    /// thread UUID rather than to anything human-readable, so without the id nothing matched and
+    /// double-clicking a Codex row did nothing at all. A UUID is specific enough that it can't
+    /// collide with a Claude tab's title, which is why it's safe to try for both.
+    /// </summary>
     static List<string> Candidates(SessionInfo s) =>
-        new[] { s.Name, s.Title, s.DisplayName }
+        new[] { s.Name, s.Title, s.DisplayName, s.SessionId }
             .Where(x => !string.IsNullOrWhiteSpace(x))
             .Select(TabSelector.Normalize)
             .Where(x => x.Length > 0)
