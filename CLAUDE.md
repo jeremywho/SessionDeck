@@ -108,11 +108,17 @@ The second footer bar: signed-in address on the left, one fill-behind pill per p
 **Error** is *not* a status — it's read from the transcript (`isApiErrorMessage`) and sorts to the top.
 
 ## Gotchas (don't rediscover these)
-- **Codex titles its terminal tab with the thread UUID**, not with anything human-readable — that's why
-  `SessionInfo.SessionId` is one of `WindowActivator.Candidates`. Without it nothing matched and
-  double-clicking a Codex row did nothing at all. Sessions started by older Codex builds leave the tab
-  at the shell's default (the cwd leaf, e.g. `Jeremy`) and still can't be matched; don't "fix" that by
-  matching on the cwd leaf, which collides with any Claude tab whose name contains it.
+- **Focus resolves a tab by asking the session's console for its title, not by guessing it.**
+  `ConsoleTitle.Read` attaches to the session's console (`AttachConsole`) and reads the real title,
+  which is the same string UIA reports as the tab's name. Guessing from session metadata was the
+  original approach and it rots: Codex titles its tab with the thread UUID at startup, but a
+  long-running session had that replaced by the shell's cwd (`Jeremy`) — so every metadata candidate
+  missed. The metadata candidates remain only as a fallback.
+- **Identical titles are broken by a temporary marker.** Two Codex sessions both sitting at `Jeremy`
+  cannot be told apart by title, and nothing in UIA maps a tab to the process inside it. So
+  `ActivateByConsoleTitle` stamps a unique marker on that session's console, polls for the tab wearing
+  it, activates it, and restores the old title in a `finally`. Verified the right tab is chosen by
+  marking a session externally and confirming its tab was the selected one in the foregrounded window.
 - **Selecting a tab focuses its HEADER, not the session.** After `TabSelector.Select`, keystrokes go to
   the tab strip until something focuses the pane — the element classed `TermControl`. That's what
   `TabSelector.FocusTerminal` is for, and it must run *after* the window is foregrounded, since

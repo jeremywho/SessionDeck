@@ -45,6 +45,35 @@ internal static class TabSelector
         return null;
     }
 
+    /// <summary>Every tab whose accessible name matches <paramref name="normalized"/> exactly. Returns
+    /// them all rather than the first, because "how many" is the question that decides whether a match
+    /// can be trusted — two tabs with the same title cannot be told apart by title.</summary>
+    public static List<(IntPtr WindowHwnd, AutomationElement Tab)> FindTabsExact(
+        IEnumerable<IntPtr> windows, string normalized)
+    {
+        var hits = new List<(IntPtr, AutomationElement)>();
+        if (normalized.Length == 0) return hits;
+
+        foreach (var hwnd in windows)
+        {
+            AutomationElement? root;
+            try { root = AutomationElement.FromHandle(hwnd); } catch { continue; }
+            if (root == null) continue;
+
+            AutomationElementCollection tabs;
+            try
+            {
+                tabs = root.FindAll(TreeScope.Descendants,
+                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.TabItem));
+            }
+            catch { continue; }
+
+            foreach (AutomationElement t in tabs)
+                if (Normalize(t.Current.Name) == normalized) hits.Add((hwnd, t));
+        }
+        return hits;
+    }
+
     /// <summary>All TabItem accessible names (normalized) across the given windows, paired with their window.
     /// One UIA pass — used by the virtual-desktop resolver to map every session's tab to its host window.</summary>
     public static List<(IntPtr Hwnd, string Norm)> EnumerateTabs(IEnumerable<IntPtr> windows)

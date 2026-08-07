@@ -19,19 +19,20 @@ internal static class WindowActivator
         if (hostPid == 0 || !byPid.TryGetValue(hostPid, out var windows) || windows.Count == 0)
             return false;
 
+        var hwnds = windows.Select(w => w.Hwnd).ToList();
+
+        // Best: ask the session's own console what its title is, and find the tab wearing it. This is
+        // ground truth rather than a guess from session metadata, which is what the candidate list
+        // below is — and guesses go stale the moment a session retitles itself.
+        if (ActivateByConsoleTitle(s, hwnds)) return true;
+
         var candidates = Candidates(s);
 
         // Primary: match a TAB by its UIA name across all host windows (covers multi-tab windows).
         if (candidates.Count > 0)
         {
-            var hit = TabSelector.FindTab(windows.Select(w => w.Hwnd), candidates);
-            if (hit.HasValue)
-            {
-                try { TabSelector.Select(hit.Value.Tab); } catch { }
-                ForceForeground(hit.Value.WindowHwnd);
-                TabSelector.FocusTerminal(hit.Value.WindowHwnd);
-                return true;
-            }
+            var hit = TabSelector.FindTab(hwnds, candidates);
+            if (hit.HasValue) return Activate(hit.Value.WindowHwnd, hit.Value.Tab);
         }
 
         // Fallback: match the window title (single-tab windows where UIA didn't enumerate tabs).
@@ -41,6 +42,49 @@ internal static class WindowActivator
         // Last resort: exactly one window -> use it; otherwise don't focus the wrong one.
         if (windows.Count == 1) { ForceForeground(windows[0].Hwnd); TabSelector.FocusTerminal(windows[0].Hwnd); return true; }
         return false;
+    }
+
+    /// <summary>
+    /// Focus the tab whose title matches the session's ACTUAL console title.
+    ///
+    /// Two outcomes are useful. Exactly one tab wears that title — activate it, nothing is disturbed.
+    /// Several tabs share it (two Codex sessions both sitting at <c>Jeremy</c>, the shell's cwd) — then
+    /// the title genuinely cannot identify a tab, so we stamp a unique marker on this session's console,
+    /// let Windows Terminal repaint, activate the tab now wearing the marker, and put the old title back.
+    /// The marker is visible for a fraction of a second and is the only way to break the tie: nothing
+    /// in UIA maps a tab to the process running inside it.
+    /// </summary>
+    static bool ActivateByConsoleTitle(SessionInfo s, List<IntPtr> windows)
+    {
+        string? title = ConsoleTitle.Read(s.Pid);
+        if (string.IsNullOrWhiteSpace(title)) return false;
+
+        var hits = TabSelector.FindTabsExact(windows, TabSelector.Normalize(title));
+        if (hits.Count == 1) return Activate(hits[0].WindowHwnd, hits[0].Tab);
+        if (hits.Count == 0) return false;      // title says nothing useful — fall back to the guesses
+
+        string marker = "csm-" + Guid.NewGuid().ToString("N").Substring(0, 12);
+        if (!ConsoleTitle.Write(s.Pid, marker)) return false;
+        try
+        {
+            // WT repaints the tab asynchronously, so poll rather than assume.
+            for (int i = 0; i < 20; i++)
+            {
+                var marked = TabSelector.FindTabsExact(windows, TabSelector.Normalize(marker));
+                if (marked.Count == 1) return Activate(marked[0].WindowHwnd, marked[0].Tab);
+                System.Threading.Thread.Sleep(25);
+            }
+            return false;
+        }
+        finally { ConsoleTitle.Write(s.Pid, title); }   // always hand the session its title back
+    }
+
+    static bool Activate(IntPtr windowHwnd, System.Windows.Automation.AutomationElement tab)
+    {
+        try { TabSelector.Select(tab); } catch { }
+        ForceForeground(windowHwnd);
+        TabSelector.FocusTerminal(windowHwnd);
+        return true;
     }
 
     /// <summary>
@@ -93,6 +137,14 @@ internal static class WindowActivator
         int hostPid = FindHostPid(s.Pid, byPid);
         if (hostPid == 0 || !byPid.TryGetValue(hostPid, out var windows) || windows.Count == 0)
             return "(no host window)";
+
+        string? live = ConsoleTitle.Read(s.Pid);
+        if (!string.IsNullOrWhiteSpace(live))
+        {
+            var exact = TabSelector.FindTabsExact(windows.Select(w => w.Hwnd), TabSelector.Normalize(live));
+            if (exact.Count == 1) return $"console title '{live}' -> its tab (hwnd {exact[0].WindowHwnd.ToInt64()})";
+            if (exact.Count > 1) return $"console title '{live}' matches {exact.Count} tabs -> marker tiebreak";
+        }
 
         var candidates = Candidates(s);
         var hit = TabSelector.FindTab(windows.Select(w => w.Hwnd), candidates);
