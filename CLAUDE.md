@@ -117,6 +117,16 @@ The second footer bar: signed-in address on the left, one fill-behind pill per p
 **Error** is *not* a status — it's read from the transcript (`isApiErrorMessage`) and sorts to the top.
 
 ## Gotchas (don't rediscover these)
+- **Nothing without a terminal gets a row.** `CodexAttribution.Fold` removes every headless session —
+  Codex companion/exec threads *and* Claude's own `bg` sessions (what `/tr:pr` spawns) — folding it onto
+  the session that started it as a badge count, or dropping it when no parent can be found. The rule is
+  the requirement, not an optimisation: a row you can't click into is worse than absent. Claude `bg` is
+  matched by that exact kind rather than "not interactive", because an unrecognised kind is far more
+  likely to be a real terminal, and hiding one of those is the expensive mistake.
+- **A Claude `bg` session is a child PROCESS of its parent**, so `OwnerByProcessTree` walks the tree and
+  names it outright — the strongest signal available, and bounded to 12 hops so a deep shell nest can't
+  attribute a job to something merely far above it. Codex threads can't use this: the app-server daemon
+  they run under is nobody's child.
 - **Headless Codex threads are folded onto the Claude session that started them** (`CodexAttribution`),
   because a row for one is a row you can't click into — no terminal exists. Attribution is a *heuristic*
   and worth understanding before trusting the count: there is no explicit link to follow, since the

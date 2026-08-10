@@ -141,6 +141,76 @@ public class CodexAttributionTests
         Assert.Contains("1 Codex task running", row.SubagentTooltip);
     }
 
+    // Claude's own bg sessions (what /tr:pr spawns) have no terminal either — double-click could only
+    // fail on them. Unlike a Codex thread, a bg session IS a child process of the session that started
+    // it, so the process tree names the parent outright.
+    [Fact]
+    public void A_claude_bg_session_folds_onto_the_session_that_spawned_it()
+    {
+        var parent = Claude("p", @"C:\Repos\X"); parent.Pid = 100;
+        var bg = new SessionInfo { Provider = SessionProvider.Claude, SessionId = "bg", Kind = "bg", Pid = 300, Cwd = @"C:\Nowhere" };
+        var tree = new Dictionary<int, int> { [300] = 200, [200] = 100 };   // bg <- shell <- parent
+
+        var rows = CodexAttribution.Fold(new[] { parent, bg }, Array.Empty<SessionInfo>(), tree);
+
+        Assert.Equal(new[] { parent }, rows);       // the bg row is gone
+        Assert.Equal(1, parent.BackgroundTasks);
+    }
+
+    [Fact]
+    public void A_bg_session_with_no_findable_parent_is_hidden()
+    {
+        var other = Claude("p", @"C:\Repos\X"); other.Pid = 100;
+        var bg = new SessionInfo { Provider = SessionProvider.Claude, SessionId = "bg", Kind = "bg", Pid = 300, Cwd = @"C:\Nowhere" };
+
+        var rows = CodexAttribution.Fold(new[] { other, bg }, Array.Empty<SessionInfo>(), parents: null);
+
+        Assert.Equal(new[] { other }, rows);
+        Assert.Equal(0, other.BackgroundTasks);
+    }
+
+    // An interactive session is never folded away, however it's nested.
+    [Fact]
+    public void An_interactive_claude_session_is_never_hidden()
+    {
+        var parent = Claude("p", @"C:\Repos\X"); parent.Pid = 100;
+        var child = Claude("c", @"C:\Repos\X"); child.Pid = 300;
+        var tree = new Dictionary<int, int> { [300] = 100 };
+
+        var rows = CodexAttribution.Fold(new[] { parent, child }, Array.Empty<SessionInfo>(), tree);
+
+        Assert.Contains(child, rows);
+        Assert.Equal(0, parent.BackgroundTasks);
+    }
+
+    // A headless session must not become somebody's parent, or work ends up hidden behind something
+    // that is itself hidden.
+    [Fact]
+    public void A_headless_session_is_not_a_candidate_parent()
+    {
+        var hiddenParent = new SessionInfo { Provider = SessionProvider.Claude, SessionId = "h", Kind = "bg", Pid = 100, Cwd = @"C:\Repos\X" };
+        var bg = new SessionInfo { Provider = SessionProvider.Claude, SessionId = "bg", Kind = "bg", Pid = 300, Cwd = @"C:\Repos\X" };
+        var tree = new Dictionary<int, int> { [300] = 100 };
+
+        var rows = CodexAttribution.Fold(new[] { hiddenParent, bg }, Array.Empty<SessionInfo>(), tree);
+
+        Assert.Empty(rows);
+        Assert.Equal(0, hiddenParent.BackgroundTasks);
+    }
+
+    // Codex threads come from a shared daemon that is nobody's child, so the tree must not be consulted
+    // for them -- an unrelated ancestor would be attributed as the parent.
+    [Fact]
+    public void The_process_tree_walk_stops_rather_than_guessing_at_depth()
+    {
+        var far = Claude("far", @"C:\Repos\X"); far.Pid = 1;
+        var bg = new SessionInfo { Provider = SessionProvider.Claude, SessionId = "bg", Kind = "bg", Pid = 500, Cwd = @"C:\Nowhere" };
+        var tree = new Dictionary<int, int>();
+        for (int i = 500; i > 1; i--) tree[i] = i - 1;      // a 500-deep chain ending at the session
+
+        Assert.Null(CodexAttribution.OwnerByProcessTree(bg, new[] { far }, tree));
+    }
+
     [Fact]
     public void A_session_with_no_background_work_shows_no_badge()
     {
