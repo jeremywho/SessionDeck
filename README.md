@@ -131,7 +131,9 @@ would restart somebody's automation rather than restore your work.
 **Show in taskbar** (turn off to live in the tray only), **Run at login** (on by default; registers the
 installed exe under `HKCU\...\CurrentVersion\Run` — dev builds never touch it), and a flags box **per CLI**:
 **Claude flags** appended to every new or resumed Claude session (e.g. `--dangerously-skip-permissions`)
-and **Codex flags** appended to every resumed Codex one (e.g. `--dangerously-bypass-approvals-and-sandbox`).
+and **Codex flags** appended to every new or resumed Codex one, which defaults to
+`--dangerously-bypass-approvals-and-sandbox` so a session launched from a button is usable without
+babysitting it. Clear the box if you'd rather it didn't — that sticks, and isn't re-added.
 They're separate because the two CLIs share no flag spelling — one field for both would hand `codex` an
 argument it exits on.
 

@@ -15,7 +15,18 @@ internal sealed class Settings
     public Dictionary<string, double> ColumnWidth { get; set; } = new();    // column key -> pixel width
     public int LayoutVersion { get; set; }                                  // bumped when the window layout changes (resets stale window size)
     public string ResumeFlags { get; set; } = "";                           // "Claude flags": appended to every launched/resumed claude (JSON key kept for compat)
-    public string CodexFlags { get; set; } = "";                            // appended to every resumed codex — separate because the two CLIs share no flag spelling
+    public string CodexFlags { get; set; } = DefaultCodexFlags;             // appended to every launched/resumed codex — separate because the two CLIs share no flag spelling
+
+    /// <summary>
+    /// What a Codex session needs to be usable without babysitting it — Codex's equivalent of the
+    /// <c>--dangerously-skip-permissions</c> people put in the Claude box. Applied once (see
+    /// <see cref="FlagsVersion"/>); clearing the box afterwards sticks.
+    /// </summary>
+    public const string DefaultCodexFlags = "--dangerously-bypass-approvals-and-sandbox";
+
+    /// <summary>Bumped when a flags default is introduced, so it's filled in exactly once on files
+    /// written before it existed — and never re-added if you then clear the box on purpose.</summary>
+    public int FlagsVersion { get; set; }
     public string DockPosition { get; set; } = "Free";                      // Free | LeftEdge | RightEdge | TopLeft | TopRight | BottomLeft | BottomRight
     public double? WindowLeft { get; set; }
     public double? WindowTop { get; set; }
@@ -29,13 +40,32 @@ internal sealed class Settings
 
     public static Settings Load()
     {
+        Settings s;
         try
         {
-            if (File.Exists(FilePath))
-                return JsonSerializer.Deserialize<Settings>(File.ReadAllText(FilePath)) ?? new Settings();
+            s = (File.Exists(FilePath)
+                    ? JsonSerializer.Deserialize<Settings>(File.ReadAllText(FilePath))
+                    : null) ?? new Settings();
         }
-        catch { }
-        return new Settings();
+        catch { s = new Settings(); }
+
+        if (s.ApplyNewDefaults()) s.Save();
+        return s;
+    }
+
+    /// <summary>
+    /// Fill in settings introduced after this file was written. Returns whether anything changed.
+    /// <para>Guarded by <see cref="FlagsVersion"/> rather than by "is it empty": a file written before
+    /// the Codex box existed has it empty, and so does a file where you deliberately cleared it. Only
+    /// the version tells those apart, and re-adding a flag someone removed would be obnoxious.</para>
+    /// </summary>
+    internal bool ApplyNewDefaults()
+    {
+        if (FlagsVersion >= 1) return false;
+        FlagsVersion = 1;
+        if (!string.IsNullOrWhiteSpace(CodexFlags)) return true;
+        CodexFlags = DefaultCodexFlags;
+        return true;
     }
 
     public void Save()

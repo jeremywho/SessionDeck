@@ -149,3 +149,54 @@ public class CodexAttributionTests
         Assert.Equal("", row.SubagentTooltip);
     }
 }
+
+/// <summary>
+/// A Codex session launched from the buttons has to carry the bypass flag, the same way the Claude
+/// box carries --dangerously-skip-permissions. It's filled in once for files written before the box
+/// existed, and must not come back if you clear it on purpose.
+/// </summary>
+public class CodexFlagDefaultTests
+{
+    [Fact]
+    public void A_fresh_install_launches_codex_with_the_bypass_flag()
+    {
+        var s = new Settings();
+        Assert.Equal(Settings.DefaultCodexFlags, s.CodexFlags);
+        Assert.Equal("codex --dangerously-bypass-approvals-and-sandbox",
+            SessionLauncher.NewCodexCommand(s.CodexFlags));
+    }
+
+    [Fact]
+    public void An_older_settings_file_gets_the_flag_filled_in_once()
+    {
+        var s = new Settings { CodexFlags = "", FlagsVersion = 0 };   // written before the box existed
+        Assert.True(s.ApplyNewDefaults());
+        Assert.Equal(Settings.DefaultCodexFlags, s.CodexFlags);
+        Assert.False(s.ApplyNewDefaults());                           // and only once
+    }
+
+    [Fact]
+    public void Clearing_the_box_on_purpose_is_not_undone()
+    {
+        var s = new Settings { CodexFlags = "", FlagsVersion = 1 };   // already migrated, then cleared
+        Assert.False(s.ApplyNewDefaults());
+        Assert.Equal("", s.CodexFlags);
+    }
+
+    [Fact]
+    public void Flags_someone_chose_are_left_alone()
+    {
+        var s = new Settings { CodexFlags = "--search", FlagsVersion = 0 };
+        s.ApplyNewDefaults();
+        Assert.Equal("--search", s.CodexFlags);
+    }
+
+    // Resume uses the same box, so a restored Codex thread gets the flag too.
+    [Fact]
+    public void A_resumed_codex_session_carries_the_flag_as_well()
+    {
+        var saved = new SavedSession { Id = "019f", Provider = SessionProvider.Codex };
+        Assert.Equal("codex resume 019f --dangerously-bypass-approvals-and-sandbox",
+            SessionLauncher.ResumeCommand(saved, new Settings().CodexFlags));
+    }
+}
