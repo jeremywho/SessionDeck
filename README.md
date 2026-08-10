@@ -37,7 +37,10 @@ provider/PID/Id/version (and the API-error text when it's in that state). Sessio
 virtual desktop** get a small colored pip at the row's left edge — one color per desktop, the
 current desktop shows none (hover it for "Desktop N"). A session running **subagents** shows a small
 **⚙ N** badge after its name — how many are working right now (hover for the total spawned this
-session); its slot is reserved on every row, so the model pills stay in a straight column whether or
+session). Headless **Codex** work a Claude session started — the codex plugin's "Codex Companion Task"
+second opinions, and `codex exec` runs — counts into that same badge rather than appearing as rows of
+its own, since those threads have no terminal to click into. If which session started it can't be
+determined, it isn't listed at all: the list only holds sessions you can actually open; its slot is reserved on every row, so the model pills stay in a straight column whether or
 not agents are running. A footer shows the live count (hover for the Claude/Codex split) and a color
 legend.
 

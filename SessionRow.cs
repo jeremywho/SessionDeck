@@ -95,12 +95,29 @@ internal sealed class SessionRow : INotifyPropertyChanged
         h(this, new PropertyChangedEventArgs(nameof(RowTooltip)));
     }
 
-    // --- subagents (background Task agents this session is running) ---
-    public int SubagentsActive => _s.SubagentsActive;
-    public bool HasActiveSubagents => _s.SubagentsActive > 0;
-    public string SubagentTooltip => _s.SubagentsTotal > 0
-        ? $"{_s.SubagentsActive} subagent{(_s.SubagentsActive == 1 ? "" : "s")} working · {_s.SubagentsTotal} this session"
-        : "";
+    // --- background work this session has in flight ---
+
+    /// <summary>
+    /// One badge for everything this session has running elsewhere: its own Task subagents, plus any
+    /// headless Codex threads it started (which used to appear as rows of their own that you couldn't
+    /// click into — see <see cref="CodexAttribution"/>). They're counted together because the question
+    /// the badge answers is "is this session waiting on something?", and the tooltip splits them.
+    /// </summary>
+    public int SubagentsActive => _s.SubagentsActive + _s.BackgroundTasks;
+    public bool HasActiveSubagents => SubagentsActive > 0;
+
+    public string SubagentTooltip
+    {
+        get
+        {
+            var parts = new List<string>();
+            if (_s.SubagentsTotal > 0)
+                parts.Add($"{_s.SubagentsActive} subagent{(_s.SubagentsActive == 1 ? "" : "s")} working · {_s.SubagentsTotal} this session");
+            if (_s.BackgroundTasks > 0)
+                parts.Add($"{_s.BackgroundTasks} Codex task{(_s.BackgroundTasks == 1 ? "" : "s")} running (no terminal)");
+            return string.Join("\n", parts);
+        }
+    }
 
     /// <summary>Multi-line hover summary so you can eyeball anything odd (model / context / cwd / ids).</summary>
     public string RowTooltip

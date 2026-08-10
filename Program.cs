@@ -23,11 +23,11 @@ internal static class Program
             foreach (var m in CodexScanner.PlanMeters)
                 sb.AppendLine($"PLAN\t{m.Label}\t{m.Percent}%\t{m.Severity}\tresets {m.ResetsAt:g}\t{m.Note}");
 
-            var all = SessionScanner.Scan();
-            all.AddRange(CodexScanner.Scan());
+            // Folded, like the window: headless Codex threads roll onto the session that started them.
+            var all = CodexAttribution.Fold(SessionScanner.Scan(), CodexScanner.Scan());
 
             foreach (var s in all)
-                sb.AppendLine($"{s.Provider}\t{s.Pid}\t{(s.ApiError ? "ERROR" : s.Status)}\t{s.ShortId}\t{s.Model}\t{s.Effort}\t{s.ContextDisplay}\t{s.SubagentsActive}/{s.SubagentsTotal}\t{s.LastTool}\t{s.DisplayName}\t{s.Cwd}");
+                sb.AppendLine($"{s.Provider}\t{s.Pid}\t{(s.ApiError ? "ERROR" : s.Status)}\t{s.ShortId}\t{s.Model}\t{s.Effort}\t{s.ContextDisplay}\t{s.SubagentsActive}/{s.SubagentsTotal}\tcodex-tasks:{s.BackgroundTasks}\t{s.LastTool}\t{s.DisplayName}\t{s.Cwd}");
             System.IO.File.WriteAllText(
                 System.IO.Path.Combine(System.IO.Path.GetTempPath(), "claude-sessions-dump.txt"),
                 sb.ToString());
@@ -39,8 +39,9 @@ internal static class Program
         {
             CodexScanner.Probe();
             var byPid = Native.TopWindowsByPid();
-            var all = SessionScanner.Scan();
-            all.AddRange(CodexScanner.Scan());   // focus is provider-agnostic — it only needs a PID
+            // Folded, like the window — so this dump reflects the rows you'd actually see. Anything
+            // still reporting "no window" here is a row that shouldn't exist.
+            var all = CodexAttribution.Fold(SessionScanner.Scan(), CodexScanner.Scan());
 
             var sb = new System.Text.StringBuilder();
             foreach (var s in all)

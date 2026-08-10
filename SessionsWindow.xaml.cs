@@ -449,8 +449,10 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
 
     void Refresh()
     {
-        var live = SessionScanner.Scan();
-        live.AddRange(CodexScanner.Scan());   // same list, same sort — told apart by the provider mark
+        // Same list, same sort — told apart by the provider mark. Headless Codex threads (companion
+        // second opinions, exec runs) are folded onto the Claude session that started them rather than
+        // listed separately: they have no terminal, so a row for one is a row you can't act on.
+        var live = CodexAttribution.Fold(SessionScanner.Scan(), CodexScanner.Scan());
         var seen = new HashSet<string>();
         foreach (var s in live)
         {

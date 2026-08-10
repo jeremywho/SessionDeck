@@ -26,6 +26,11 @@ internal sealed class SessionInfo
     public string ErrorText = "";  // the error text (e.g. "API Error: … Rate limited")
     public int SubagentsActive;    // subagent transcript files touched in the last ~30s (working now)
     public int SubagentsTotal;     // subagent files this session has spawned (cumulative)
+
+    /// <summary>Headless Codex threads this Claude session started (companion second opinions, exec
+    /// runs) — rolled onto the parent row by <see cref="CodexAttribution"/> instead of listed on their
+    /// own, since there's no terminal to click into.</summary>
+    public int BackgroundTasks;
     public DateTime StartedAt;
     public DateTime UpdatedAt;
     public DateTime StatusUpdatedAt;   // when the status field last changed (sessions/<pid>.json)

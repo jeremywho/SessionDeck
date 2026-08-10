@@ -117,6 +117,16 @@ The second footer bar: signed-in address on the left, one fill-behind pill per p
 **Error** is *not* a status — it's read from the transcript (`isApiErrorMessage`) and sorts to the top.
 
 ## Gotchas (don't rediscover these)
+- **Headless Codex threads are folded onto the Claude session that started them** (`CodexAttribution`),
+  because a row for one is a row you can't click into — no terminal exists. Attribution is a *heuristic*
+  and worth understanding before trusting the count: there is no explicit link to follow, since the
+  codex app-server daemon is shared between every Claude session and is orphaned from the process tree
+  (the plugin's broker script has already exited). A thread started in a session's scratchpad names its
+  parent exactly; otherwise all we have is the working directory, and **twelve sessions were observed
+  sharing `C:\Users\Jeremy`**, so the `busy` tie-break decides — sound, because a session waiting on a
+  second opinion is busy, but not certain. A thread we can't place is **hidden**, not shown: the list is
+  for sessions you can act on, and a row with no terminal and no parent offers nothing to do. Don't
+  "helpfully" restore those rows — their absence is the requirement.
 - **Focus resolves a tab by asking the session's console for its title, not by guessing it.**
   `ConsoleTitle.Read` attaches to the session's console (`AttachConsole`) and reads the real title,
   which is the same string UIA reports as the tab's name. Guessing from session metadata was the
