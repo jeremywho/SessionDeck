@@ -177,8 +177,24 @@
                            a fixed Width) so a two-digit count still fits. -->
                       <ColumnDefinition Width="Auto" MinWidth="42"/>
                     </Grid.ColumnDefinitions>
-                    <TextBlock Grid.Column="0" Text="{Binding Name}" FontSize="14.5" VerticalAlignment="Center"
-                               Foreground="{DynamicResource FgBrush}" TextTrimming="CharacterEllipsis"/>
+                    <DockPanel Grid.Column="0">
+                      <!-- background-agent badge: a companion thread another app is driving (the
+                           Claude Code codex plugin's second opinions). No terminal window exists,
+                           so the row announces itself as an agent instead of a session. -->
+                      <Border DockPanel.Dock="Left" VerticalAlignment="Center" Margin="0,0,8,0" Padding="6,1"
+                              CornerRadius="8" Background="{DynamicResource TrackBrush}"
+                              BorderBrush="{DynamicResource Border2Brush}" BorderThickness="1"
+                              Visibility="{Binding IsBackgroundAgent, Converter={StaticResource BoolToVis}}">
+                        <StackPanel Orientation="Horizontal">
+                          <TextBlock Text="&#xE713;" FontFamily="Segoe MDL2 Assets" FontSize="9.5"
+                                     Foreground="{DynamicResource Fg3Brush}" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                          <TextBlock Text="agent" FontSize="10.5" FontWeight="SemiBold"
+                                     Foreground="{DynamicResource Fg3Brush}" VerticalAlignment="Center"/>
+                        </StackPanel>
+                      </Border>
+                      <TextBlock Text="{Binding Name}" FontSize="14.5" VerticalAlignment="Center"
+                                 Foreground="{DynamicResource FgBrush}" TextTrimming="CharacterEllipsis"/>
+                    </DockPanel>
                     <!-- model pill: provider mark + model, plus reasoning effort where the CLI reports
                          one (Codex does; Claude Code doesn't put it in the transcript). The provider
                          mark lives IN the pill rather than beside it — one element to read, not two. -->

@@ -35,12 +35,40 @@ internal sealed class SessionRow : INotifyPropertyChanged
         nameof(IdleDisplay), nameof(LastTool), nameof(Cwd), nameof(Version),
         nameof(ApiError), nameof(RowTooltip), nameof(LastChanged),
         nameof(SubagentsActive), nameof(HasActiveSubagents), nameof(SubagentTooltip),
+        nameof(IsBackgroundAgent),
     };
 
     public SessionInfo Info => _s;
 
     public int Pid => _s.Pid;
-    public string Name => _s.DisplayName;
+    public string Name => IsBackgroundAgent ? CompanionName(_s.DisplayName) : _s.DisplayName;
+
+    // --- background agents (companion threads driven by another app, not a terminal) ---
+
+    /// <summary>
+    /// A thread another app is driving through the codex app server (the Claude Code codex plugin's
+    /// "Codex Companion Task" second opinions, IDE extensions). Live and worth listing, but it has no
+    /// terminal window — so double-click must not hunt for one, and the row wears an agent badge
+    /// instead of pretending to be a session you could sit in.
+    /// </summary>
+    public bool IsBackgroundAgent => _s.Kind == "companion";
+
+    /// <summary>
+    /// The plugin names its threads "Codex Companion Task: &lt;task&gt;…"; the badge already says
+    /// "agent", so the row shows just the task text. The raw name stays in the tooltip.
+    /// </summary>
+    internal static string CompanionName(string name)
+    {
+        const string prefix = "Codex Companion Task";
+        string n = name.Trim();
+        if (n.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            n = n.Substring(prefix.Length).TrimStart(':', ' ');
+            if (n.StartsWith("<task>", StringComparison.OrdinalIgnoreCase)) n = n.Substring(6);
+            n = n.Trim();
+        }
+        return n.Length > 0 ? n : "Codex agent";
+    }
     public string Status => _s.Status;                            // raw status (optional column)
     public SessionState State => _s.ApiError ? SessionState.Error : SessionStateMap.FromStatus(_s.Status);
     public bool ApiError => _s.ApiError;
@@ -83,11 +111,16 @@ internal sealed class SessionRow : INotifyPropertyChanged
             {
                 _s.DisplayName,
                 $"Model: {(_s.Model.Length > 0 ? _s.Model : "—")}{(HasEffort ? $" · {_s.Effort} effort" : "")}",
+            };
+            if (IsBackgroundAgent)
+                lines.Insert(1, "Background agent — driven by another app; no terminal window");
+            lines.AddRange(new[]
+            {
                 $"Context: {ContextPct}% ({ContextTokensDisplay} of {Window / 1000}k)",
                 $"Status: {_s.Status}{(_s.ApiError ? " · API ERROR" : "")}{(LastTool.Length > 0 ? $" · {LastTool}" : "")}",
                 $"Folder: {_s.Cwd}",
                 $"{ProviderName} · PID {_s.Pid} · {ShortId} · v{_s.Version}",
-            };
+            });
             if (OnOtherDesktop) lines.Add($"On {DesktopLabel}");
             if (_s.SubagentsActive > 0) lines.Add($"Subagents: {_s.SubagentsActive} working / {_s.SubagentsTotal} this session");
             if (_s.ApiError && _s.ErrorText.Length > 0) lines.Add(_s.ErrorText);

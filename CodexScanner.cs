@@ -142,7 +142,7 @@ internal static class CodexScanner
                 SessionId = head.Id,
                 Cwd = head.Cwd,
                 Version = head.Version,
-                Kind = head.Originator.Contains("exec", StringComparison.OrdinalIgnoreCase) ? "exec" : "tui",
+                Kind = KindFor(head.Originator),
                 TranscriptPath = kv.Key,
                 Name = names.TryGetValue(head.Id, out var n) ? n : "",
             };
@@ -185,6 +185,22 @@ internal static class CodexScanner
         string path = RolloutFor(sessionId);
         return path.Length > 0 && FileHolders.OwnerPid(path, "codex") != 0;
     }
+
+    /// <summary>
+    /// What is driving this thread, from the header's <c>originator</c>. "tui" = a terminal a human
+    /// sits in front of; "exec" = a headless one-shot; "companion" = a thread another app drives
+    /// through the codex app server — the Claude Code codex plugin stamps <c>"Claude Code"</c> here
+    /// for its "Codex Companion Task" second-opinion threads, and IDE extensions land in the same
+    /// bucket. A companion is a real live thread (it holds its rollout open like any other), but it
+    /// has no terminal window to focus and is nothing a restore should reopen, so the distinction is
+    /// what the UI keys every terminal-shaped affordance on. An empty/unknown originator stays "tui":
+    /// misreading a real terminal as a companion would silently break focus and restore for it, which
+    /// is the expensive direction to be wrong in.
+    /// </summary>
+    internal static string KindFor(string originator) =>
+        originator.Contains("exec", StringComparison.OrdinalIgnoreCase) ? "exec"
+        : originator.Length == 0 || originator.StartsWith("codex", StringComparison.OrdinalIgnoreCase) ? "tui"
+        : "companion";
 
     /// <summary>The rollout file for a thread id — its filename ends with the id.</summary>
     static string RolloutFor(string sessionId)

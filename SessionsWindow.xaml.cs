@@ -558,6 +558,13 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     void Grid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
     {
         if (SessionsGrid.SelectedItem is not SessionRow row) return;
+        // A background agent has no terminal window by construction — hunting for one would only
+        // produce the "could not find a window" error for a row that is behaving normally.
+        if (row.IsBackgroundAgent)
+        {
+            LiveLabel.Text = "Background agent — it has no terminal window to focus.";
+            return;
+        }
         if (!WindowActivator.Activate(row.Info))
             LiveLabel.Text = $"Could not find a window for PID {row.Info.Pid}.";
     }

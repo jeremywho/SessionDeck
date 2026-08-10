@@ -64,6 +64,15 @@ Four things will bite you, in rough order of how long they take to notice:
   duplicate rows). The upside: `session_id` is the root at *any* nesting depth, so subagent roll-up needs
   no parent-chain walk. Note also that `thread_source` is the plain string `"user"`/`"subagent"`; the
   spawn detail (parent, depth, nickname) is in `source`.
+- **Not every live thread is a terminal.** The header's `originator` says who is driving:
+  `codex-tui` (a terminal), `*exec*` (headless one-shot), anything else → **`companion`**
+  (`CodexScanner.KindFor`) — a thread another app drives through the codex app server. The Claude
+  Code codex plugin stamps `"Claude Code"` here for its "Codex Companion Task" second opinions; IDE
+  extensions land in the same bucket. Companions are listed with an **agent badge** and the
+  companion prefix trimmed off the name (`SessionRow.CompanionName`), double-click declines instead
+  of hunting for a window that never existed, and `IsRestorable` excludes them (only `tui` restores).
+  An empty/unknown originator stays `tui` on purpose: misreading a real terminal as a companion
+  silently breaks focus + restore, the expensive direction.
 
 Other Codex notes: model + effort come from `turn_context` (last one wins) and `thread_settings_applied`
 (a mid-thread switch); context is `last_token_usage.input_tokens` against `model_context_window` —
