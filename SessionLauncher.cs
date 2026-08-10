@@ -154,10 +154,11 @@ internal static class SessionLauncher
         var psi = new ProcessStartInfo("wt.exe")
         {
             UseShellExecute = false,
-            // wt.exe is a short-lived launcher that hands off to WindowsTerminal.exe and exits —
-            // measured at ~90ms. Started from a GUI process without this, Windows gives it a console
-            // of its own, so you see a window flash up and vanish just before the real terminal
-            // appears. WindowsTerminal.exe is a separate GUI process and is unaffected.
+            // Hygiene for launching a console helper from a GUI process, and nothing more. It was
+            // added believing it fixed a window flashing before the terminal appeared; it does not.
+            // Measured with a WinEvent hook, launching wt.exe creates ZERO windows either way — that
+            // flash came from a Claude SessionStart hook spawning `gh` without windowsHide, in a
+            // different repo entirely. Don't read this line as load-bearing.
             CreateNoWindow = true,
         };
         foreach (var a in new[] { "-w", window, "new-tab", "-d", cwd, "pwsh", "-NoExit", "-Command", cmd })
