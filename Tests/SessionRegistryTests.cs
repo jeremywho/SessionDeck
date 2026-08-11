@@ -57,4 +57,33 @@ public class SessionRegistryTests
         Assert.DoesNotContain("aaa", after);
         Assert.DoesNotContain("ccc", after);
     }
+
+    // The snapshot used to be keyed on the id-SET alone, so a rename (or cwd/model change) with an
+    // unchanged set was never persisted — and a set that stayed identical past the 7-day restore
+    // cutoff aged itself out because LastSeen never advanced (hence the periodic checkpoint too,
+    // which is time-based and pinned only by its existence here).
+    [Fact]
+    public void A_rename_with_an_unchanged_id_set_is_persisted()
+    {
+        SessionRegistry.ResetForTests();
+        var s = Session("rename-me");
+        SessionRegistry.Snapshot(new[] { s });
+
+        var renamed = Session("rename-me");
+        renamed.Name = "better name";
+        SessionRegistry.Snapshot(new[] { renamed });
+
+        Assert.Contains("better name", File.ReadAllText(RegistryFile));
+    }
+
+    [Fact]
+    public void An_identical_set_within_the_checkpoint_window_is_not_rewritten()
+    {
+        SessionRegistry.ResetForTests();
+        SessionRegistry.Snapshot(new[] { Session("same") });
+        var first = File.GetLastWriteTimeUtc(RegistryFile);
+
+        SessionRegistry.Snapshot(new[] { Session("same") });   // identical, seconds later
+        Assert.Equal(first, File.GetLastWriteTimeUtc(RegistryFile));
+    }
 }

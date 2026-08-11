@@ -20,7 +20,18 @@ internal static class SessionRegistry
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ClaudeSessionMonitor");
     static readonly string FilePath = Path.Combine(Dir, "active-sessions.json");
 
-    static HashSet<string> _lastIds = new();
+    static string _lastSig = "";
+    static DateTime _lastWriteUtc = DateTime.MinValue;
+
+    /// <summary>
+    /// How often an UNCHANGED live set still gets rewritten so LastSeen keeps advancing. Without
+    /// this, a set that stayed identical for longer than the 7-day restore cutoff aged itself out
+    /// of the restore offer while every session in it was alive the whole time.
+    /// </summary>
+    public static readonly TimeSpan LastSeenCheckpoint = TimeSpan.FromHours(12);
+
+    /// <summary>Test seam: forget the last-written signature/time so a test starts from a clean slate.</summary>
+    internal static void ResetForTests() { _lastSig = ""; _lastWriteUtc = DateTime.MinValue; }
 
     /// <summary>
     /// Set when the OS announces the end of the interactive session (shutdown/restart/logoff).
@@ -40,14 +51,23 @@ internal static class SessionRegistry
         return new();
     }
 
-    /// <summary>Rewrite the file only when the live interactive id-set changes.</summary>
+    /// <summary>Rewrite the file when anything about the live interactive set changes (not just the
+    /// id-set — a rename or cwd change must persist too), plus a periodic checkpoint for LastSeen.</summary>
     public static void Snapshot(IReadOnlyList<SessionInfo> liveInteractive)
     {
         if (Frozen) return;
 
-        var ids = new HashSet<string>(liveInteractive.Select(s => s.SessionId));
-        if (ids.SetEquals(_lastIds)) return;
-        _lastIds = ids;
+        var parts = new List<string>(liveInteractive.Count);
+        foreach (var s in liveInteractive)
+            parts.Add($"{s.SessionId}|{s.DisplayName}|{s.Cwd}|{s.Model}|{(int)s.Provider}");
+        parts.Sort(StringComparer.Ordinal);
+        string sig = string.Join("\n", parts);
+
+        var nowUtc = DateTime.UtcNow;
+        bool checkpoint = liveInteractive.Count > 0 && nowUtc - _lastWriteUtc >= LastSeenCheckpoint;
+        if (sig == _lastSig && !checkpoint) return;
+        _lastSig = sig;
+        _lastWriteUtc = nowUtc;
 
         long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var saved = liveInteractive.Select(s => new SavedSession

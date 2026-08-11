@@ -36,6 +36,19 @@ internal static class CodexScanner
     /// <summary>How far back to look for rollout files that could still be open.</summary>
     const int WindowDays = 30;
 
+    /// <summary>Day-folders stat'd on EVERY probe pass. Two, not one: a rollout lives in the
+    /// day-folder its session STARTED in, so a live session that crossed midnight is in yesterday's.</summary>
+    const int FastWindowDays = 2;
+
+    /// <summary>
+    /// How often the FULL 30-day catalog is re-enumerated — discovery of resumed old threads, plus
+    /// cache pruning. Every 3s pass used to do this, stat'ing every historical rollout each time
+    /// (~800 files / 4GB observed on a real machine); between full scans a pass now stats only the
+    /// fast window (where new rollouts appear) and the files already known to be live.
+    /// </summary>
+    static readonly TimeSpan CatalogRescan = TimeSpan.FromSeconds(60);
+    static DateTime _catalogAt = DateTime.MinValue;   // probe thread only
+
     /// <summary>Restart Manager calls allowed per probe pass (first pass gets more — see Probe).</summary>
     const int ProbeBudget = 40;
     const int FirstProbeBudget = 150;
@@ -71,7 +84,7 @@ internal static class CodexScanner
 
     static readonly object _gate = new();
     static Dictionary<string, int> _owner = new(StringComparer.OrdinalIgnoreCase);      // rollout -> codex pid
-    static Dictionary<string, string> _subParent = new(StringComparer.OrdinalIgnoreCase); // subagent rollout -> ROOT thread id
+    static readonly Dictionary<string, string> _subParent = new(StringComparer.OrdinalIgnoreCase); // subagent rollout -> ROOT thread id
     static readonly Dictionary<string, long> _probed = new(StringComparer.OrdinalIgnoreCase); // rollout -> size when last probed
     static readonly Dictionary<string, int> _misses = new(StringComparer.OrdinalIgnoreCase);  // consecutive "nobody holds this" results
     static bool _firstPass = true;
@@ -85,7 +98,7 @@ internal static class CodexScanner
     /// both is what silently pinned exec sessions at "idle".)
     /// </summary>
     static readonly Dictionary<string, (long Size, DateTime At)> _growth = new(StringComparer.OrdinalIgnoreCase);
-    static Dictionary<string, DateTime> _grewAt = new(StringComparer.OrdinalIgnoreCase);
+    static readonly Dictionary<string, DateTime> _grewAt = new(StringComparer.OrdinalIgnoreCase);
 
     // ---------------------------------------------------------------- tail-parse cache
 
@@ -207,7 +220,7 @@ internal static class CodexScanner
     {
         try
         {
-            foreach (var f in RecentRollouts())
+            foreach (var f in RecentRollouts(WindowDays))
                 if (Path.GetFileNameWithoutExtension(f.Path)
                         .EndsWith(sessionId, StringComparison.OrdinalIgnoreCase)) return f.Path;
         }
@@ -238,9 +251,14 @@ internal static class CodexScanner
         // Before the liveness check, not after: the plan meter should show even with no Codex running.
         if (!_seeded) { _seeded = true; SeedPlanUsage(); }
 
-        bool anyCodex;
-        try { anyCodex = Process.GetProcessesByName("codex").Length > 0; }
-        catch { anyCodex = false; }
+        bool anyCodex = false;
+        try
+        {
+            var procs = Process.GetProcessesByName("codex");
+            anyCodex = procs.Length > 0;
+            foreach (var p in procs) p.Dispose();
+        }
+        catch { }
 
         if (!anyCodex)
         {
@@ -248,14 +266,17 @@ internal static class CodexScanner
             return;
         }
 
-        var files = RecentRollouts();
+        Dictionary<string, int> owned;
+        lock (_gate) owned = new Dictionary<string, int>(_owner, StringComparer.OrdinalIgnoreCase);
+
+        // Full catalog on the slow cadence; the fast window + known-live files otherwise.
+        bool fullScan = DateTime.UtcNow - _catalogAt > CatalogRescan;
+        if (fullScan) _catalogAt = DateTime.UtcNow;
+        var files = fullScan ? RecentRollouts(WindowDays) : FastRollouts(owned);
         if (files.Count == 0) return;
 
         foreach (var f in files) ReadHead(f.Path);   // cached; only new files cost anything
         TrackGrowth(files);
-
-        Dictionary<string, int> owned;
-        lock (_gate) owned = new Dictionary<string, int>(_owner, StringComparer.OrdinalIgnoreCase);
 
         int budget = _firstPass ? FirstProbeBudget : ProbeBudget;
 
@@ -300,7 +321,62 @@ internal static class CodexScanner
         }
 
         _firstPass = false;
-        RebuildSubagentMap(files);
+        RebuildSubagentMap(files, fullScan);
+        if (fullScan) Prune(files, owned);
+    }
+
+    /// <summary>The fast window's rollouts plus stats for owned files outside it — what a between-
+    /// full-scans pass looks at instead of the whole catalog.</summary>
+    static List<(string Path, long Mtime, long Size)> FastRollouts(Dictionary<string, int> owned)
+    {
+        var list = RecentRollouts(FastWindowDays);
+        var have = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var f in list) have.Add(f.Path);
+        foreach (var path in owned.Keys)
+        {
+            if (have.Contains(path)) continue;
+            try
+            {
+                var fi = new FileInfo(path);
+                if (fi.Exists) list.Add((path, fi.LastWriteTimeUtc.Ticks, fi.Length));
+            }
+            catch { }
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// Drop cache entries for rollouts that have left the catalog window (unless still owned).
+    /// Runs on the full-scan cadence. Without it, <see cref="_heads"/> and the growth maps grew for
+    /// the life of the process — the only unbounded memory in the app.
+    /// </summary>
+    static void Prune(List<(string Path, long Mtime, long Size)> catalog, Dictionary<string, int> owned)
+    {
+        var keep = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var f in catalog) keep.Add(f.Path);
+        foreach (var p in owned.Keys) keep.Add(p);
+
+        var dead = new List<string>();
+        foreach (var k in _heads.Keys) if (!keep.Contains(k)) dead.Add(k);
+        foreach (var k in dead) _heads.TryRemove(k, out _);
+
+        dead.Clear();
+        foreach (var k in _growth.Keys) if (!keep.Contains(k)) dead.Add(k);
+        foreach (var k in dead) _growth.Remove(k);
+
+        lock (_gate)
+        {
+            PruneDict(_grewAt, keep);
+            PruneDict(_probed, keep);
+            PruneDict(_misses, keep);
+        }
+    }
+
+    static void PruneDict<T>(Dictionary<string, T> map, HashSet<string> keep)
+    {
+        var dead = new List<string>();
+        foreach (var k in map.Keys) if (!keep.Contains(k)) dead.Add(k);
+        foreach (var k in dead) map.Remove(k);
     }
 
     /// <summary>Drop a rollout from the live map. Clearing the probe record too is the point: it's what
@@ -312,14 +388,14 @@ internal static class CodexScanner
         _misses.Remove(path);
     }
 
-    /// <summary>Rollout files from the last <see cref="WindowDays"/> day-folders, newest write first.</summary>
-    static List<(string Path, long Mtime, long Size)> RecentRollouts()
+    /// <summary>Rollout files from the last <paramref name="days"/> day-folders, newest write first.</summary>
+    static List<(string Path, long Mtime, long Size)> RecentRollouts(int days)
     {
         var result = new List<(string, long, long)>();
         if (!Directory.Exists(SessionsDir)) return result;
 
         var today = DateTime.Now.Date;
-        for (int i = 0; i < WindowDays; i++)
+        for (int i = 0; i < days; i++)
         {
             var d = today.AddDays(-i);
             string dir = Path.Combine(SessionsDir, d.ToString("yyyy"), d.ToString("MM"), d.ToString("dd"));
@@ -351,7 +427,7 @@ internal static class CodexScanner
     static void TrackGrowth(List<(string Path, long Mtime, long Size)> files)
     {
         var now = DateTime.UtcNow;
-        var snapshot = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
+        var seen = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var f in files)
         {
@@ -364,10 +440,13 @@ internal static class CodexScanner
                 g = (f.Size, new DateTime(f.Mtime, DateTimeKind.Utc));
             }
             _growth[f.Path] = g;
-            snapshot[f.Path] = g.At;
+            seen[f.Path] = g.At;
         }
 
-        lock (_gate) _grewAt = snapshot;
+        // Merged, not replaced: a fast pass only carries the fast-window files, and replacing the
+        // map would blank the growth stamps — and so the subagent-activity window — for the rest.
+        // Entries for aged-out files are dropped by Prune on the full-scan cadence.
+        lock (_gate) foreach (var kv in seen) _grewAt[kv.Key] = kv.Value;
     }
 
     /// <summary>
@@ -375,16 +454,19 @@ internal static class CodexScanner
     /// spawn its own — but the header's <c>session_id</c> is already the ROOT thread for every depth,
     /// so the whole tree rolls up to the row you actually see without walking any parent chain.
     /// </summary>
-    static void RebuildSubagentMap(List<(string Path, long Mtime, long Size)> files)
+    static void RebuildSubagentMap(List<(string Path, long Mtime, long Size)> files, bool full)
     {
-        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var f in files)
+        lock (_gate)
         {
-            if (!_heads.TryGetValue(f.Path, out var h) || !h.IsSubagent) continue;
-            if (h.RootId.Length > 0) map[f.Path] = h.RootId;
+            // A fast pass merges (it only saw the fast window); the periodic full pass rebuilds,
+            // which is also what drops entries for deleted or aged-out rollouts.
+            if (full) _subParent.Clear();
+            foreach (var f in files)
+            {
+                if (!_heads.TryGetValue(f.Path, out var h) || !h.IsSubagent) continue;
+                if (h.RootId.Length > 0) _subParent[f.Path] = h.RootId;
+            }
         }
-
-        lock (_gate) _subParent = map;
     }
 
     // ================================================================ parsing
@@ -749,7 +831,7 @@ internal static class CodexScanner
     {
         try
         {
-            var files = RecentRollouts();
+            var files = RecentRollouts(WindowDays);
             for (int i = 0; i < files.Count && i < 3; i++)
             {
                 var d = new Detail();

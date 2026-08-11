@@ -48,10 +48,12 @@ internal static class SessionScanner
 
         list.Sort((a, b) => a.IdleSeconds.CompareTo(b.IdleSeconds));
 
-        // forget cached detail for sessions that are no longer live
+        // forget cached detail (and fallback-path probes) for sessions that are no longer live
         var liveIds = new HashSet<string>(list.ConvertAll(x => x.SessionId));
         foreach (var key in new List<string>(_detailCache.Keys))
             if (!liveIds.Contains(key)) _detailCache.Remove(key);
+        foreach (var key in new List<string>(_fallback.Keys))
+            if (!liveIds.Contains(key)) _fallback.Remove(key);
 
         return list;
     }
@@ -181,6 +183,13 @@ internal static class SessionScanner
         };
     }
 
+    // Fallback-search results, cached — including misses, which retry on a cooldown. The fallback
+    // walks ALL of ~/.claude/projects, and TranscriptPath runs on every 2s scan: uncached, one
+    // session with a missing transcript meant that whole recursive walk 30 times a minute.
+    sealed record FallbackProbe(string Path, DateTime At);
+    static readonly Dictionary<string, FallbackProbe> _fallback = new();
+    static readonly TimeSpan FallbackRetry = TimeSpan.FromSeconds(30);
+
     static string TranscriptPath(SessionInfo s)
     {
         // cwd -> slug: every non-alphanumeric char becomes '-'  (C:\Users\Jeremy -> C--Users-Jeremy)
@@ -188,13 +197,22 @@ internal static class SessionScanner
         string p = Path.Combine(ProjectsDir, slug, s.SessionId + ".jsonl");
         if (File.Exists(p)) return p;
 
+        if (_fallback.TryGetValue(s.SessionId, out var prev))
+        {
+            if (prev.Path.Length > 0 && File.Exists(prev.Path)) return prev.Path;
+            if (DateTime.UtcNow - prev.At < FallbackRetry) return "";   // recent miss — don't re-walk yet
+        }
+
         // Fallback: locate by session id anywhere under projects/ (slug rules vary across versions).
+        string found = "";
         try
         {
-            return Directory.EnumerateFiles(ProjectsDir, s.SessionId + ".jsonl", SearchOption.AllDirectories)
-                            .FirstOrDefault() ?? "";
+            found = Directory.EnumerateFiles(ProjectsDir, s.SessionId + ".jsonl", SearchOption.AllDirectories)
+                             .FirstOrDefault() ?? "";
         }
-        catch { return ""; }
+        catch { }
+        _fallback[s.SessionId] = new FallbackProbe(found, DateTime.UtcNow);
+        return found;
     }
 
     const double SubagentActiveSeconds = 30;

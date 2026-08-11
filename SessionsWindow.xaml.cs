@@ -41,7 +41,6 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     /// guessed: we own the interval, so this is "two polls in a row failed".
     /// </summary>
     static readonly TimeSpan StaleAfter = UsageApi.PollInterval * 2.5;
-    internal bool AllowClose;
 
     public SessionsWindow(App app)
     {
@@ -130,12 +129,30 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
                 NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size,
                 EnableRaisingEvents = true,
             };
-            _watcher.Changed += (_, _) => Dispatcher.InvokeAsync(() => PushRefresh());
-            _watcher.Created += (_, _) => Dispatcher.InvokeAsync(() => PushRefresh());
-            _watcher.Deleted += (_, _) => Dispatcher.InvokeAsync(() => PushRefresh());
-            _watcher.Renamed += (_, _) => Dispatcher.InvokeAsync(() => PushRefresh());
+            _watcher.Changed += (_, _) => OnSessionsDirEvent();
+            _watcher.Created += (_, _) => OnSessionsDirEvent();
+            _watcher.Deleted += (_, _) => OnSessionsDirEvent();
+            _watcher.Renamed += (_, _) => OnSessionsDirEvent();
         }
         catch { }   // best-effort; the fallback poll still works without it
+    }
+
+    int _fsEventQueued;   // 1 while a watcher callback is already waiting on the dispatcher
+
+    /// <summary>
+    /// One dispatcher hop per burst. Claude rewrites every &lt;pid&gt;.json on heartbeats, and
+    /// queueing an InvokeAsync per raw event let a rewrite storm pile hundreds of operations onto
+    /// the dispatcher before the 120ms debounce ever saw the first one — the debounce coalesced
+    /// the refreshes, not the queue traffic.
+    /// </summary>
+    void OnSessionsDirEvent()
+    {
+        if (System.Threading.Interlocked.Exchange(ref _fsEventQueued, 1) == 1) return;
+        Dispatcher.InvokeAsync(() =>
+        {
+            System.Threading.Interlocked.Exchange(ref _fsEventQueued, 0);
+            PushRefresh();
+        });
     }
 
     // --- virtual-desktop resolver: tag each row with the desktop its terminal window is on ---
@@ -615,7 +632,12 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
 
     void Grid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
     {
-        if (SessionsGrid.SelectedItem is not SessionRow row) return;
+        // Only act when the double-click landed on an actual row: the grid raises this for the
+        // header and the empty area below the rows too, where SelectedItem is just whatever row
+        // was clicked last — focusing that window would look like a misfire.
+        var dep = e.OriginalSource as DependencyObject;
+        while (dep != null && dep is not DataGridRow) dep = VisualTreeHelper.GetParent(dep);
+        if (dep is not DataGridRow hit || hit.Item is not SessionRow row) return;
         // A background agent has no terminal window by construction — hunting for one would only
         // produce the "could not find a window" error for a row that is behaving normally.
         if (row.IsBackgroundAgent)
@@ -636,7 +658,9 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         PersistLayout();
         _app.Settings.Save();
 
-        if (!AllowClose) { e.Cancel = true; Hide(); return; }
-        base.OnClosing(e);
+        // Tray app: the X always hides. Exit lives in the tray menu and hard-exits the process,
+        // so no close path ever needs this window to genuinely close.
+        e.Cancel = true;
+        Hide();
     }
 }
