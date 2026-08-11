@@ -168,9 +168,13 @@ internal static class Updater
             };
             using var p = Process.Start(psi);
             if (p == null) return null;
-            string o = await p.StandardOutput.ReadToEndAsync();
-            await p.WaitForExitAsync();
-            return p.ExitCode == 0 ? o : null;
+            // Both pipes are redirected, so both must be drained concurrently: reading stdout to
+            // completion first deadlocks if gh fills the (~4KB) stderr pipe buffer while we're
+            // not reading it — gh blocks writing stderr, we block waiting for stdout EOF.
+            var stdout = p.StandardOutput.ReadToEndAsync();
+            var stderr = p.StandardError.ReadToEndAsync();
+            await Task.WhenAll(stdout, stderr, p.WaitForExitAsync());
+            return p.ExitCode == 0 ? stdout.Result : null;
         }
         catch { return null; }   // gh not installed / not on PATH
     }

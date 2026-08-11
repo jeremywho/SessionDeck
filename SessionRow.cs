@@ -19,23 +19,51 @@ internal sealed class SessionRow : INotifyPropertyChanged
 
     public void Update(SessionInfo s)
     {
-        _s = s;
         var h = PropertyChanged;
-        if (h == null) return;
-        foreach (var n in Tracked) h(this, new PropertyChangedEventArgs(n));
+        if (h == null) { _s = s; return; }
+
+        // Raise only what actually changed. Every raise re-runs bindings and converters, and three
+        // of these are live-sort keys the collection view re-evaluates per raise — so a blanket
+        // raise on the 2s tick had the whole grid churning while nothing was visibly different.
+        var before = new object?[Tracked.Length];
+        for (int i = 0; i < Tracked.Length; i++) before[i] = Tracked[i].Get(this);
+        _s = s;
+        for (int i = 0; i < Tracked.Length; i++)
+            if (!Equals(before[i], Tracked[i].Get(this)))
+                h(this, new PropertyChangedEventArgs(Tracked[i].Name));
     }
 
-    static readonly string[] Tracked =
+    static readonly (string Name, Func<SessionRow, object?> Get)[] Tracked =
     {
-        nameof(Pid), nameof(Name), nameof(Status), nameof(State), nameof(SortPriority),
-        nameof(ShortId), nameof(Model), nameof(ModelChip),
-        nameof(Effort), nameof(HasEffort), nameof(HasModel), nameof(ModelTooltip),
-        nameof(Provider), nameof(ProviderGlyph), nameof(IsCodex),
-        nameof(ContextPct), nameof(ContextDisplay), nameof(ContextTokensDisplay),
-        nameof(IdleDisplay), nameof(LastTool), nameof(Cwd), nameof(Version),
-        nameof(ApiError), nameof(RowTooltip), nameof(LastChanged),
-        nameof(SubagentsActive), nameof(HasActiveSubagents), nameof(SubagentTooltip),
-        nameof(IsBackgroundAgent),
+        (nameof(Pid), r => r.Pid),
+        (nameof(Name), r => r.Name),
+        (nameof(Status), r => r.Status),
+        (nameof(State), r => r.State),
+        (nameof(SortPriority), r => r.SortPriority),
+        (nameof(ShortId), r => r.ShortId),
+        (nameof(Model), r => r.Model),
+        (nameof(ModelChip), r => r.ModelChip),
+        (nameof(Effort), r => r.Effort),
+        (nameof(HasEffort), r => r.HasEffort),
+        (nameof(HasModel), r => r.HasModel),
+        (nameof(ModelTooltip), r => r.ModelTooltip),
+        (nameof(Provider), r => r.Provider),
+        (nameof(ProviderGlyph), r => r.ProviderGlyph),
+        (nameof(IsCodex), r => r.IsCodex),
+        (nameof(ContextPct), r => r.ContextPct),
+        (nameof(ContextDisplay), r => r.ContextDisplay),
+        (nameof(ContextTokensDisplay), r => r.ContextTokensDisplay),
+        (nameof(IdleDisplay), r => r.IdleDisplay),
+        (nameof(LastTool), r => r.LastTool),
+        (nameof(Cwd), r => r.Cwd),
+        (nameof(Version), r => r.Version),
+        (nameof(ApiError), r => r.ApiError),
+        (nameof(RowTooltip), r => r.RowTooltip),
+        (nameof(LastChanged), r => r.LastChanged),
+        (nameof(SubagentsActive), r => r.SubagentsActive),
+        (nameof(HasActiveSubagents), r => r.HasActiveSubagents),
+        (nameof(SubagentTooltip), r => r.SubagentTooltip),
+        (nameof(IsBackgroundAgent), r => r.IsBackgroundAgent),
     };
 
     public SessionInfo Info => _s;

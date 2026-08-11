@@ -21,9 +21,11 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     CredentialsWatcher? _credentialsWatcher;
     readonly SingleFlight _usagePoll;
     volatile SessionInfo[] _sessionsSnapshot = Array.Empty<SessionInfo>();
+    volatile bool _windowVisible;        // read by the desktop-resolver thread
     ContextMenu _columnsMenu = new();
 
     public ObservableCollection<SessionRow> Rows { get; } = new();
+    readonly Dictionary<string, SessionRow> _rowsById = new();
     public ObservableCollection<UsageMeter> Meters { get; } = new();
     List<UsageMeter>? _liveMeters;      // last successful API fetch; null until one lands
     DateTime _liveAt;                   // when that fetch succeeded
@@ -47,6 +49,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         _usagePoll = new SingleFlight(PollUsageAsync);
         InitializeComponent();
         DataContext = this;
+        IsVisibleChanged += (_, _) => _windowVisible = IsVisible;
 
         // One-time reset of the pre-redesign (wide) window size, then persist normally.
         if (_app.Settings.LayoutVersion < 1)
@@ -138,9 +141,14 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     // --- virtual-desktop resolver: tag each row with the desktop its terminal window is on ---
 
     /// <summary>
-    /// Background STA loop: map each session to its terminal window (UI Automation) and that window's
+    /// Background MTA loop: map each session to its terminal window (UI Automation) and that window's
     /// virtual desktop, then tag the rows. Throttled — desktop moves are rare — and off the UI thread
     /// because the resolution is UIA-heavy. Background thread, so it dies with the process.
+    /// <para>MTA on purpose, and load-bearing: UIA client calls belong on an MTA thread, and this
+    /// loop used to run STA while sleeping between passes — an STA that never pumps messages, which
+    /// both violates COM's pumping contract and gives a stalled UIA/COM call no way to ever
+    /// complete. Skipped entirely while the window is hidden: the desktop pips this feeds aren't
+    /// visible, and the UIA sweep is the app's most expensive recurring touch of other processes.</para>
     /// </summary>
     void StartDesktopResolver()
     {
@@ -151,7 +159,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
                 try
                 {
                     var snap = _sessionsSnapshot;
-                    if (snap.Length > 0)
+                    if (_windowVisible && snap.Length > 0)
                     {
                         var map = ResolveDesktops(snap);
                         Dispatcher.InvokeAsync(() => ApplyDesktops(map));
@@ -161,7 +169,6 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
                 System.Threading.Thread.Sleep(8000);
             }
         }) { IsBackground = true, Name = "vd-resolver" };
-        t.SetApartmentState(System.Threading.ApartmentState.STA);
         t.Start();
     }
 
@@ -462,12 +469,11 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         foreach (var s in live)
         {
             seen.Add(s.SessionId);
-            var row = Rows.FirstOrDefault(r => r.SessionId == s.SessionId);
-            if (row == null) Rows.Add(new SessionRow(s));
-            else row.Update(s);
+            if (_rowsById.TryGetValue(s.SessionId, out var row)) row.Update(s);
+            else { row = new SessionRow(s); _rowsById[s.SessionId] = row; Rows.Add(row); }
         }
         for (int i = Rows.Count - 1; i >= 0; i--)
-            if (!seen.Contains(Rows[i].SessionId)) Rows.RemoveAt(i);
+            if (!seen.Contains(Rows[i].SessionId)) { _rowsById.Remove(Rows[i].SessionId); Rows.RemoveAt(i); }
 
         // Keep the restore registry in sync with the live *interactive* set of each CLI. Codex's
         // equivalent of Claude's "interactive" is the TUI: a `codex exec` thread is a headless one-shot

@@ -18,7 +18,7 @@ internal static class VirtualDesktop
         [PreserveSig] int MoveWindowToDesktop(IntPtr w, ref Guid id);
     }
 
-    // Per-thread so the (STA) resolver thread owns its own COM object.
+    // Per-thread so the (MTA) resolver thread owns its own COM object.
     [ThreadStatic] static IVirtualDesktopManager? _mgr;
     static IVirtualDesktopManager Mgr() => _mgr ??= (IVirtualDesktopManager)Activator.CreateInstance(
         Type.GetTypeFromCLSID(new Guid("aa509086-5ca9-4c25-8f95-589d3c07b48a"))!)!;

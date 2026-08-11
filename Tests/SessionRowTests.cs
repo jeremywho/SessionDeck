@@ -60,6 +60,37 @@ public class SessionRowTests
         Assert.True(codex.IsCodex);
     }
 
+    // Update raises only what changed: a blanket raise of every property on the 2s tick made the
+    // grid re-run bindings, converters, and live-sort placement for every row while nothing was
+    // visibly different. An identical scan must be silent; a real change must still notify.
+    [Fact]
+    public void Update_with_identical_data_raises_nothing()
+    {
+        var row = Row(new SessionInfo { SessionId = "x", Pid = 1, Status = "busy", Model = "claude-opus-5" });
+        var raised = new List<string>();
+        row.PropertyChanged += (_, e) => raised.Add(e.PropertyName ?? "");
+
+        row.Update(new SessionInfo { SessionId = "x", Pid = 1, Status = "busy", Model = "claude-opus-5" });
+
+        Assert.Empty(raised);
+    }
+
+    [Fact]
+    public void Update_with_a_status_change_raises_the_state_and_sort_properties()
+    {
+        var row = Row(new SessionInfo { SessionId = "x", Pid = 1, Status = "busy", Model = "claude-opus-5" });
+        var raised = new List<string>();
+        row.PropertyChanged += (_, e) => raised.Add(e.PropertyName ?? "");
+
+        row.Update(new SessionInfo { SessionId = "x", Pid = 1, Status = "waiting", Model = "claude-opus-5" });
+
+        Assert.Contains(nameof(SessionRow.Status), raised);
+        Assert.Contains(nameof(SessionRow.State), raised);
+        Assert.Contains(nameof(SessionRow.SortPriority), raised);
+        Assert.DoesNotContain(nameof(SessionRow.Name), raised);       // unchanged fields stay silent
+        Assert.DoesNotContain(nameof(SessionRow.ContextPct), raised);
+    }
+
     // Codex reports its own window per turn; Claude's isn't exposed to a standalone app, so those rows
     // fall back to the app-wide default. Sharing one divisor would have shown Codex sessions at ~a
     // quarter of their real fullness (258k window scored against 1M).
