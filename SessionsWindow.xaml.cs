@@ -18,6 +18,8 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     readonly DispatcherTimer _timer;
     readonly DispatcherTimer _pushTimer;
     FileSystemWatcher? _watcher;
+    CredentialsWatcher? _credentialsWatcher;
+    readonly SingleFlight _usagePoll;
     volatile SessionInfo[] _sessionsSnapshot = Array.Empty<SessionInfo>();
     ContextMenu _columnsMenu = new();
 
@@ -29,6 +31,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     string _accountText = "";
     string _usageState = "";
     string _accountTip = "";
+    string? _accountUuid;               // last account seen; null until the first reading
 
     /// <summary>
     /// How long after our last successful poll the numbers stop being presentable as current.
@@ -41,6 +44,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     public SessionsWindow(App app)
     {
         _app = app;
+        _usagePoll = new SingleFlight(PollUsageAsync);
         InitializeComponent();
         DataContext = this;
 
@@ -79,6 +83,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         Refresh();
         StartDesktopResolver();
         StartUsagePolling();
+        StartAccountWatcher();
     }
 
     /// <summary>
@@ -488,18 +493,47 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     /// <summary>Poll the usage endpoint now, then on <see cref="UsageApi.PollInterval"/>.</summary>
     void StartUsagePolling()
     {
-        _ = PollUsageAsync();
+        _ = _usagePoll.RunAsync();
         var timer = new DispatcherTimer { Interval = UsageApi.PollInterval };
-        timer.Tick += (_, _) => { _ = PollUsageAsync(); };
+        timer.Tick += (_, _) => { _ = _usagePoll.RunAsync(); };
         timer.Start();
+    }
+
+    /// <summary>
+    /// Watch the credentials file so switching accounts updates the bar now rather than at the next
+    /// 15-minute poll. The periodic poll is untouched — this is an extra trigger, not a replacement.
+    /// Marshalled to the dispatcher on arrival, same as the sessions-dir watcher.
+    /// </summary>
+    void StartAccountWatcher()
+    {
+        _credentialsWatcher = new CredentialsWatcher(UsageApi.CredentialsFile);
+        _credentialsWatcher.Changed += () => Dispatcher.InvokeAsync(OnCredentialsChanged);
+        _credentialsWatcher.Start();
+    }
+
+    /// <summary>
+    /// The credentials file was replaced, and by now <c>~/.claude.json</c> has caught up. Re-read the
+    /// identity (which drops the previous account's numbers, see <see cref="RefreshAccount"/>) and
+    /// ask the API for this account's. A failed call — an expired token right after a switch is the
+    /// obvious way — leaves the ordinary fallback on screen: the config's cache, labelled `· cached`.
+    /// </summary>
+    void OnCredentialsChanged()
+    {
+        RefreshAccount();
+        _ = _usagePoll.RunAsync();
     }
 
     async System.Threading.Tasks.Task PollUsageAsync()
     {
+        var startedFor = _accountUuid;
         var meters = await UsageApi.FetchAsync();
         // A failed call keeps the previous numbers rather than blanking the bar; RefreshAccount
         // ages them, and two consecutive misses is what surfaces as stale.
         if (meters == null || meters.Count == 0) return;
+        // The account changed while this was in the air, so whose numbers these are is anybody's
+        // guess — the token was re-read from disk mid-switch. Throw them away; the switch queued a
+        // re-run behind this one, and that call is unambiguously the new account's.
+        if (!string.Equals(startedFor, _accountUuid, StringComparison.Ordinal)) return;
         _liveMeters = meters;
         _liveAt = DateTime.Now;
         RefreshAccount();
@@ -513,6 +547,22 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     void RefreshAccount()
     {
         var acct = AccountScanner.Read();
+
+        // A different account is signed in than the numbers in hand were fetched for, so those
+        // numbers are now somebody else's. Drop them: the bar falls back to whatever the config
+        // caches for the new account (the switcher swaps that too), labelled `· cached`, until the
+        // poll this change also triggers comes back.
+        bool switched = AccountScanner.AccountChanged(_accountUuid, acct.AccountUuid);
+        _accountUuid = acct.AccountUuid;
+        if (switched)
+        {
+            _liveMeters = null;
+            _liveAt = default;
+            // The identity change is the trigger, wherever it was noticed — the watcher is only the
+            // fast path to noticing it. Coalesced, so this can't stack with the call the watcher
+            // makes for the same switch. (Set _accountUuid first: the poll reads it on entry.)
+            _ = _usagePoll.RunAsync();
+        }
 
         // Live numbers win. The on-disk cache is the fallback for a failed/never-run poll, and is
         // labelled as cached rather than passed off as current — its age can't be interpreted.

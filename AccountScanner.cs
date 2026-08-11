@@ -56,6 +56,11 @@ internal sealed class AccountInfo
 {
     public string Email = "";
     public string Organization = "";
+
+    /// <summary>Stable id of the signed-in account. The address can be reused across logins and is
+    /// missing entirely when signed out, so identity comparisons key off this instead.</summary>
+    public string AccountUuid = "";
+
     public List<UsageMeter> Meters = new();
     public DateTime FetchedAt;       // local; MinValue when the file carried no usage cache
 
@@ -119,6 +124,14 @@ internal static class AccountScanner
         return _cached;
     }
 
+    /// <summary>
+    /// Did the signed-in account change between two readings? Only a *transition* counts: the very
+    /// first reading (<paramref name="previous"/> null) is not a switch, or the app would throw away
+    /// the poll it just made at startup. Signing out — a real uuid going empty — does count.
+    /// </summary>
+    public static bool AccountChanged(string? previous, string current) =>
+        previous != null && !string.Equals(previous, current, StringComparison.Ordinal);
+
     /// <summary>Parses the config text. Returns null if it isn't valid JSON (a torn read).</summary>
     public static AccountInfo? Parse(string json)
     {
@@ -135,6 +148,7 @@ internal static class AccountScanner
             {
                 info.Email = Str(acct, "emailAddress");
                 info.Organization = Str(acct, "organizationName");
+                info.AccountUuid = Str(acct, "accountUuid");
             }
 
             if (!root.TryGetProperty("cachedUsageUtilization", out var cache) ||

@@ -87,6 +87,21 @@ The second footer bar: signed-in address on the left, one fill-behind pill per p
   the **file**, not the `~/.claude/` **directory** everything else reads.
 - **Meters** come from the API, polled every 15 min. `~/.claude.json` → `cachedUsageUtilization` is
   only the **fallback** when a poll fails, and is labelled `· cached` when shown.
+- **Switching accounts re-polls immediately** (`CredentialsWatcher`), because 15 minutes of the
+  previous account's pills beside the new account's address is just wrong. The switch is detected by
+  `~/.claude/.credentials.json` being **replaced** — the switcher writes a temp file and renames over
+  the top, so Created/Renamed/Changed/Deleted are all treated the same — then debounced ~1s, because
+  the sibling `~/.claude.json` patch (identity + usage cache) lands a few milliseconds later and
+  firing on the first event would re-read the *old* identity. The 15-min poll is untouched; this is
+  an extra trigger.
+- **The account's identity, not the watcher, is what invalidates the numbers.** `RefreshAccount`
+  compares `oauthAccount.accountUuid` against the last reading and drops `_liveMeters` when it
+  changes, so a switch noticed by any path (the 2s tick, say) is handled — and a poll still in flight
+  across the switch has its result thrown away, since the token was re-read from disk mid-swap and
+  whose numbers came back is unknowable. Post-switch the bar shows the config's cache (`· cached`)
+  for the moment it takes the new poll to land, or keeps showing it if that poll fails.
+- **All three poll callers go through one `SingleFlight`** — startup, the 15-min timer, the switch —
+  so a burst of switches can't put N HTTP calls in the air. One run in flight, at most one queued.
 - Both sources hit the same parser: the API response body *is* the object the config caches under
   `utilization`, so `AccountScanner.ParseLimits` serves both. Keep it that way.
 - Parse the self-describing **`limits` array**, never the `five_hour` / `seven_day_opus` siblings —

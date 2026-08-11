@@ -21,7 +21,10 @@ internal static class UsageApi
 {
     const string Url = "https://api.anthropic.com/api/oauth/usage";
 
-    static readonly string CredentialsFile = Path.Combine(
+    /// <summary>Claude Code's live auth state — read here for the bearer token, and watched by
+    /// <see cref="CredentialsWatcher"/> because it being replaced is what an account switch looks
+    /// like from outside. Never written; see <see cref="ReadAccessToken"/>.</summary>
+    public static readonly string CredentialsFile = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude", ".credentials.json");
 
     static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(15) };
