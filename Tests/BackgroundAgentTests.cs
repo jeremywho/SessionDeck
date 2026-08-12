@@ -11,6 +11,32 @@ namespace ClaudeSessionMonitor.Tests;
 /// </summary>
 public class BackgroundAgentTests
 {
+    [Fact]
+    public void Known_owner_verification_is_bounded_and_rotates_to_the_remainder()
+    {
+        var now = DateTime.UtcNow;
+        var owners = Enumerable.Range(1, 12).Select(i => $"rollout-{i}").ToList();
+        var verified = new Dictionary<string, DateTime>();
+
+        var first = CodexScanner.DueForVerification(owners, verified, now);
+        Assert.Equal(8, first.Count);
+        foreach (var path in first) verified[path] = now;
+
+        var second = CodexScanner.DueForVerification(owners, verified, now);
+        Assert.Equal(owners.Skip(8), second);
+    }
+
+    [Fact]
+    public void Recently_verified_owner_is_not_due_again()
+    {
+        var now = DateTime.UtcNow;
+        var verified = new Dictionary<string, DateTime> { ["rollout"] = now - TimeSpan.FromSeconds(29) };
+
+        Assert.Empty(CodexScanner.DueForVerification(new[] { "rollout" }, verified, now));
+        Assert.Single(CodexScanner.DueForVerification(new[] { "rollout" }, verified,
+            now + TimeSpan.FromSeconds(1)));
+    }
+
     [Theory]
     [InlineData("codex-tui", "tui")]           // a terminal a human sits in
     [InlineData("codex_exec", "exec")]         // headless one-shot

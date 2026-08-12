@@ -58,7 +58,10 @@ Four things will bite you, in rough order of how long they take to notice:
   it exactly, non-admin, and hands back the `codex.exe` PID — which is also what makes double-click-to-
   focus work, since `WindowActivator` is provider-agnostic and just needs a PID. It costs ~50ms a call,
   so it lives on the `codex-probe` background thread with a per-pass budget; `Scan()` on the UI tick only
-  reads the map it produces. Don't move a probe onto the UI thread.
+  reads the map it produces. New/growing candidates keep priority, while up to eight known owners are
+  revalidated per pass on a rotating 30s cadence. A miss still needs two checks before removal. Startup
+  crash recovery bypasses this cache and directly verifies each saved Codex session. Don't move a probe
+  onto the UI thread or let known-owner verification exceed the shared budget.
 - **Windows does not reliably refresh mtime for a file a process holds open.** A `codex exec` rollout was
   measured sitting at a **14-minute-old** timestamp while gaining 7KB in 12 seconds (the TUI's own
   rollout *does* update). So mtime cannot drive idle time or "is this subagent working" — both use

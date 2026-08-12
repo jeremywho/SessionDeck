@@ -87,8 +87,11 @@ internal static class CodexScanner
     static readonly Dictionary<string, string> _subParent = new(StringComparer.OrdinalIgnoreCase); // subagent rollout -> ROOT thread id
     static readonly Dictionary<string, long> _probed = new(StringComparer.OrdinalIgnoreCase); // rollout -> size when last probed
     static readonly Dictionary<string, int> _misses = new(StringComparer.OrdinalIgnoreCase);  // consecutive "nobody holds this" results
+    static readonly Dictionary<string, DateTime> _verified = new(StringComparer.OrdinalIgnoreCase); // last owner recheck
     static bool _firstPass = true;
-    static DateTime _lastVerify = DateTime.MinValue;
+
+    static readonly TimeSpan VerifyInterval = TimeSpan.FromSeconds(30);
+    const int VerifyPerPass = 8;
 
     /// <summary>
     /// When each rollout was last seen to GROW. Windows does not reliably refresh the mtime of a file
@@ -262,7 +265,10 @@ internal static class CodexScanner
 
         if (!anyCodex)
         {
-            lock (_gate) { _owner.Clear(); _subParent.Clear(); _probed.Clear(); _misses.Clear(); }
+            lock (_gate)
+            {
+                _owner.Clear(); _subParent.Clear(); _probed.Clear(); _misses.Clear(); _verified.Clear();
+            }
             return;
         }
 
@@ -280,33 +286,19 @@ internal static class CodexScanner
 
         int budget = _firstPass ? FirstProbeBudget : ProbeBudget;
 
-        // Re-verify what we already hold, every ~30s. Cheap (one call per live session) and it's the
-        // only thing that notices a thread being closed by a process that stays alive.
-        bool verify = (DateTime.UtcNow - _lastVerify).TotalSeconds > 30;
-        if (verify)
-        {
-            _lastVerify = DateTime.UtcNow;
-            foreach (var path in owned.Keys)
-            {
-                int pid = FileHolders.OwnerPid(path, "codex");
-                budget--;
-                lock (_gate)
-                {
-                    if (pid != 0) { _owner[path] = pid; _misses.Remove(path); continue; }
-
-                    // Two strikes, not one. A single "nobody holds this" is not worth a session
-                    // blinking out of the list — and dropping a QUIET session is the expensive kind of
-                    // mistake, because rediscovery is driven by the file growing.
-                    _misses[path] = _misses.TryGetValue(path, out var m) ? m + 1 : 1;
-                    if (_misses[path] >= 2) Forget(path);
-                }
-            }
-        }
+        // Reserve a small part of the pass for rotating known-owner verification. The old code
+        // verified every known rollout in one burst before checking the budget, so a large live set
+        // could issue an unbounded run of Restart Manager calls and starve new-session discovery.
+        var now = DateTime.UtcNow;
+        List<string> due;
+        lock (_gate)
+            due = DueForVerification(owned.Keys, _verified, now);
+        int verifyReserved = Math.Min(budget, due.Count);
 
         // Then probe candidates newest-first: anything never probed, or written since we last looked.
         foreach (var f in files)
         {
-            if (budget <= 0) break;
+            if (budget <= verifyReserved) break;
             if (owned.ContainsKey(f.Path)) continue;
             lock (_gate)
             {
@@ -317,13 +309,39 @@ internal static class CodexScanner
 
             int pid = FileHolders.OwnerPid(f.Path, "codex");
             if (pid == 0) continue;
-            lock (_gate) { _owner[f.Path] = pid; _misses.Remove(f.Path); }
+            lock (_gate)
+            {
+                _owner[f.Path] = pid; _misses.Remove(f.Path); _verified[f.Path] = now;
+            }
+        }
+
+        // Rechecking ownership is what notices a closed rollout when its codex process remains alive.
+        // At most eight are checked per pass, rotating naturally because successful and failed checks
+        // are timestamped. A miss still needs two checks 30s apart before the session is forgotten.
+        foreach (var path in due)
+        {
+            if (budget <= 0) break;
+            budget--;
+            int pid = FileHolders.OwnerPid(path, "codex");
+            lock (_gate)
+            {
+                _verified[path] = now;
+                if (pid != 0) { _owner[path] = pid; _misses.Remove(path); continue; }
+
+                _misses[path] = _misses.TryGetValue(path, out var m) ? m + 1 : 1;
+                if (_misses[path] >= 2) Forget(path);
+            }
         }
 
         _firstPass = false;
         RebuildSubagentMap(files, fullScan);
         if (fullScan) Prune(files, owned);
     }
+
+    internal static List<string> DueForVerification(IEnumerable<string> owned,
+        IReadOnlyDictionary<string, DateTime> verified, DateTime nowUtc) =>
+        owned.Where(path => !verified.TryGetValue(path, out var at) || nowUtc - at >= VerifyInterval)
+             .Take(VerifyPerPass).ToList();
 
     /// <summary>The fast window's rollouts plus stats for owned files outside it — what a between-
     /// full-scans pass looks at instead of the whole catalog.</summary>
@@ -369,6 +387,7 @@ internal static class CodexScanner
             PruneDict(_grewAt, keep);
             PruneDict(_probed, keep);
             PruneDict(_misses, keep);
+            PruneDict(_verified, keep);
         }
     }
 
@@ -386,6 +405,7 @@ internal static class CodexScanner
         _owner.Remove(path);
         _probed.Remove(path);
         _misses.Remove(path);
+        _verified.Remove(path);
     }
 
     /// <summary>Rollout files from the last <paramref name="days"/> day-folders, newest write first.</summary>

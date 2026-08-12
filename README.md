@@ -193,7 +193,8 @@ started last week can be the one live in front of you.
   that is — the **Restart Manager** API (`RmGetList`, the same non-admin call installers use for "close
   these apps first"), which returns the owning `codex.exe` PID. That's also what gives Codex rows a real
   PID, so double-click-to-focus works exactly as it does for Claude. The call costs ~50ms, so it runs on
-  a budgeted background thread; the UI scan just reads the resulting map.
+  a budgeted background thread; the UI scan just reads the resulting map. New/growing rollouts are
+  prioritized, and known owners are rechecked in small rotating batches rather than one large burst.
 - **Detail:** `turn_context` → model + reasoning effort · `token_count` → context tokens and the model's
   own context window (so Codex rows are a percentage of *their* window, not the Claude default) ·
   `task_started` / `task_complete` → Working / Completed · tool calls → last tool.
