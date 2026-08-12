@@ -17,6 +17,9 @@ dotnet test Tests\ClaudeSessionMonitor.Tests.csproj
 ```
 - It's a **tray app with no console** — failures are silent. After a launch, check
   `%TEMP%\claude-session-monitor-error.log`.
+- Slow recurring work is written sparingly to `%TEMP%\claude-session-monitor-performance.log`:
+  session scans at 1s+, UI application at 250ms+, and Codex probes/UIA sweeps at 2s+. The file rotates
+  at 1MB. Keep this thresholded; logging every pass would itself become background I/O.
 - Iteration loop that works well here: kill the running exe → build → launch → **screenshot to
   verify** (the UI is the spec; `PrintWindow` with flag `2` captures it). `--list` / `--windows` dump
   the session list / focus mapping to `%TEMP%` for headless checks.
@@ -41,8 +44,9 @@ dotnet test Tests\ClaudeSessionMonitor.Tests.csproj
    snapshots run on a thread-pool thread with no overlapping passes; only the completed snapshot is
    applied on the WPF dispatcher. Do not reintroduce session-file-triggered full scans: busy Claude
    heartbeats can sustain a rewrite stream and previously drove nearly eight scans per second.
-6. A background **STA thread** tags each row with its virtual desktop every ~8s
-   (`VirtualDesktop` + `WindowActivator.ResolveWindows`, which is UIA-heavy — hence off the UI thread).
+6. A background **MTA thread** tags each row with its virtual desktop via `VirtualDesktop` +
+   `WindowActivator.ResolveWindows`. The UIA-heavy sweep runs only while visible, skips active session
+   scans, normally waits 15s, and backs off to 30–60s after slow UIA or discovery passes.
 7. `CodexScanner.Scan()` appends live Codex sessions to the same list (see below). Rows are told apart
    only by the provider mark in the model pill — sort, focus, columns and tooltips are all shared.
 

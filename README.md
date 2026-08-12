@@ -89,6 +89,8 @@ the window's position/size is remembered on close, so it reopens where you left 
   config changes.
 - Settings persist to `%APPDATA%\ClaudeSessionMonitor\settings.json`; unhandled errors are logged to
   `%TEMP%\claude-session-monitor-error.log`.
+- Slow background scans and Windows UI Automation sweeps are recorded in the bounded
+  `%TEMP%\claude-session-monitor-performance.log` for troubleshooting.
 - `--list` / `--windows` headless modes dump the session list / focus mapping to `%TEMP%`.
 
 ## Install & updates

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
@@ -33,6 +34,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     string _accountTip = "";
     string? _accountUuid;               // last account seen; null until the first reading
     int _scanRunning;                   // one background discovery pass at a time
+    long _lastScanMs;                   // adaptive input for the UIA desktop resolver
 
     /// <summary>
     /// How long after our last successful poll the numbers stop being presentable as current.
@@ -98,7 +100,15 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         {
             while (true)
             {
-                try { CodexScanner.Probe(); } catch { }
+                try
+                {
+                    var timer = Stopwatch.StartNew();
+                    CodexScanner.Probe();
+                    timer.Stop();
+                    if (timer.ElapsedMilliseconds >= 2000)
+                        PerformanceLog.Write($"codex-probe {timer.ElapsedMilliseconds}ms");
+                }
+                catch { }
                 System.Threading.Thread.Sleep(3000);
             }
         }) { IsBackground = true, Name = "codex-probe" };
@@ -121,23 +131,36 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     {
         var t = new System.Threading.Thread(() =>
         {
+            int delayMs = 15000;
             while (true)
             {
+                System.Threading.Thread.Sleep(delayMs);
                 try
                 {
                     var snap = _sessionsSnapshot;
-                    if (_windowVisible && snap.Length > 0)
+                    if (_windowVisible && snap.Length > 0 &&
+                        System.Threading.Volatile.Read(ref _scanRunning) == 0)
                     {
+                        var timer = Stopwatch.StartNew();
                         var map = ResolveDesktops(snap);
+                        timer.Stop();
+                        delayMs = DesktopResolverDelayMs(timer.ElapsedMilliseconds,
+                            System.Threading.Interlocked.Read(ref _lastScanMs));
+                        if (timer.ElapsedMilliseconds >= 2000)
+                            PerformanceLog.Write($"desktop-uia {timer.ElapsedMilliseconds}ms sessions={snap.Length} next={delayMs}ms");
                         Dispatcher.InvokeAsync(() => ApplyDesktops(map));
                     }
+                    else delayMs = 5000; // hidden, empty, or scanning: cheap retry without touching UIA
                 }
                 catch { }
-                System.Threading.Thread.Sleep(8000);
             }
         }) { IsBackground = true, Name = "vd-resolver" };
         t.Start();
     }
+
+    internal static int DesktopResolverDelayMs(long uiaMs, long scanMs) =>
+        uiaMs >= 5000 || scanMs >= 3000 ? 60000 :
+        uiaMs >= 2000 || scanMs >= 1000 ? 30000 : 15000;
 
     static Dictionary<string, (int Index, bool Current)> ResolveDesktops(SessionInfo[] sessions)
     {
@@ -439,12 +462,34 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             {
                 // Same list, same sort — told apart by the provider mark. Headless threads are folded
                 // onto their interactive owner because they have no terminal of their own.
-                var found = CodexAttribution.Fold(
-                    SessionScanner.Scan(), CodexScanner.Scan(), Native.BuildParentMap());
+                var total = Stopwatch.StartNew();
+                var phase = Stopwatch.StartNew();
+                var claude = SessionScanner.Scan();
+                long claudeMs = phase.ElapsedMilliseconds;
+                phase.Restart();
+                var codex = CodexScanner.Scan();
+                long codexMs = phase.ElapsedMilliseconds;
+                phase.Restart();
+                var parents = Native.BuildParentMap();
+                long processesMs = phase.ElapsedMilliseconds;
+                phase.Restart();
+                var found = CodexAttribution.Fold(claude, codex, parents);
+                long attributionMs = phase.ElapsedMilliseconds;
+                phase.Restart();
                 SessionRegistry.Snapshot(found.Where(IsRestorable).ToList());
+                long registryMs = phase.ElapsedMilliseconds;
+                total.Stop();
+                System.Threading.Interlocked.Exchange(ref _lastScanMs, total.ElapsedMilliseconds);
+                if (total.ElapsedMilliseconds >= 1000)
+                    PerformanceLog.Write($"session-scan {total.ElapsedMilliseconds}ms claude={claudeMs} codex={codexMs} " +
+                        $"processes={processesMs} attribution={attributionMs} registry={registryMs} sessions={found.Count}");
                 return found;
             });
+            var apply = Stopwatch.StartNew();
             ApplyRefresh(live);
+            apply.Stop();
+            if (apply.ElapsedMilliseconds >= 250)
+                PerformanceLog.Write($"ui-apply {apply.ElapsedMilliseconds}ms sessions={live.Count}");
         }
         catch { } // best-effort: retain the last good snapshot after a transient read failure
         finally { System.Threading.Interlocked.Exchange(ref _scanRunning, 0); }

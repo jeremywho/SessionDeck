@@ -11,6 +11,16 @@ namespace ClaudeSessionMonitor.Tests;
 /// </summary>
 public class BackgroundAgentTests
 {
+    [Theory]
+    [InlineData(100, 100, 15000)]
+    [InlineData(2000, 100, 30000)]
+    [InlineData(100, 1000, 30000)]
+    [InlineData(5000, 100, 60000)]
+    [InlineData(100, 3000, 60000)]
+    public void Desktop_resolver_backs_off_from_slow_UIA_or_session_scans(
+        long uiaMs, long scanMs, int expectedDelayMs)
+        => Assert.Equal(expectedDelayMs, SessionsWindow.DesktopResolverDelayMs(uiaMs, scanMs));
+
     [Fact]
     public void Known_owner_verification_is_bounded_and_rotates_to_the_remainder()
     {
