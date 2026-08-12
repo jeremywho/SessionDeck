@@ -84,8 +84,8 @@ the window's position/size is remembered on close, so it reopens where you left 
   highlight on hover (with a hand cursor) to show they're clickable.
 - **Ctrl + mouse wheel** zooms the content larger/smaller (like browser zoom) without resizing the
   window; **Ctrl + 0** resets to 100%. Remembered.
-- **Change-driven refresh** — a `FileSystemWatcher` on the sessions registry updates the list within
-  ~120ms of a status change, with a 2s fallback poll. Event-driven, so idle CPU is ~0 — no hooks, no
+- **Bounded background refresh** — session discovery runs off the UI thread at most every 5s, with
+  overlapping passes dropped. Busy heartbeat streams cannot create a scan backlog — no hooks and no
   config changes.
 - Settings persist to `%APPDATA%\ClaudeSessionMonitor\settings.json`; unhandled errors are logged to
   `%TEMP%\claude-session-monitor-error.log`.
@@ -174,9 +174,8 @@ DigiCert KeyLocker), swap the workflow's *Sign the exe* step for that provider's
 - **Detail:** tails `~/.claude/projects/<slug>/<sessionId>.jsonl` for token usage, model, last tool,
   and the Claude-set title — but only re-reads a transcript when its mtime/size changed since the last
   scan (an unchanged, idle session costs just a `stat`).
-- **Refresh:** a `FileSystemWatcher` on `~/.claude/sessions/` fires when Claude rewrites a `<pid>.json`
-  (status change / heartbeat) → a debounced re-scan; a 2s timer is the fallback. Event-driven, so idle
-  CPU is ~0, with no hooks or edits to the user's files.
+- **Refresh:** a non-overlapping background scan starts at most every 5s. Claude heartbeat writes do
+  not directly trigger scans, preventing sustained activity from flooding the WPF dispatcher.
 - **Focus:** asks the session's own console what its title is (by attaching to it), then finds the tab
   wearing that title across the host process's windows, selects it, foregrounds the window, and moves
   keyboard focus into the terminal pane so you can type straight away. If two sessions happen to share
@@ -207,7 +206,7 @@ started last week can be the one live in front of you.
 - **Subagents:** each Codex subagent is a rollout of its own, tied to its session by the header's
   `session_id` (which is the **root** thread at any nesting depth), and rolled up into the same **⚙ N**
   badge Claude's Task agents use.
-- **Refresh:** the 2s poll, deliberately without a `FileSystemWatcher` — Codex writes to the rollout tree
+- **Refresh:** the 5s poll, deliberately without a `FileSystemWatcher` — Codex writes to the rollout tree
   continuously while a turn runs, and every one of those events would trigger a re-read.
 
 ## Project layout

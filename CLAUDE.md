@@ -34,7 +34,10 @@ dotnet test Tests\ClaudeSessionMonitor.Tests.csproj
 3. `SessionRow` (observable VM) derives the display **state** from `status` via `SessionStateMap`.
 4. `SessionsWindow` binds `ObservableCollection<SessionRow>` to a DataGrid, live-sorted by a
    `ListCollectionView` (SortPriority → `LastChanged` desc → Name).
-5. Refresh is **event-driven**: a `FileSystemWatcher` on the sessions dir + a 2s fallback `DispatcherTimer`.
+5. Refresh starts at most every **5s**. Discovery, enrichment, process-tree attribution, and registry
+   snapshots run on a thread-pool thread with no overlapping passes; only the completed snapshot is
+   applied on the WPF dispatcher. Do not reintroduce session-file-triggered full scans: busy Claude
+   heartbeats can sustain a rewrite stream and previously drove nearly eight scans per second.
 6. A background **STA thread** tags each row with its virtual desktop every ~8s
    (`VirtualDesktop` + `WindowActivator.ResolveWindows`, which is UIA-heavy — hence off the UI thread).
 7. `CodexScanner.Scan()` appends live Codex sessions to the same list (see below). Rows are told apart
@@ -96,7 +99,7 @@ The second footer bar: signed-in address on the left, one fill-behind pill per p
   an extra trigger.
 - **The account's identity, not the watcher, is what invalidates the numbers.** `RefreshAccount`
   compares `oauthAccount.accountUuid` against the last reading and drops `_liveMeters` when it
-  changes, so a switch noticed by any path (the 2s tick, say) is handled — and a poll still in flight
+  changes, so a switch noticed by any path (the 5s scan, say) is handled — and a poll still in flight
   across the switch has its result thrown away, since the token was re-read from disk mid-swap and
   whose numbers came back is unknowable. Post-switch the bar shows the config's cache (`· cached`)
   for the moment it takes the new poll to land, or keeps showing it if that poll fails.

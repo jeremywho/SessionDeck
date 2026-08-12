@@ -16,8 +16,6 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
 {
     readonly App _app;
     readonly DispatcherTimer _timer;
-    readonly DispatcherTimer _pushTimer;
-    FileSystemWatcher? _watcher;
     CredentialsWatcher? _credentialsWatcher;
     readonly SingleFlight _usagePoll;
     volatile SessionInfo[] _sessionsSnapshot = Array.Empty<SessionInfo>();
@@ -34,6 +32,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     string _usageState = "";
     string _accountTip = "";
     string? _accountUuid;               // last account seen; null until the first reading
+    int _scanRunning;                   // one background discovery pass at a time
 
     /// <summary>
     /// How long after our last successful poll the numbers stop being presentable as current.
@@ -70,19 +69,15 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         InitColumns();
         SetupSort();
 
-        // Fallback poll — catches the idle-time counters and anything the watcher misses; the
-        // FileSystemWatcher (below) drives the real-time updates, so this can be slow.
-        _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
-        _timer.Tick += (_, _) => Refresh();
+        // A full discovery pass is intentionally capped at one start every five seconds. Claude
+        // rewrites its registry files on heartbeats; using those events to trigger scans allowed a
+        // continuously busy set of sessions to drive nearly eight full scans per second.
+        _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
+        _timer.Tick += (_, _) => RequestRefresh();
         _timer.Start();
 
-        // Debounce: coalesce a burst of change events into one refresh ~120ms later.
-        _pushTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(120) };
-        _pushTimer.Tick += (_, _) => { _pushTimer.Stop(); Refresh(); };
-
-        StartWatcher();
         StartCodexProbe();
-        Refresh();
+        RequestRefresh();
         StartDesktopResolver();
         StartUsagePolling();
         StartAccountWatcher();
@@ -95,7 +90,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     /// holds each rollout file open — ~50ms a call, far too slow for the UI tick. This thread absorbs
     /// that cost; the scan itself then just reads the map. There's deliberately no FileSystemWatcher on
     /// the rollout tree either: Codex writes to it constantly while a turn runs, and every one of those
-    /// events would trigger a tail re-read. The 2s poll is the right cadence here.
+    /// events would trigger a tail re-read. The capped 5s poll is the right cadence here.
     /// </summary>
     void StartCodexProbe()
     {
@@ -108,51 +103,6 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             }
         }) { IsBackground = true, Name = "codex-probe" };
         t.Start();
-    }
-
-    /// <summary>Coalesce a burst of change events into one refresh ~120ms later.</summary>
-    public void PushRefresh() { if (!_pushTimer.IsEnabled) _pushTimer.Start(); }
-
-    /// <summary>
-    /// Watch the sessions registry dir: Claude rewrites &lt;pid&gt;.json on every status change (and
-    /// heartbeat), so this gives change-driven, near-instant updates at ~0 idle CPU — no polling loop,
-    /// no hooks, no edits to the user's files. The 2s fallback timer covers anything the watcher drops.
-    /// </summary>
-    void StartWatcher()
-    {
-        try
-        {
-            var dir = SessionScanner.SessionsDirectory;
-            if (!Directory.Exists(dir)) return;
-            _watcher = new FileSystemWatcher(dir, "*.json")
-            {
-                NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size,
-                EnableRaisingEvents = true,
-            };
-            _watcher.Changed += (_, _) => OnSessionsDirEvent();
-            _watcher.Created += (_, _) => OnSessionsDirEvent();
-            _watcher.Deleted += (_, _) => OnSessionsDirEvent();
-            _watcher.Renamed += (_, _) => OnSessionsDirEvent();
-        }
-        catch { }   // best-effort; the fallback poll still works without it
-    }
-
-    int _fsEventQueued;   // 1 while a watcher callback is already waiting on the dispatcher
-
-    /// <summary>
-    /// One dispatcher hop per burst. Claude rewrites every &lt;pid&gt;.json on heartbeats, and
-    /// queueing an InvokeAsync per raw event let a rewrite storm pile hundreds of operations onto
-    /// the dispatcher before the 120ms debounce ever saw the first one — the debounce coalesced
-    /// the refreshes, not the queue traffic.
-    /// </summary>
-    void OnSessionsDirEvent()
-    {
-        if (System.Threading.Interlocked.Exchange(ref _fsEventQueued, 1) == 1) return;
-        Dispatcher.InvokeAsync(() =>
-        {
-            System.Threading.Interlocked.Exchange(ref _fsEventQueued, 0);
-            PushRefresh();
-        });
     }
 
     // --- virtual-desktop resolver: tag each row with the desktop its terminal window is on ---
@@ -476,12 +426,33 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
 
     // ---------------- data ----------------
 
-    void Refresh()
+    /// <summary>
+    /// Discover and enrich sessions away from the dispatcher. If a slow pass is still running when
+    /// the timer ticks, that tick is dropped so scans never overlap or build a backlog.
+    /// </summary>
+    async void RequestRefresh()
     {
-        // Same list, same sort — told apart by the provider mark. Headless Codex threads (companion
-        // second opinions, exec runs) are folded onto the Claude session that started them rather than
-        // listed separately: they have no terminal, so a row for one is a row you can't act on.
-        var live = CodexAttribution.Fold(SessionScanner.Scan(), CodexScanner.Scan(), Native.BuildParentMap());
+        if (System.Threading.Interlocked.Exchange(ref _scanRunning, 1) == 1) return;
+        try
+        {
+            var live = await System.Threading.Tasks.Task.Run(() =>
+            {
+                // Same list, same sort — told apart by the provider mark. Headless threads are folded
+                // onto their interactive owner because they have no terminal of their own.
+                var found = CodexAttribution.Fold(
+                    SessionScanner.Scan(), CodexScanner.Scan(), Native.BuildParentMap());
+                SessionRegistry.Snapshot(found.Where(IsRestorable).ToList());
+                return found;
+            });
+            ApplyRefresh(live);
+        }
+        catch { } // best-effort: retain the last good snapshot after a transient read failure
+        finally { System.Threading.Interlocked.Exchange(ref _scanRunning, 0); }
+    }
+
+    /// <summary>Apply a completed discovery snapshot to WPF-bound state on the dispatcher.</summary>
+    void ApplyRefresh(List<SessionInfo> live)
+    {
         var seen = new HashSet<string>();
         foreach (var s in live)
         {
@@ -492,11 +463,6 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         for (int i = Rows.Count - 1; i >= 0; i--)
             if (!seen.Contains(Rows[i].SessionId)) { _rowsById.Remove(Rows[i].SessionId); Rows.RemoveAt(i); }
 
-        // Keep the restore registry in sync with the live *interactive* set of each CLI. Codex's
-        // equivalent of Claude's "interactive" is the TUI: a `codex exec` thread is a headless one-shot
-        // fired by a script or an agent, so reopening one in a terminal would restart somebody's
-        // automation, not restore your work.
-        SessionRegistry.Snapshot(live.Where(IsRestorable).ToList());
         _sessionsSnapshot = live.ToArray();
 
         // The count stays short and the provider split goes in the tooltip: the legend beside it
