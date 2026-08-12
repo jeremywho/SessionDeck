@@ -31,6 +31,7 @@ internal static class SessionScanner
         public long Mtime; public long Size;
     }
     static readonly Dictionary<string, Detail> _detailCache = new();
+    static readonly SubagentCounter _subagents = new();
 
     public static List<SessionInfo> Scan()
     {
@@ -54,6 +55,7 @@ internal static class SessionScanner
             if (!liveIds.Contains(key)) _detailCache.Remove(key);
         foreach (var key in new List<string>(_fallback.Keys))
             if (!liveIds.Contains(key)) _fallback.Remove(key);
+        _subagents.Retain(new HashSet<string>(list.Select(SubagentsDir), StringComparer.OrdinalIgnoreCase));
 
         return list;
     }
@@ -215,30 +217,19 @@ internal static class SessionScanner
         return found;
     }
 
-    const double SubagentActiveSeconds = 30;
-
     /// <summary>
     /// Count this session's subagents from &lt;transcriptDir&gt;/&lt;sessionId&gt;/subagents/agent-*.jsonl —
     /// total ever spawned, plus how many were written in the last ~30s (actively streaming = working now).
-    /// Done on every scan (NOT gated by the transcript mtime cache): subagents stream while the parent's
-    /// own transcript sits idle, so the subagents dir is the live signal.
+    /// The incremental cache inventories newly changed directories, stats only recently active files
+    /// between passes, and periodically reconciles settled history to catch an unusual resumed agent.
     /// </summary>
     static void CountSubagents(SessionInfo s)
     {
         try
         {
             string dir = SubagentsDir(s);
-            if (dir.Length == 0 || !Directory.Exists(dir)) return;
-            var now = DateTime.UtcNow;
-            int total = 0, active = 0;
-            foreach (var f in Directory.EnumerateFiles(dir, "agent-*.jsonl"))
-            {
-                total++;
-                try { if ((now - File.GetLastWriteTimeUtc(f)).TotalSeconds < SubagentActiveSeconds) active++; }
-                catch { }
-            }
-            s.SubagentsTotal = total;
-            s.SubagentsActive = active;
+            if (dir.Length == 0) return;
+            (s.SubagentsTotal, s.SubagentsActive) = _subagents.Count(dir, DateTime.UtcNow);
         }
         catch { }
     }

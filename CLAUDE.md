@@ -30,7 +30,10 @@ dotnet test Tests\ClaudeSessionMonitor.Tests.csproj
    `~/.claude/projects/<slug>/<sessionId>.jsonl` (model, context %, last tool, title, API error).
    Transcript reads are **mtime/size-cached** — an unchanged session costs a `stat`.
 2. `CountSubagents()` — counts `<sessionId>/subagents/agent-*.jsonl` (total + fresh-mtime `<30s` =
-   "working now"). Deliberately **not** cached: subagents stream while the parent transcript is static.
+   "working now") through `SubagentCounter`. It inventories when the directory changes, stats only
+   recently active files on 5s passes, and fully reconciles every 15s so settled history is cheap while
+   an unusual resumed cold agent is still detected. This cache is independent of the parent transcript,
+   because subagents stream while the parent transcript can remain static.
 3. `SessionRow` (observable VM) derives the display **state** from `status` via `SessionStateMap`.
 4. `SessionsWindow` binds `ObservableCollection<SessionRow>` to a DataGrid, live-sorted by a
    `ListCollectionView` (SortPriority → `LastChanged` desc → Name).
