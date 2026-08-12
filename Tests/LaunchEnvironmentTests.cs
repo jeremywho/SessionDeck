@@ -19,7 +19,7 @@ public class LaunchEnvironmentTests
     static ProcessStartInfo Build(LaunchTarget target = LaunchTarget.NewWindow) =>
         // The strip list is passed explicitly so the test never depends on the real machine's
         // environment — otherwise a dev box with a genuine NO_COLOR would flip the result.
-        SessionLauncher.BuildTerminalStart(@"C:\x", "claude", target, new[] { NoColor });
+        SessionLauncher.BuildTerminalStart(@"C:\x", "claude", target, new[] { NoColor }, @"C:\PowerShell\pwsh.exe");
 
     [Fact]
     public void A_launched_terminal_does_not_inherit_NO_COLOR()
@@ -76,7 +76,7 @@ public class LaunchEnvironmentTests
     public void A_new_window_is_requested_with_w_minus_one()
     {
         var argv = Build(LaunchTarget.NewWindow).ArgumentList;
-        Assert.Equal(new[] { "-w", "-1", "new-tab", "-d", @"C:\x", "pwsh", "-NoExit", "-Command", "claude" }, argv);
+        Assert.Equal(new[] { "-w", "-1", "new-tab", "-d", @"C:\x", @"C:\PowerShell\pwsh.exe", "-NoExit", "-Command", "claude" }, argv);
     }
 
     [Fact]
@@ -93,5 +93,23 @@ public class LaunchEnvironmentTests
         var psi = SessionLauncher.BuildTerminalStart(@"C:\x", "claude --name 'a b'", LaunchTarget.NewWindow,
                                                      Array.Empty<string>());
         Assert.Equal("claude --name 'a b'", psi.ArgumentList[^1]);
+    }
+
+    [Fact]
+    public void PowerShell_7_is_preferred_without_using_PATH()
+    {
+        string expected = @"C:\Program Files\PowerShell\7\pwsh.exe";
+        string actual = SessionLauncher.ResolvePowerShell(path => path == expected,
+            @"C:\Program Files", @"C:\Windows\System32");
+        Assert.Equal(expected, actual);
+    }
+
+    [Fact]
+    public void Built_in_Windows_PowerShell_is_the_fallback()
+    {
+        string expected = @"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe";
+        string actual = SessionLauncher.ResolvePowerShell(path => path == expected,
+            @"C:\Program Files", @"C:\Windows\System32");
+        Assert.Equal(expected, actual);
     }
 }

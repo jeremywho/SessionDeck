@@ -193,6 +193,10 @@ The second footer bar: signed-in address on the left, one fill-behind pill per p
   `LaunchEnvironmentTests`; verified those tests fail when the scrub is removed.
   **Practical note for agents: don't relaunch the user's app from your own shell** — it inherits your
   environment. Clear the offending variable first, or let the user start it.
+- **Do not give Windows Terminal a bare `pwsh`.** An installed tray app can inherit Explorer's stale
+  PATH even though PowerShell 7 is already installed, causing WT to show `0x80070002`. The launcher
+  resolves the existing `Program Files\PowerShell\7\pwsh.exe` to an absolute path, falling back to
+  built-in Windows PowerShell. This fixes launch without changing PATH or installing another shell.
 - **The launcher's two rows are aligned by hand, and both mechanisms look deletable.** The Codex row
   carries an empty 36px `Border` where Claude's "named" button sits, and both provider glyphs have a
   fixed `Width` because `✳` and `◆` measure differently (~4px, enough to visibly skew the rows). Remove

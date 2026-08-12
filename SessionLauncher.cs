@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO;
 
 namespace ClaudeSessionMonitor;
 
@@ -141,6 +142,25 @@ internal static class SessionLauncher
     // ---------------------------------------------------------------- process start
 
     /// <summary>
+    /// Resolve a shell by absolute path instead of relying on the tray app's inherited PATH. An
+    /// installed app can start before a PATH update or inherit Explorer's stale environment, while
+    /// the executable is already present and usable. Prefer PowerShell 7, then Windows' built-in
+    /// PowerShell; the bare name is only a last resort for nonstandard installations.
+    /// </summary>
+    internal static string ResolvePowerShell(Func<string, bool>? exists = null,
+        string? programFiles = null, string? systemDirectory = null)
+    {
+        exists ??= File.Exists;
+        programFiles ??= Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+        systemDirectory ??= Environment.SystemDirectory;
+
+        string pwsh = Path.Combine(programFiles, "PowerShell", "7", "pwsh.exe");
+        if (exists(pwsh)) return pwsh;
+        string windowsPowerShell = Path.Combine(systemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
+        return exists(windowsPowerShell) ? windowsPowerShell : "pwsh.exe";
+    }
+
+    /// <summary>
     /// The Windows Terminal invocation: `wt -w <window> new-tab -d <cwd> pwsh -NoExit -Command <cmd>`.
     /// `-w -1` forces a new window; `-w 0` targets its most recently used window — verified to follow
     /// the last *focused* terminal, not the invoking one, which is what makes it the right answer when
@@ -148,7 +168,8 @@ internal static class SessionLauncher
     /// error) after the CLI exits.
     /// </summary>
     public static ProcessStartInfo BuildTerminalStart(string cwd, string cmd, LaunchTarget target,
-                                                      IEnumerable<string>? strip = null)
+                                                      IEnumerable<string>? strip = null,
+                                                      string? shellExecutable = null)
     {
         string window = target == LaunchTarget.NewWindow ? "-1" : "0";
         var psi = new ProcessStartInfo("wt.exe")
@@ -161,7 +182,8 @@ internal static class SessionLauncher
             // different repo entirely. Don't read this line as load-bearing.
             CreateNoWindow = true,
         };
-        foreach (var a in new[] { "-w", window, "new-tab", "-d", cwd, "pwsh", "-NoExit", "-Command", cmd })
+        foreach (var a in new[] { "-w", window, "new-tab", "-d", cwd,
+                                  shellExecutable ?? ResolvePowerShell(), "-NoExit", "-Command", cmd })
             psi.ArgumentList.Add(a);
         StripFromChild(psi, strip ?? InjectedColorKillSwitches());
         return psi;
@@ -172,9 +194,11 @@ internal static class SessionLauncher
     /// FALSE here even though nothing is redirected — it's the only mode that lets us edit the child's
     /// environment, and a console app started this way from a GUI process still gets its own window.
     /// </summary>
-    public static ProcessStartInfo BuildFallbackStart(string cwd, string cmd, IEnumerable<string>? strip = null)
+    public static ProcessStartInfo BuildFallbackStart(string cwd, string cmd, IEnumerable<string>? strip = null,
+                                                       string? shellExecutable = null)
     {
-        var psi = new ProcessStartInfo("pwsh.exe") { UseShellExecute = false, WorkingDirectory = cwd };
+        var psi = new ProcessStartInfo(shellExecutable ?? ResolvePowerShell())
+            { UseShellExecute = false, WorkingDirectory = cwd };
         psi.ArgumentList.Add("-NoExit");
         psi.ArgumentList.Add("-Command");
         psi.ArgumentList.Add(cmd);
