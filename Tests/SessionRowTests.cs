@@ -41,13 +41,21 @@ public class SessionRowTests
         Assert.Equal("", row.ModelChip);
     }
 
-    // Effort is Codex-only: Claude Code doesn't record one in the transcript, and an empty string
-    // has to keep the trailing text collapsed rather than render a stray gap in the pill.
+    // Both CLIs report an effort now, so this turns on whether one was seen — not on which CLI it
+    // came from. An empty string has to keep the trailing text collapsed rather than render a stray
+    // gap in the pill.
     [Fact]
     public void Effort_shows_only_when_the_cli_reports_one()
     {
         Assert.True(WithModel("gpt-5.6-sol", "ultra", SessionProvider.Codex).HasEffort);
+        Assert.True(WithModel("claude-opus-5", "max").HasEffort);
         Assert.False(WithModel("claude-opus-5").HasEffort);
+    }
+
+    [Fact]
+    public void A_claude_effort_reaches_the_model_tooltip()
+    {
+        Assert.Equal("Claude Code · claude-fable-5 · max effort", WithModel("claude-fable-5", "max").ModelTooltip);
     }
 
     [Fact]

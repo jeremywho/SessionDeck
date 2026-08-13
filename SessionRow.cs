@@ -187,7 +187,8 @@ internal sealed class SessionRow : INotifyPropertyChanged
     public string ModelChip => FriendlyModel(_s.Model);
     public bool HasModel => _s.Model.Length > 0;
 
-    /// <summary>Reasoning effort, Codex only — Claude Code doesn't record one in the transcript.</summary>
+    /// <summary>Reasoning effort of the latest turn. Both CLIs report one; empty means none was seen,
+    /// which keeps the trailing text collapsed rather than rendering a stray separator.</summary>
     public string Effort => _s.Effort;
     public bool HasEffort => _s.Effort.Length > 0;
     public string ModelTooltip => HasModel

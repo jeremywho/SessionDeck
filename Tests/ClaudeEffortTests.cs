@@ -77,4 +77,26 @@ public sealed class ClaudeEffortTests
             {"type":"assistant","effort":3,"message":{"model":"claude-opus-5"}}
             """).Effort);
     }
+
+    // The parser returning "" is only half the delivered behaviour: Enrich then fills the gap from the
+    // previous pass, so what the row actually shows after a record with no effort is the LAST KNOWN
+    // effort, not blank. Pinning it here because the parser tests above look like they cover it and
+    // don't — a reading of ParseAssistant alone predicts a blank cell that never appears.
+    [Fact]
+    public void A_gap_keeps_the_last_known_effort_rather_than_blanking_the_row()
+    {
+        var s = new SessionInfo { SessionId = "x", Model = "claude-opus-5" };
+        SessionScanner.FillGapsFrom(s, new SessionScanner.Detail { Effort = "max", Model = "claude-opus-5" });
+
+        Assert.Equal("max", s.Effort);
+    }
+
+    [Fact]
+    public void A_real_effort_is_never_overwritten_by_the_cached_one()
+    {
+        var s = new SessionInfo { SessionId = "x", Effort = "high" };
+        SessionScanner.FillGapsFrom(s, new SessionScanner.Detail { Effort = "max" });
+
+        Assert.Equal("high", s.Effort);
+    }
 }

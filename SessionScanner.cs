@@ -24,7 +24,7 @@ internal static class SessionScanner
     // Last known-good detail per session id. A turn in progress can briefly leave no parseable
     // assistant line in the tail; we reuse these instead of flashing "no model / 0%". Also caches the
     // transcript's mtime/size so an unchanged transcript skips the re-read entirely (see Enrich).
-    sealed class Detail
+    internal sealed class Detail
     {
         public string Model = ""; public string Effort = ""; public long Ctx; public long Out; public string LastTool = ""; public string Title = "";
         public bool ApiError; public string ErrorText = "";
@@ -167,18 +167,7 @@ internal static class SessionScanner
             catch { }
         }
 
-        // Sticky last-known-good: a new turn can briefly leave no parseable assistant line in the
-        // tail. Reuse cached values for anything we came up empty on, then remember the good ones.
-        // (Only fills empties, so a real drop — e.g. after auto-compact — still updates.)
-        if (prev != null)
-        {
-            if (s.Model.Length == 0) s.Model = prev.Model;
-            if (s.Effort.Length == 0) s.Effort = prev.Effort;
-            if (s.ContextTokens == 0) s.ContextTokens = prev.Ctx;
-            if (s.OutputTokens == 0) s.OutputTokens = prev.Out;
-            if (s.LastTool.Length == 0) s.LastTool = prev.LastTool;
-            if (s.Title.Length == 0) s.Title = prev.Title;
-        }
+        if (prev != null) FillGapsFrom(s, prev);
         _detailCache[s.SessionId] = new Detail
         {
             Model = s.Model, Effort = s.Effort, Ctx = s.ContextTokens, Out = s.OutputTokens, LastTool = s.LastTool, Title = s.Title,
@@ -241,6 +230,23 @@ internal static class SessionScanner
             ? Path.GetDirectoryName(s.TranscriptPath) ?? ""
             : Path.Combine(ProjectsDir, Regex.Replace(s.Cwd, "[^a-zA-Z0-9]", "-"));
         return baseDir.Length > 0 ? Path.Combine(baseDir, s.SessionId, "subagents") : "";
+    }
+
+    /// <summary>
+    /// Sticky last-known-good: a new turn can briefly leave no parseable assistant line in the tail,
+    /// so anything this pass came up empty on falls back to the previous pass. It only fills empties,
+    /// which is what lets a real drop — a smaller context after auto-compact — still show through.
+    /// The consequence worth knowing: a value never goes back to unknown while the session lives, so
+    /// an effort or model that genuinely stops being reported keeps displaying its last real value.
+    /// </summary>
+    internal static void FillGapsFrom(SessionInfo s, Detail prev)
+    {
+        if (s.Model.Length == 0) s.Model = prev.Model;
+        if (s.Effort.Length == 0) s.Effort = prev.Effort;
+        if (s.ContextTokens == 0) s.ContextTokens = prev.Ctx;
+        if (s.OutputTokens == 0) s.OutputTokens = prev.Out;
+        if (s.LastTool.Length == 0) s.LastTool = prev.LastTool;
+        if (s.Title.Length == 0) s.Title = prev.Title;
     }
 
     /// <summary>
