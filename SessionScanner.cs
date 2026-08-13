@@ -26,7 +26,7 @@ internal static class SessionScanner
     // transcript's mtime/size so an unchanged transcript skips the re-read entirely (see Enrich).
     sealed class Detail
     {
-        public string Model = ""; public long Ctx; public long Out; public string LastTool = ""; public string Title = "";
+        public string Model = ""; public string Effort = ""; public long Ctx; public long Out; public string LastTool = ""; public string Title = "";
         public bool ApiError; public string ErrorText = "";
         public long Mtime; public long Size;
     }
@@ -125,7 +125,7 @@ internal static class SessionScanner
         // skip the (expensive) tail read + JSON parse. A cheap stat is all we do for an idle session.
         if (haveFile && prev != null && prev.Mtime == mtime && prev.Size == size)
         {
-            s.Model = prev.Model; s.ContextTokens = prev.Ctx; s.OutputTokens = prev.Out;
+            s.Model = prev.Model; s.Effort = prev.Effort; s.ContextTokens = prev.Ctx; s.OutputTokens = prev.Out;
             s.LastTool = prev.LastTool; s.Title = prev.Title;
             s.ApiError = prev.ApiError; s.ErrorText = prev.ErrorText;
             return;
@@ -173,6 +173,7 @@ internal static class SessionScanner
         if (prev != null)
         {
             if (s.Model.Length == 0) s.Model = prev.Model;
+            if (s.Effort.Length == 0) s.Effort = prev.Effort;
             if (s.ContextTokens == 0) s.ContextTokens = prev.Ctx;
             if (s.OutputTokens == 0) s.OutputTokens = prev.Out;
             if (s.LastTool.Length == 0) s.LastTool = prev.LastTool;
@@ -180,7 +181,7 @@ internal static class SessionScanner
         }
         _detailCache[s.SessionId] = new Detail
         {
-            Model = s.Model, Ctx = s.ContextTokens, Out = s.OutputTokens, LastTool = s.LastTool, Title = s.Title,
+            Model = s.Model, Effort = s.Effort, Ctx = s.ContextTokens, Out = s.OutputTokens, LastTool = s.LastTool, Title = s.Title,
             ApiError = s.ApiError, ErrorText = s.ErrorText, Mtime = mtime, Size = size,
         };
     }
@@ -242,7 +243,13 @@ internal static class SessionScanner
         return baseDir.Length > 0 ? Path.Combine(baseDir, s.SessionId, "subagents") : "";
     }
 
-    static void ParseAssistant(string line, SessionInfo s)
+    /// <summary>
+    /// Reads model, reasoning effort and token usage off one assistant transcript record. Effort sits at
+    /// the record ROOT, not inside <c>message</c> — Claude Code stamps the level that actually ran on the
+    /// turn, after any silent downgrade for a model that can't do the requested one. It is therefore the
+    /// last completed turn's effort, not necessarily what a later <c>/effort</c> selected.
+    /// </summary>
+    internal static void ParseAssistant(string line, SessionInfo s)
     {
         try
         {
@@ -251,6 +258,7 @@ internal static class SessionScanner
             string model = m.TryGetProperty("model", out var mo) ? (mo.GetString() ?? "") : "";
             if (model == "<synthetic>") return;   // error/synthetic message — not a real model/usage turn
             s.Model = model;
+            s.Effort = GetStr(d.RootElement, "effort");
             if (m.TryGetProperty("usage", out var u))
             {
                 s.ContextTokens = U(u, "input_tokens") + U(u, "cache_read_input_tokens") + U(u, "cache_creation_input_tokens");

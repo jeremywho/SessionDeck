@@ -16,7 +16,7 @@ internal sealed class SessionInfo
     public string Version = "";
     public string Kind = "";
     public string Model = "";      // from latest assistant turn (Codex: latest turn_context)
-    public string Effort = "";     // reasoning effort — Codex only ("ultra", "high", …)
+    public string Effort = "";     // reasoning effort of the latest turn ("high", "max", "xhigh", "ultra", …)
     public string LastTool = "";   // last tool_use block seen
     public string Title = "";      // Claude-set terminal title (ai-title / custom-title) -> used for tab matching
     public long ContextTokens;     // input + cache_read + cache_creation of latest assistant turn
