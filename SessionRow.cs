@@ -30,7 +30,10 @@ internal sealed class SessionRow : INotifyPropertyChanged
         _s = s;
         for (int i = 0; i < Tracked.Length; i++)
             if (!Equals(before[i], Tracked[i].Get(this)))
+            {
+                IsolationTelemetry.PropertyChanged(Tracked[i].Name);
                 h(this, new PropertyChangedEventArgs(Tracked[i].Name));
+            }
     }
 
     static readonly (string Name, Func<SessionRow, object?> Get)[] Tracked =

@@ -9,7 +9,8 @@ namespace ClaudeSessionMonitor;
 /// <summary>
 /// Fetches plan usage straight from the account's usage endpoint, rather than reading whatever
 /// Claude Code last happened to cache on disk.
-/// <para>This is the one place the app talks to the network. It exists because the on-disk cache
+/// <para>This is the one place the app talks to the public internet. CPA mode instead reads its
+/// sanitized loopback dashboard through <see cref="CpaUsageApi"/>. This direct path exists because the on-disk cache
 /// (<c>~/.claude.json</c> → <c>cachedUsageUtilization</c>) refreshes on no schedule we can predict —
 /// it was observed sitting 52 minutes stale while a session hammered the API — which makes any
 /// "is this current?" answer derived from it a guess. Polling ourselves means the refresh interval

@@ -5,6 +5,41 @@ using System.Text.Json;
 
 namespace ClaudeSessionMonitor;
 
+/// <summary>Aggregate, privacy-safe results from one rollout ownership probe pass.</summary>
+internal sealed class CodexProbeStats
+{
+    readonly Dictionary<string, int> _errors = new(StringComparer.Ordinal);
+
+    public int Files { get; set; }
+    public int KnownBefore { get; set; }
+    public int KnownAfter { get; set; }
+    public int CandidateChecks { get; private set; }
+    public int VerificationChecks { get; private set; }
+    public int Owned { get; private set; }
+    public int Unowned { get; private set; }
+    public int Indeterminate { get; private set; }
+    public int Forgotten { get; set; }
+
+    public string ErrorSummary => _errors.Count == 0
+        ? "none"
+        : string.Join(",", _errors.OrderBy(kv => kv.Key).Select(kv => $"{kv.Key}x{kv.Value}"));
+
+    public void Record(FileOwnerResult result, bool verification)
+    {
+        if (verification) VerificationChecks++; else CandidateChecks++;
+        switch (result.State)
+        {
+            case FileOwnerState.Owned: Owned++; break;
+            case FileOwnerState.Unowned: Unowned++; break;
+            case FileOwnerState.Indeterminate:
+                Indeterminate++;
+                string key = $"{result.ErrorStage}:{result.ErrorCode}";
+                _errors[key] = _errors.GetValueOrDefault(key) + 1;
+                break;
+        }
+    }
+}
+
 /// <summary>
 /// Discovers live Codex CLI sessions from <c>~/.codex/</c>.
 ///
@@ -88,6 +123,7 @@ internal static class CodexScanner
     static readonly Dictionary<string, long> _probed = new(StringComparer.OrdinalIgnoreCase); // rollout -> size when last probed
     static readonly Dictionary<string, int> _misses = new(StringComparer.OrdinalIgnoreCase);  // consecutive "nobody holds this" results
     static readonly Dictionary<string, DateTime> _verified = new(StringComparer.OrdinalIgnoreCase); // last owner recheck
+    static readonly Dictionary<string, DateTime> _retryAfter = new(StringComparer.OrdinalIgnoreCase); // inconclusive new-candidate backoff
     static bool _firstPass = true;
 
     static readonly TimeSpan VerifyInterval = TimeSpan.FromSeconds(30);
@@ -199,7 +235,7 @@ internal static class CodexScanner
                 if (_heads.TryGetValue(kv.Key, out var h) && h.Id == sessionId) return IsAlive(kv.Value);
 
         string path = RolloutFor(sessionId);
-        return path.Length > 0 && FileHolders.OwnerPid(path, "codex") != 0;
+        return path.Length > 0 && FileHolders.QueryOwner(path, "codex").State == FileOwnerState.Owned;
     }
 
     /// <summary>
@@ -245,12 +281,15 @@ internal static class CodexScanner
     // ================================================================ probe (background thread)
 
     /// <summary>
-    /// Refresh the rollout-&gt;PID map. Runs off the UI thread: each <see cref="FileHolders.OwnerPid"/>
+    /// Refresh the rollout-&gt;PID map. Runs off the UI thread: each <see cref="FileHolders.QueryOwner"/>
     /// call is ~50ms, so passes are budgeted and probe newest-first. Files already owned are re-verified
     /// on a slower cadence (a Codex TUI that switches threads closes the old file while the process lives on).
     /// </summary>
-    public static void Probe()
+    public static CodexProbeStats Probe()
     {
+        var stats = new CodexProbeStats();
+        lock (_gate) stats.KnownBefore = _owner.Count;
+
         // Before the liveness check, not after: the plan meter should show even with no Codex running.
         if (!_seeded) { _seeded = true; SeedPlanUsage(); }
 
@@ -267,9 +306,9 @@ internal static class CodexScanner
         {
             lock (_gate)
             {
-                _owner.Clear(); _subParent.Clear(); _probed.Clear(); _misses.Clear(); _verified.Clear();
+                _owner.Clear(); _subParent.Clear(); _probed.Clear(); _misses.Clear(); _verified.Clear(); _retryAfter.Clear();
             }
-            return;
+            return stats;
         }
 
         Dictionary<string, int> owned;
@@ -279,7 +318,12 @@ internal static class CodexScanner
         bool fullScan = DateTime.UtcNow - _catalogAt > CatalogRescan;
         if (fullScan) _catalogAt = DateTime.UtcNow;
         var files = fullScan ? RecentRollouts(WindowDays) : FastRollouts(owned);
-        if (files.Count == 0) return;
+        stats.Files = files.Count;
+        if (files.Count == 0)
+        {
+            lock (_gate) stats.KnownAfter = _owner.Count;
+            return stats;
+        }
 
         foreach (var f in files) ReadHead(f.Path);   // cached; only new files cost anything
         TrackGrowth(files);
@@ -303,15 +347,28 @@ internal static class CodexScanner
             lock (_gate)
             {
                 if (_probed.TryGetValue(f.Path, out var seen) && seen == f.Size) continue;
-                _probed[f.Path] = f.Size;
+                if (_retryAfter.TryGetValue(f.Path, out var retry) && now < retry) continue;
             }
             budget--;
 
-            int pid = FileHolders.OwnerPid(f.Path, "codex");
-            if (pid == 0) continue;
+            var result = FileHolders.QueryOwner(f.Path, "codex");
+            stats.Record(result, verification: false);
             lock (_gate)
             {
-                _owner[f.Path] = pid; _misses.Remove(f.Path); _verified[f.Path] = now;
+                if (!ShouldCacheCandidateResult(result.State))
+                {
+                    // Do not mark the file as probed: a quiet rollout may never change size again.
+                    // Back off before retrying so a sick Restart Manager cannot create a probe storm.
+                    _retryAfter[f.Path] = now + VerifyInterval;
+                    continue;
+                }
+
+                _probed[f.Path] = f.Size;
+                _retryAfter.Remove(f.Path);
+                if (result.State == FileOwnerState.Owned)
+                {
+                    _owner[f.Path] = result.Pid; _misses.Remove(f.Path); _verified[f.Path] = now;
+                }
             }
         }
 
@@ -322,21 +379,53 @@ internal static class CodexScanner
         {
             if (budget <= 0) break;
             budget--;
-            int pid = FileHolders.OwnerPid(path, "codex");
+            var result = FileHolders.QueryOwner(path, "codex");
+            stats.Record(result, verification: true);
             lock (_gate)
             {
                 _verified[path] = now;
-                if (pid != 0) { _owner[path] = pid; _misses.Remove(path); continue; }
+                if (result.State == FileOwnerState.Owned)
+                {
+                    _owner[path] = result.Pid; _misses.Remove(path); continue;
+                }
 
-                _misses[path] = _misses.TryGetValue(path, out var m) ? m + 1 : 1;
-                if (_misses[path] >= 2) Forget(path);
+                int previousMisses = _misses.GetValueOrDefault(path);
+                if (ShouldForgetAfterVerification(result.State, previousMisses, out int nextMisses))
+                {
+                    Forget(path);
+                    stats.Forgotten++;
+                }
+                else if (result.State == FileOwnerState.Unowned)
+                {
+                    _misses[path] = nextMisses;
+                }
+                // Indeterminate deliberately leaves both the owner and confirmed-miss count intact.
             }
         }
 
         _firstPass = false;
         RebuildSubagentMap(files, fullScan);
         if (fullScan) Prune(files, owned);
+        lock (_gate) stats.KnownAfter = _owner.Count;
+        return stats;
     }
+
+    /// <summary>Only a confirmed unowned result advances removal; an API failure is no evidence.</summary>
+    internal static bool ShouldForgetAfterVerification(FileOwnerState state, int previousMisses,
+                                                        out int nextMisses)
+    {
+        nextMisses = state switch
+        {
+            FileOwnerState.Owned => 0,
+            FileOwnerState.Unowned => previousMisses + 1,
+            _ => previousMisses,
+        };
+        return state == FileOwnerState.Unowned && nextMisses >= 2;
+    }
+
+    /// <summary>An inconclusive first probe must remain retryable even if the rollout never grows.</summary>
+    internal static bool ShouldCacheCandidateResult(FileOwnerState state) =>
+        state != FileOwnerState.Indeterminate;
 
     internal static List<string> DueForVerification(IEnumerable<string> owned,
         IReadOnlyDictionary<string, DateTime> verified, DateTime nowUtc) =>
@@ -388,6 +477,7 @@ internal static class CodexScanner
             PruneDict(_probed, keep);
             PruneDict(_misses, keep);
             PruneDict(_verified, keep);
+            PruneDict(_retryAfter, keep);
         }
     }
 
@@ -406,6 +496,7 @@ internal static class CodexScanner
         _probed.Remove(path);
         _misses.Remove(path);
         _verified.Remove(path);
+        _retryAfter.Remove(path);
     }
 
     /// <summary>Rollout files from the last <paramref name="days"/> day-folders, newest write first.</summary>

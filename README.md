@@ -16,8 +16,8 @@ then **most-recently-changed first within each group**, re-sorting live as state
 | Glyph | State | Claude status | Meaning |
 |---|---|---|---|
 | 🔴 red disc + ! | **Error** | *(transcript)* | last turn hit an API error (rate-limit, etc.) — hover the row for the message |
-| 🟠 amber pulsing ring | **Awaiting** | `waiting` | blocked on you (permission / input) |
-| 🔵 blue spinner | **Working** | `busy` / `shell` | actively running — including background shell/lane work while the agent "holds" |
+| 🟠 amber ring | **Awaiting** | `waiting` | blocked on you (permission / input) |
+| 🔵 blue play badge | **Working** | `busy` / `shell` | actively running — including background shell/lane work while the agent "holds" |
 | 🟢 green disc + ✓ | **Completed** | `idle` | finished its turn, ready for you |
 | ⚪ slate ring | **Idle** | *(other)* | fallback for any unrecognized status |
 
@@ -45,10 +45,11 @@ at all: the list only holds sessions you can actually open; its slot is reserved
 not agents are running. A footer shows the live count (hover for the Claude/Codex split) and a color
 legend.
 
-Below that, the **usage bar**: the signed-in Claude account on the left, and one fill-behind meter per
+Below that, the **usage bar**: the active Claude account on the left, and one fill-behind meter per
 plan limit on the right — the Claude ones (**5h**, **Week**, and any model-scoped limit), then
-**Codex**. Hover any meter for what it is, when it resets, and — for Codex — the plan and how old the
-reading is.
+**Codex**. When Claude is routed through local CPA, the address and Claude meters follow the account
+CPA is currently serving; otherwise they use the directly signed-in Claude account. Hover any meter
+for what it is, when it resets, and — for Codex — the plan and how old the reading is.
 
 The **title bar** holds a **settings** gear (opens the Settings window) and an **always-on-top pin**
 (accents when active), beside the min/max/close buttons. The Dark/Light Fluent theme is chosen in

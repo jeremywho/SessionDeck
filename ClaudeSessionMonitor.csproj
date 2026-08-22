@@ -30,6 +30,7 @@
        project's default **/*.cs glob, and let the test assembly see internal types. -->
   <ItemGroup>
     <Compile Remove="Tests/**" />
+    <Compile Remove="tools/**" />
     <InternalsVisibleTo Include="ClaudeSessionMonitor.Tests" />
   </ItemGroup>
 
