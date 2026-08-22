@@ -78,8 +78,9 @@ public class SessionRowTests
         var raised = new List<string>();
         row.PropertyChanged += (_, e) => raised.Add(e.PropertyName ?? "");
 
-        row.Update(new SessionInfo { SessionId = "x", Pid = 1, Status = "busy", Model = "claude-opus-5" });
+        int changed = row.Update(new SessionInfo { SessionId = "x", Pid = 1, Status = "busy", Model = "claude-opus-5" });
 
+        Assert.Equal(0, changed);
         Assert.Empty(raised);
     }
 
@@ -90,8 +91,9 @@ public class SessionRowTests
         var raised = new List<string>();
         row.PropertyChanged += (_, e) => raised.Add(e.PropertyName ?? "");
 
-        row.Update(new SessionInfo { SessionId = "x", Pid = 1, Status = "waiting", Model = "claude-opus-5" });
+        int changed = row.Update(new SessionInfo { SessionId = "x", Pid = 1, Status = "waiting", Model = "claude-opus-5" });
 
+        Assert.Equal(raised.Count, changed);
         Assert.Contains(nameof(SessionRow.Status), raised);
         Assert.Contains(nameof(SessionRow.State), raised);
         Assert.Contains(nameof(SessionRow.SortPriority), raised);

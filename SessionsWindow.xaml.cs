@@ -15,6 +15,8 @@ namespace ClaudeSessionMonitor;
 
 internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
 {
+    public const int StatusAnimationFrameRate = 10;
+
     readonly App _app;
     readonly DispatcherTimer _timer;
     CredentialsWatcher? _credentialsWatcher;
@@ -24,6 +26,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     ContextMenu _columnsMenu = new();
 
     public ObservableCollection<SessionRow> Rows { get; } = new();
+    public bool StatusAnimationsEnabled => !DwmDiagnosticOptions.DisableAnimations;
     readonly Dictionary<string, SessionRow> _rowsById = new();
     public ObservableCollection<UsageMeter> Meters { get; } = new();
     List<UsageMeter>? _liveMeters;      // last successful API fetch; null until one lands
@@ -48,8 +51,16 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         _app = app;
         _usagePoll = new SingleFlight(PollUsageAsync);
         InitializeComponent();
+        if (DwmDiagnosticOptions.DisableBackdrop)
+            WindowBackdropType = Wpf.Ui.Controls.WindowBackdropType.None;
         DataContext = this;
-        IsVisibleChanged += (_, _) => _windowVisible = IsVisible;
+        SourceInitialized += (_, _) => DwmDiagnostics.Mark("window-source", $"backdrop={WindowBackdropType}; hwnd={new System.Windows.Interop.WindowInteropHelper(this).Handle}");
+        Loaded += (_, _) => DwmDiagnostics.Mark("window-loaded", $"backdrop={WindowBackdropType}; size={ActualWidth:0}x{ActualHeight:0}; rows={Rows.Count}");
+        IsVisibleChanged += (_, _) =>
+        {
+            _windowVisible = IsVisible;
+            DwmDiagnostics.Mark("window-visible", IsVisible.ToString());
+        };
 
         // One-time reset of the pre-redesign (wide) window size, then persist normally.
         if (_app.Settings.LayoutVersion < 1)
@@ -76,13 +87,20 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         // continuously busy set of sessions to drive nearly eight full scans per second.
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
         _timer.Tick += (_, _) => RequestRefresh();
-        _timer.Start();
+        if (!DwmDiagnosticOptions.DisableBackgroundWork)
+        {
+            _timer.Start();
+            StartCodexProbe();
+            StartDesktopResolver();
+            StartUsagePolling();
+            StartAccountWatcher();
+        }
+        else DwmDiagnostics.Mark("background-work", "disabled; one initial discovery pass only");
 
-        StartCodexProbe();
+        // Keep one initial pass in backdrop-only mode so the visual tree is representative rather than
+        // testing an empty window. Only the recurring work is disabled.
         RequestRefresh();
-        StartDesktopResolver();
-        StartUsagePolling();
-        StartAccountWatcher();
+        DwmDiagnostics.Mark("window-config", $"backdrop={WindowBackdropType}; animations={StatusAnimationsEnabled}; animationFps={(StatusAnimationsEnabled ? StatusAnimationFrameRate : 0)}; backgroundWork={!DwmDiagnosticOptions.DisableBackgroundWork}");
     }
 
     /// <summary>
@@ -105,10 +123,14 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
                     var timer = Stopwatch.StartNew();
                     CodexScanner.Probe();
                     timer.Stop();
-                    if (timer.ElapsedMilliseconds >= 2000)
+                    if (DwmDiagnosticOptions.Enabled || timer.ElapsedMilliseconds >= 2000)
                         PerformanceLog.Write($"codex-probe {timer.ElapsedMilliseconds}ms");
+                    DwmDiagnostics.Mark("codex-probe", $"elapsedMs={timer.ElapsedMilliseconds}");
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    DwmDiagnostics.Mark("codex-probe-error", ex.GetType().Name + ": " + ex.Message);
+                }
                 System.Threading.Thread.Sleep(3000);
             }
         }) { IsBackground = true, Name = "codex-probe" };
@@ -146,13 +168,17 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
                         timer.Stop();
                         delayMs = DesktopResolverDelayMs(timer.ElapsedMilliseconds,
                             System.Threading.Interlocked.Read(ref _lastScanMs));
-                        if (timer.ElapsedMilliseconds >= 2000)
+                        if (DwmDiagnosticOptions.Enabled || timer.ElapsedMilliseconds >= 2000)
                             PerformanceLog.Write($"desktop-uia {timer.ElapsedMilliseconds}ms sessions={snap.Length} next={delayMs}ms");
+                        DwmDiagnostics.Mark("desktop-uia", $"elapsedMs={timer.ElapsedMilliseconds}; sessions={snap.Length}; nextMs={delayMs}");
                         Dispatcher.InvokeAsync(() => ApplyDesktops(map));
                     }
                     else delayMs = 5000; // hidden, empty, or scanning: cheap retry without touching UIA
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    DwmDiagnostics.Mark("desktop-uia-error", ex.GetType().Name + ": " + ex.Message);
+                }
             }
         }) { IsBackground = true, Name = "vd-resolver" };
         t.Start();
@@ -480,33 +506,49 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
                 long registryMs = phase.ElapsedMilliseconds;
                 total.Stop();
                 System.Threading.Interlocked.Exchange(ref _lastScanMs, total.ElapsedMilliseconds);
-                if (total.ElapsedMilliseconds >= 1000)
+                if (DwmDiagnosticOptions.Enabled || total.ElapsedMilliseconds >= 1000)
                     PerformanceLog.Write($"session-scan {total.ElapsedMilliseconds}ms claude={claudeMs} codex={codexMs} " +
                         $"processes={processesMs} attribution={attributionMs} registry={registryMs} sessions={found.Count}");
+                DwmDiagnostics.Mark("session-scan", $"elapsedMs={total.ElapsedMilliseconds}; claudeMs={claudeMs}; codexMs={codexMs}; processesMs={processesMs}; attributionMs={attributionMs}; registryMs={registryMs}; sessions={found.Count}");
                 return found;
             });
             var apply = Stopwatch.StartNew();
-            ApplyRefresh(live);
+            var changes = ApplyRefresh(live);
             apply.Stop();
-            if (apply.ElapsedMilliseconds >= 250)
+            if (DwmDiagnosticOptions.Enabled || apply.ElapsedMilliseconds >= 250)
                 PerformanceLog.Write($"ui-apply {apply.ElapsedMilliseconds}ms sessions={live.Count}");
+            DwmDiagnostics.Mark("ui-apply", $"elapsedMs={apply.ElapsedMilliseconds}; sessions={live.Count}; added={changes.Added}; removed={changes.Removed}; propertyChanges={changes.PropertyChanges}");
         }
-        catch { } // best-effort: retain the last good snapshot after a transient read failure
+        catch (Exception ex)
+        {
+            // Best-effort: retain the last good snapshot after a transient read failure. Diagnostic
+            // launches still need the reason, otherwise a stalled/failed scanner is indistinguishable
+            // from a quiet one in the correlation log.
+            DwmDiagnostics.Mark("refresh-error", ex.GetType().Name + ": " + ex.Message);
+        }
         finally { System.Threading.Interlocked.Exchange(ref _scanRunning, 0); }
     }
 
     /// <summary>Apply a completed discovery snapshot to WPF-bound state on the dispatcher.</summary>
-    void ApplyRefresh(List<SessionInfo> live)
+    (int Added, int Removed, int PropertyChanges) ApplyRefresh(List<SessionInfo> live)
     {
         var seen = new HashSet<string>();
+        int added = 0;
+        int removed = 0;
+        int propertyChanges = 0;
         foreach (var s in live)
         {
             seen.Add(s.SessionId);
-            if (_rowsById.TryGetValue(s.SessionId, out var row)) row.Update(s);
-            else { row = new SessionRow(s); _rowsById[s.SessionId] = row; Rows.Add(row); }
+            if (_rowsById.TryGetValue(s.SessionId, out var row)) propertyChanges += row.Update(s);
+            else { row = new SessionRow(s); _rowsById[s.SessionId] = row; Rows.Add(row); added++; }
         }
         for (int i = Rows.Count - 1; i >= 0; i--)
-            if (!seen.Contains(Rows[i].SessionId)) { _rowsById.Remove(Rows[i].SessionId); Rows.RemoveAt(i); }
+            if (!seen.Contains(Rows[i].SessionId))
+            {
+                _rowsById.Remove(Rows[i].SessionId);
+                Rows.RemoveAt(i);
+                removed++;
+            }
 
         _sessionsSnapshot = live.ToArray();
 
@@ -517,6 +559,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         LiveLabel.ToolTip = codex > 0 ? $"{live.Count - codex} Claude · {codex} Codex" : null;
 
         RefreshAccount();
+        return (added, removed, propertyChanges);
     }
 
     /// <summary>Is this a session a human is sitting in front of, and could therefore want back?</summary>

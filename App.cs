@@ -30,11 +30,21 @@ internal sealed class App : Application
         Settings = Settings.Load();
         ApplyRunOnLogin();   // also refreshes the registered path if the install dir ever moves
 
+        // Opt-in DWM investigation only. Normal launches never create the timer or telemetry file.
+        DwmDiagnostics.Start(() => Dispatcher.BeginInvoke(() =>
+        {
+            _tray?.Dispose();
+            DwmDiagnostics.Stop("guarded exit");
+            Environment.Exit(86);
+        }));
+        DwmDiagnostics.Mark("app-startup", $"theme={Settings.Theme}; transparency={ReadTransparencySetting()}");
+
         var theme = ThemeFrom(Settings.Theme);
         Resources.MergedDictionaries.Add(new ControlsDictionary());
         Resources.MergedDictionaries.Add(new ThemesDictionary { Theme = theme });
         Resources.MergedDictionaries.Add(PaletteDict(theme));   // our custom design tokens
         ApplicationThemeManager.Apply(theme);
+        DwmDiagnostics.Mark("theme-applied", theme.ToString());
 
         _tray = new NotifyIcon
         {
@@ -51,6 +61,7 @@ internal sealed class App : Application
         var orphaned = ComputeOrphaned();
 
         ShowWindow();
+        DwmDiagnostics.Mark("main-window-shown");
 
         if (orphaned.Count > 0) ShowRestore(orphaned);
 
@@ -117,6 +128,7 @@ internal sealed class App : Application
             // single-file self-contained builds, which can leave the process half-alive still holding
             // the single-instance mutex and block the relaunch. Dispose the tray and hard-exit instead.
             _tray?.Dispose();
+            DwmDiagnostics.Stop("apply update");
             Environment.Exit(0);
         }
     }
@@ -260,7 +272,18 @@ internal sealed class App : Application
     {
         // Hard-exit rather than Shutdown() — the latter trips a WPF telemetry crash in single-file builds.
         _tray?.Dispose();
+        DwmDiagnostics.Stop("tray exit");
         Environment.Exit(0);
+    }
+
+    static object ReadTransparencySetting()
+    {
+        try
+        {
+            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+            return key?.GetValue("EnableTransparency") ?? "unknown";
+        }
+        catch { return "unknown"; }
     }
 
     static System.Drawing.Icon LoadAppIcon()
@@ -288,6 +311,7 @@ internal sealed class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         _tray?.Dispose();
+        DwmDiagnostics.Stop("application exit");
         base.OnExit(e);
     }
 }

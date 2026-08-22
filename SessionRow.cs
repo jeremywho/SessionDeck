@@ -17,10 +17,10 @@ internal sealed class SessionRow : INotifyPropertyChanged
 
     public SessionRow(SessionInfo s) { SessionId = s.SessionId; _s = s; }
 
-    public void Update(SessionInfo s)
+    public int Update(SessionInfo s)
     {
         var h = PropertyChanged;
-        if (h == null) { _s = s; return; }
+        if (h == null) { _s = s; return 0; }
 
         // Raise only what actually changed. Every raise re-runs bindings and converters, and three
         // of these are live-sort keys the collection view re-evaluates per raise — so a blanket
@@ -28,9 +28,14 @@ internal sealed class SessionRow : INotifyPropertyChanged
         var before = new object?[Tracked.Length];
         for (int i = 0; i < Tracked.Length; i++) before[i] = Tracked[i].Get(this);
         _s = s;
+        int changed = 0;
         for (int i = 0; i < Tracked.Length; i++)
             if (!Equals(before[i], Tracked[i].Get(this)))
+            {
                 h(this, new PropertyChangedEventArgs(Tracked[i].Name));
+                changed++;
+            }
+        return changed;
     }
 
     static readonly (string Name, Func<SessionRow, object?> Get)[] Tracked =

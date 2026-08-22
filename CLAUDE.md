@@ -20,6 +20,9 @@ dotnet test Tests\ClaudeSessionMonitor.Tests.csproj
 - Slow recurring work is written sparingly to `%TEMP%\claude-session-monitor-performance.log`:
   session scans at 1s+, UI application at 250ms+, and Codex probes/UIA sweeps at 2s+. The file rotates
   at 1MB. Keep this thresholded; logging every pass would itself become background I/O.
+- DWM investigation is opt-in and documented in `docs/dwm-diagnostics.md`. The diagnostic launcher
+  separates Mica from recurring work, records one-second DWM/app telemetry, and exits only the test app
+  if the known sustained-DWM-CPU/resident-growth signature appears. Never enable that logging normally.
 - Iteration loop that works well here: kill the running exe → build → launch → **screenshot to
   verify** (the UI is the spec; `PrintWindow` with flag `2` captures it). `--list` / `--windows` dump
   the session list / focus mapping to `%TEMP%` for headless checks.
