@@ -1,12 +1,12 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('NoBackdrop', 'NoBackdropLowFps', 'NoBackdropNoAnimations', 'NoAnimations', 'BackdropOnly', 'Full')]
+    [ValidateSet('NoBackdrop', 'BackdropOnly', 'Full')]
     [string] $Mode = 'NoBackdrop'
 )
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
-$exe = Join-Path $repo 'bin\DwmDiagnosticLowFps\ClaudeSessionMonitor.exe'
+$exe = Join-Path $repo 'bin\DwmDiagnostic\ClaudeSessionMonitor.exe'
 
 if (-not (Test-Path -LiteralPath $exe)) {
     throw "Publish the diagnostic binary first with the .NET 10.0.11 command in docs\dwm-diagnostics.md"
@@ -33,32 +33,14 @@ $start.Environment['CSM_DWM_DIAGNOSTIC_PATH'] = $logPath
 switch ($Mode) {
     'NoBackdrop' {
         $start.Environment['CSM_DISABLE_BACKDROP'] = '1'
-        $start.Environment.Remove('CSM_DISABLE_ANIMATIONS') | Out-Null
-        $start.Environment.Remove('CSM_DISABLE_BACKGROUND_WORK') | Out-Null
-    }
-    'NoBackdropLowFps' {
-        $start.Environment['CSM_DISABLE_BACKDROP'] = '1'
-        $start.Environment.Remove('CSM_DISABLE_ANIMATIONS') | Out-Null
-        $start.Environment.Remove('CSM_DISABLE_BACKGROUND_WORK') | Out-Null
-    }
-    'NoBackdropNoAnimations' {
-        $start.Environment['CSM_DISABLE_BACKDROP'] = '1'
-        $start.Environment['CSM_DISABLE_ANIMATIONS'] = '1'
-        $start.Environment.Remove('CSM_DISABLE_BACKGROUND_WORK') | Out-Null
-    }
-    'NoAnimations' {
-        $start.Environment.Remove('CSM_DISABLE_BACKDROP') | Out-Null
-        $start.Environment['CSM_DISABLE_ANIMATIONS'] = '1'
         $start.Environment.Remove('CSM_DISABLE_BACKGROUND_WORK') | Out-Null
     }
     'BackdropOnly' {
         $start.Environment.Remove('CSM_DISABLE_BACKDROP') | Out-Null
-        $start.Environment.Remove('CSM_DISABLE_ANIMATIONS') | Out-Null
         $start.Environment['CSM_DISABLE_BACKGROUND_WORK'] = '1'
     }
     'Full' {
         $start.Environment.Remove('CSM_DISABLE_BACKDROP') | Out-Null
-        $start.Environment.Remove('CSM_DISABLE_ANIMATIONS') | Out-Null
         $start.Environment.Remove('CSM_DISABLE_BACKGROUND_WORK') | Out-Null
     }
 }

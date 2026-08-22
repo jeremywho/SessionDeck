@@ -4,14 +4,6 @@ namespace ClaudeSessionMonitor.Tests;
 
 public class DwmDiagnosticsTests
 {
-    [Fact]
-    public void Animation_switch_has_a_dedicated_environment_variable() =>
-        Assert.Equal("CSM_DISABLE_ANIMATIONS", DwmDiagnosticOptions.DisableAnimationsVariable);
-
-    [Fact]
-    public void Status_animation_frame_rate_is_deliberately_low() =>
-        Assert.InRange(SessionsWindow.StatusAnimationFrameRate, 1, 15);
-
     [Theory]
     [InlineData("1")]
     [InlineData("true")]

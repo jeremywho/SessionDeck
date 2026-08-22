@@ -4,10 +4,11 @@ Windows system-tray app (**.NET 10, WPF + [WPF-UI](https://github.com/lepoco/wpf
 lists live local Claude Code **and Codex CLI** sessions, read from `~/.claude/` and `~/.codex/` on
 disk. `README.md` is the user-facing feature tour; this file is for working *on* the code.
 
-**One exception to "all local".** The footer's plan-usage meters come from a network call
-(`UsageApi` → `GET api.anthropic.com/api/oauth/usage`, bearer token read from
-`~/.claude/.credentials.json`). Everything else is still pure disk reads. See *Usage bar* below
-before adding anything else that touches the network or those credentials.
+**One exception to "all local".** In direct-login mode, the footer's plan-usage meters come from a
+network call (`UsageApi` → `GET api.anthropic.com/api/oauth/usage`, bearer token read from
+`~/.claude/.credentials.json`). CPA mode reads the selected account and meters from the sanitized
+loopback dashboard instead. Everything else is still pure disk reads. See *Usage bar* below before
+adding anything else that touches the network or credentials.
 
 ## Build, run, verify
 ```
@@ -23,6 +24,9 @@ dotnet test Tests\ClaudeSessionMonitor.Tests.csproj
 - DWM investigation is opt-in and documented in `docs/dwm-diagnostics.md`. The diagnostic launcher
   separates Mica from recurring work, records one-second DWM/app telemetry, and exits only the test app
   if the known sustained-DWM-CPU/resident-growth signature appears. Never enable that logging normally.
+- The diagnostic launcher can run `Normal` with `CSM_EXPERIMENT_LOG` set: telemetry then records the
+  production behavior without enabling any isolation switch. Its paired health watcher records DWM,
+  Terminal, system, and monitor-process counters once per minute and exits with the monitored PID.
 - Iteration loop that works well here: kill the running exe → build → launch → **screenshot to
   verify** (the UI is the spec; `PrintWindow` with flag `2` captures it). `--list` / `--windows` dump
   the session list / focus mapping to `%TEMP%` for headless checks.
@@ -61,14 +65,16 @@ Four things will bite you, in rough order of how long they take to notice:
 - **`codex resume` appends to the ORIGINAL file.** The filename timestamp, the day folder, and the
   creation time all describe when the thread *started*, not whether it's running. A thread from three
   weeks ago can be the live one. Never infer liveness from any of them.
-- **Liveness = who holds the file open.** `FileHolders.OwnerPid` (Restart Manager `RmGetList`) answers
+- **Liveness = who holds the file open.** `FileHolders.QueryOwner` (Restart Manager `RmGetList`) answers
   it exactly, non-admin, and hands back the `codex.exe` PID — which is also what makes double-click-to-
   focus work, since `WindowActivator` is provider-agnostic and just needs a PID. It costs ~50ms a call,
   so it lives on the `codex-probe` background thread with a per-pass budget; `Scan()` on the UI tick only
   reads the map it produces. New/growing candidates keep priority, while up to eight known owners are
-  revalidated per pass on a rotating 30s cadence. A miss still needs two checks before removal. Startup
-  crash recovery bypasses this cache and directly verifies each saved Codex session. Don't move a probe
-  onto the UI thread or let known-owner verification exceed the shared budget.
+  revalidated per pass on a rotating 30s cadence. A confirmed miss still needs two checks before
+  removal. Restart Manager failures are **indeterminate**, not misses: known rows retain their live PID,
+  while new candidates back off and retry without caching a failed attempt. Startup crash recovery
+  bypasses this cache and directly verifies each saved Codex session. Don't move a probe onto the UI
+  thread or let known-owner verification exceed the shared budget.
 - **Windows does not reliably refresh mtime for a file a process holds open.** A `codex exec` rollout was
   measured sitting at a **14-minute-old** timestamp while gaining 7KB in 12 seconds (the TUI's own
   rollout *does* update). So mtime cannot drive idle time or "is this subagent working" — both use
@@ -97,8 +103,19 @@ parse of a session reads the **whole file** because `turn_context` is per-turn a
 back; after that it's a tail read gated on mtime **and size**. There is deliberately **no**
 `FileSystemWatcher` on the rollout tree — Codex writes to it constantly during a turn.
 
-## Usage bar (`UsageApi.cs`, `AccountScanner.cs`)
+## Usage bar (`UsageApi.cs`, `CpaUsageApi.cs`, `AccountScanner.cs`)
 The second footer bar: signed-in address on the left, one fill-behind pill per plan limit on the right.
+- **CPA mode is selected automatically** when `ANTHROPIC_BASE_URL` points to loopback port 8317 (or
+  `CSM_CPA_USAGE_URL` is explicitly set). `CpaUsageApi` polls the sanitized local dashboard at
+  `http://127.0.0.1:8318/api/usage` every 20s and shows only the row named by `serving.account` — the
+  account CPA is actually routing, not merely the highest-priority row in its pool. It never opens
+  CPA auth files or receives a token. `CSM_CPA_USAGE_URL` can redirect the dashboard endpoint.
+- **CPA failures retain the last good selected account and visibly age it.** Five minutes is stale:
+  the dashboard attempts to refresh its cache after two minutes, so this represents more than two
+  missed refresh opportunities. Before the first good snapshot, show `CPA account unavailable`
+  instead of falling back to the unrelated direct-login identity. CPA mode does not start the
+  direct credentials watcher.
+- **Without CPA**, the established direct-login behavior below remains unchanged.
 - **Account** (email / org) comes from `~/.claude.json` → `oauthAccount`. Note that's `~/.claude.json`,
   the **file**, not the `~/.claude/` **directory** everything else reads.
 - **Meters** come from the API, polled every 15 min. `~/.claude.json` → `cachedUsageUtilization` is
@@ -146,6 +163,10 @@ The second footer bar: signed-in address on the left, one fill-behind pill per p
 ## Status → display state (`SessionState.cs`)
 `busy`→Working · `waiting`→Awaiting · `idle`→Completed (green ✓) · `shell`→Working · default→Idle.
 **Error** is *not* a status — it's read from the transcript (`isApiErrorMessage`) and sorts to the top.
+All status glyphs are intentionally static. Working is a filled blue play badge and Awaiting is an
+amber ring. Do not add repeating WPF storyboards, opacity pulses, progress rings, or rotating transforms:
+the tiny status animations were measured keeping DWM above one full core and making desktop dragging
+choppy, with compositor load only partially recovering after the app exited.
 
 ## Gotchas (don't rediscover these)
 - **Nothing without a terminal gets a row.** `CodexAttribution.Fold` removes every headless session —

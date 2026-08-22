@@ -14,14 +14,12 @@ internal static class DwmDiagnosticOptions
     internal const string EnabledVariable = "CSM_DWM_DIAGNOSTICS";
     internal const string GuardVariable = "CSM_DWM_GUARD";
     internal const string DisableBackdropVariable = "CSM_DISABLE_BACKDROP";
-    internal const string DisableAnimationsVariable = "CSM_DISABLE_ANIMATIONS";
     internal const string DisableBackgroundWorkVariable = "CSM_DISABLE_BACKGROUND_WORK";
     internal const string OutputVariable = "CSM_DWM_DIAGNOSTIC_PATH";
 
     internal static bool Enabled => IsEnabled(Environment.GetEnvironmentVariable(EnabledVariable));
     internal static bool GuardEnabled => Enabled && IsEnabled(Environment.GetEnvironmentVariable(GuardVariable));
     internal static bool DisableBackdrop => IsEnabled(Environment.GetEnvironmentVariable(DisableBackdropVariable));
-    internal static bool DisableAnimations => IsEnabled(Environment.GetEnvironmentVariable(DisableAnimationsVariable));
     internal static bool DisableBackgroundWork => IsEnabled(Environment.GetEnvironmentVariable(DisableBackgroundWorkVariable));
 
     internal static bool IsEnabled(string? value) =>
@@ -29,13 +27,11 @@ internal static class DwmDiagnosticOptions
                               value.Equals("yes", StringComparison.OrdinalIgnoreCase) ||
                               value.Equals("on", StringComparison.OrdinalIgnoreCase));
 
-    internal static string Mode => (DisableBackdrop, DisableAnimations, DisableBackgroundWork) switch
+    internal static string Mode => (DisableBackdrop, DisableBackgroundWork) switch
     {
-        (true, false, false) => "no-backdrop",
-        (true, true, false) => "no-backdrop-no-animations",
-        (false, true, false) => "no-animations",
-        (false, false, true) => "backdrop-only",
-        (true, false, true) => "no-backdrop-no-background",
+        (true, false) => "no-backdrop",
+        (false, true) => "backdrop-only",
+        (true, true) => "no-backdrop-no-background",
         _ => "full",
     };
 }

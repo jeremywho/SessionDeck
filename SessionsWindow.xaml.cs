@@ -15,8 +15,6 @@ namespace ClaudeSessionMonitor;
 
 internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
 {
-    public const int StatusAnimationFrameRate = 10;
-
     readonly App _app;
     readonly DispatcherTimer _timer;
     CredentialsWatcher? _credentialsWatcher;
@@ -26,11 +24,11 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     ContextMenu _columnsMenu = new();
 
     public ObservableCollection<SessionRow> Rows { get; } = new();
-    public bool StatusAnimationsEnabled => !DwmDiagnosticOptions.DisableAnimations;
     readonly Dictionary<string, SessionRow> _rowsById = new();
     public ObservableCollection<UsageMeter> Meters { get; } = new();
     List<UsageMeter>? _liveMeters;      // last successful API fetch; null until one lands
     DateTime _liveAt;                   // when that fetch succeeded
+    CpaUsageSnapshot? _cpaSnapshot;     // last successful sanitized CPA dashboard reading
     object? _appliedMeters;             // value signature of what's currently mirrored into Meters
     string _accountText = "";
     string _usageState = "";
@@ -44,7 +42,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     /// Unlike the thresholds tried against the on-disk cache, this one is derived rather than
     /// guessed: we own the interval, so this is "two polls in a row failed".
     /// </summary>
-    static readonly TimeSpan StaleAfter = UsageApi.PollInterval * 2.5;
+    static readonly TimeSpan DirectStaleAfter = UsageApi.PollInterval * 2.5;
 
     public SessionsWindow(App app)
     {
@@ -53,6 +51,9 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         InitializeComponent();
         if (DwmDiagnosticOptions.DisableBackdrop)
             WindowBackdropType = Wpf.Ui.Controls.WindowBackdropType.None;
+        IsolationTelemetry.Start();
+        SessionsGrid.LoadingRow += (_, _) => IsolationTelemetry.RowLoaded();
+        SessionsGrid.UnloadingRow += (_, _) => IsolationTelemetry.RowUnloaded();
         DataContext = this;
         SourceInitialized += (_, _) => DwmDiagnostics.Mark("window-source", $"backdrop={WindowBackdropType}; hwnd={new System.Windows.Interop.WindowInteropHelper(this).Handle}");
         Loaded += (_, _) => DwmDiagnostics.Mark("window-loaded", $"backdrop={WindowBackdropType}; size={ActualWidth:0}x{ActualHeight:0}; rows={Rows.Count}");
@@ -82,6 +83,9 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         InitColumns();
         SetupSort();
 
+        if (ExperimentOptions.Mode != "normal")
+            Title = $"{Title} — experiment: {ExperimentOptions.Mode}";
+
         // A full discovery pass is intentionally capped at one start every five seconds. Claude
         // rewrites its registry files on heartbeats; using those events to trigger scans allowed a
         // continuously busy set of sessions to drive nearly eight full scans per second.
@@ -91,7 +95,8 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         {
             _timer.Start();
             StartCodexProbe();
-            StartDesktopResolver();
+            if (!ExperimentOptions.DisableDesktopUia)
+                StartDesktopResolver();
             StartUsagePolling();
             StartAccountWatcher();
         }
@@ -100,7 +105,9 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         // Keep one initial pass in backdrop-only mode so the visual tree is representative rather than
         // testing an empty window. Only the recurring work is disabled.
         RequestRefresh();
-        DwmDiagnostics.Mark("window-config", $"backdrop={WindowBackdropType}; animations={StatusAnimationsEnabled}; animationFps={(StatusAnimationsEnabled ? StatusAnimationFrameRate : 0)}; backgroundWork={!DwmDiagnosticOptions.DisableBackgroundWork}");
+        DwmDiagnostics.Mark("window-config",
+            $"backdrop={WindowBackdropType}; animations=false; " +
+            $"backgroundWork={!DwmDiagnosticOptions.DisableBackgroundWork}; desktopUia={!ExperimentOptions.DisableDesktopUia}");
     }
 
     /// <summary>
@@ -121,11 +128,24 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
                 try
                 {
                     var timer = Stopwatch.StartNew();
-                    CodexScanner.Probe();
+                    var stats = CodexScanner.Probe();
                     timer.Stop();
-                    if (DwmDiagnosticOptions.Enabled || timer.ElapsedMilliseconds >= 2000)
-                        PerformanceLog.Write($"codex-probe {timer.ElapsedMilliseconds}ms");
-                    DwmDiagnostics.Mark("codex-probe", $"elapsedMs={timer.ElapsedMilliseconds}");
+                    IsolationTelemetry.CodexProbe(timer.ElapsedMilliseconds, stats);
+                    string detail =
+                        $"elapsedMs={timer.ElapsedMilliseconds};files={stats.Files};" +
+                        $"checks={stats.CandidateChecks + stats.VerificationChecks};" +
+                        $"owned={stats.Owned};unowned={stats.Unowned};indeterminate={stats.Indeterminate};" +
+                        $"forgotten={stats.Forgotten};known={stats.KnownBefore}->{stats.KnownAfter};" +
+                        $"errors={stats.ErrorSummary}";
+                    if (DwmDiagnosticOptions.Enabled || timer.ElapsedMilliseconds >= 2000 ||
+                        stats.Indeterminate > 0 || stats.Forgotten > 0)
+                        PerformanceLog.Write(
+                            $"codex-probe {timer.ElapsedMilliseconds}ms files={stats.Files} " +
+                            $"checks={stats.CandidateChecks + stats.VerificationChecks} " +
+                            $"owned={stats.Owned} unowned={stats.Unowned} indeterminate={stats.Indeterminate} " +
+                            $"forgotten={stats.Forgotten} known={stats.KnownBefore}->{stats.KnownAfter} " +
+                            $"errors={stats.ErrorSummary}");
+                    DwmDiagnostics.Mark("codex-probe", detail);
                 }
                 catch (Exception ex)
                 {
@@ -166,6 +186,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
                         var timer = Stopwatch.StartNew();
                         var map = ResolveDesktops(snap);
                         timer.Stop();
+                        IsolationTelemetry.UiaSweep(timer.ElapsedMilliseconds, snap.Length, map.Count);
                         delayMs = DesktopResolverDelayMs(timer.ElapsedMilliseconds,
                             System.Threading.Interlocked.Read(ref _lastScanMs));
                         if (DwmDiagnosticOptions.Enabled || timer.ElapsedMilliseconds >= 2000)
@@ -205,6 +226,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
 
     void ApplyDesktops(Dictionary<string, (int Index, bool Current)> map)
     {
+        if (ExperimentOptions.FreezeGrid) return;
         foreach (var row in Rows)
         {
             if (map.TryGetValue(row.SessionId, out var d)) row.SetDesktop(d.Index, d.Current);
@@ -257,6 +279,9 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         view.LiveSortingProperties.Add(nameof(SessionRow.SortPriority));
         view.LiveSortingProperties.Add(nameof(SessionRow.LastChanged));
         view.LiveSortingProperties.Add(nameof(SessionRow.Name));
+        if (ExperimentOptions.TelemetryActive)
+            ((System.Collections.Specialized.INotifyCollectionChanged)view).CollectionChanged +=
+                (_, e) => IsolationTelemetry.CollectionChanged(e.Action);
     }
 
     // ---------------- columns ----------------
@@ -484,7 +509,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         if (System.Threading.Interlocked.Exchange(ref _scanRunning, 1) == 1) return;
         try
         {
-            var live = await System.Threading.Tasks.Task.Run(() =>
+            var scan = await System.Threading.Tasks.Task.Run(() =>
             {
                 // Same list, same sort — told apart by the provider mark. Headless threads are folded
                 // onto their interactive owner because they have no terminal of their own.
@@ -510,14 +535,29 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
                     PerformanceLog.Write($"session-scan {total.ElapsedMilliseconds}ms claude={claudeMs} codex={codexMs} " +
                         $"processes={processesMs} attribution={attributionMs} registry={registryMs} sessions={found.Count}");
                 DwmDiagnostics.Mark("session-scan", $"elapsedMs={total.ElapsedMilliseconds}; claudeMs={claudeMs}; codexMs={codexMs}; processesMs={processesMs}; attributionMs={attributionMs}; registryMs={registryMs}; sessions={found.Count}");
-                return found;
+                return (
+                    Sessions: found,
+                    ClaudeDiscovered: claude.Count,
+                    CodexDiscovered: codex.Count,
+                    ClaudeRows: found.Count(s => s.Provider == SessionProvider.Claude),
+                    CodexRows: found.Count(s => s.Provider == SessionProvider.Codex));
             });
             var apply = Stopwatch.StartNew();
-            var changes = ApplyRefresh(live);
+            var changes = ApplyRefresh(scan.Sessions);
             apply.Stop();
+            if (ExperimentOptions.TelemetryActive)
+            {
+                double applyMs = apply.Elapsed.TotalMilliseconds;
+                _ = Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle,
+                    () => IsolationTelemetry.FlushRefresh(
+                        scan.Sessions.Count, scan.ClaudeDiscovered, scan.CodexDiscovered,
+                        scan.ClaudeRows, scan.CodexRows, applyMs));
+            }
             if (DwmDiagnosticOptions.Enabled || apply.ElapsedMilliseconds >= 250)
-                PerformanceLog.Write($"ui-apply {apply.ElapsedMilliseconds}ms sessions={live.Count}");
-            DwmDiagnostics.Mark("ui-apply", $"elapsedMs={apply.ElapsedMilliseconds}; sessions={live.Count}; added={changes.Added}; removed={changes.Removed}; propertyChanges={changes.PropertyChanges}");
+                PerformanceLog.Write($"ui-apply {apply.ElapsedMilliseconds}ms sessions={scan.Sessions.Count}");
+            DwmDiagnostics.Mark("ui-apply",
+                $"elapsedMs={apply.ElapsedMilliseconds}; sessions={scan.Sessions.Count}; " +
+                $"added={changes.Added}; removed={changes.Removed}; propertyChanges={changes.PropertyChanges}");
         }
         catch (Exception ex)
         {
@@ -536,19 +576,23 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         int added = 0;
         int removed = 0;
         int propertyChanges = 0;
-        foreach (var s in live)
+        bool mutateGrid = !ExperimentOptions.FreezeGrid || Rows.Count == 0;
+        if (mutateGrid)
         {
-            seen.Add(s.SessionId);
-            if (_rowsById.TryGetValue(s.SessionId, out var row)) propertyChanges += row.Update(s);
-            else { row = new SessionRow(s); _rowsById[s.SessionId] = row; Rows.Add(row); added++; }
-        }
-        for (int i = Rows.Count - 1; i >= 0; i--)
-            if (!seen.Contains(Rows[i].SessionId))
+            foreach (var s in live)
             {
-                _rowsById.Remove(Rows[i].SessionId);
-                Rows.RemoveAt(i);
-                removed++;
+                seen.Add(s.SessionId);
+                if (_rowsById.TryGetValue(s.SessionId, out var row)) propertyChanges += row.Update(s);
+                else { row = new SessionRow(s); _rowsById[s.SessionId] = row; Rows.Add(row); added++; }
             }
+            for (int i = Rows.Count - 1; i >= 0; i--)
+                if (!seen.Contains(Rows[i].SessionId))
+                {
+                    _rowsById.Remove(Rows[i].SessionId);
+                    Rows.RemoveAt(i);
+                    removed++;
+                }
+        }
 
         _sessionsSnapshot = live.ToArray();
 
@@ -567,11 +611,12 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         ? s.Kind == "tui"
         : s.Kind == "interactive";
 
-    /// <summary>Poll the usage endpoint now, then on <see cref="UsageApi.PollInterval"/>.</summary>
+    /// <summary>Poll the selected usage source now, then at that source's own cadence.</summary>
     void StartUsagePolling()
     {
         _ = _usagePoll.RunAsync();
-        var timer = new DispatcherTimer { Interval = UsageApi.PollInterval };
+        var interval = CpaUsageApi.IsConfigured ? CpaUsageApi.PollInterval : UsageApi.PollInterval;
+        var timer = new DispatcherTimer { Interval = interval };
         timer.Tick += (_, _) => { _ = _usagePoll.RunAsync(); };
         timer.Start();
     }
@@ -583,6 +628,11 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     /// </summary>
     void StartAccountWatcher()
     {
+        // CPA owns account selection. Its sanitized dashboard is polled every 20s, so watching the
+        // unrelated direct-login credentials would only trigger redundant work and could briefly
+        // pair one identity with another account's limits.
+        if (CpaUsageApi.IsConfigured) return;
+
         _credentialsWatcher = new CredentialsWatcher(UsageApi.CredentialsFile);
         _credentialsWatcher.Changed += () => Dispatcher.InvokeAsync(OnCredentialsChanged);
         _credentialsWatcher.Start();
@@ -602,6 +652,16 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
 
     async System.Threading.Tasks.Task PollUsageAsync()
     {
+        if (CpaUsageApi.IsConfigured)
+        {
+            // A failed read deliberately preserves the last good snapshot. RefreshAccount ages it
+            // on every ordinary 5s session refresh instead of replacing it with a guessed identity.
+            var cpa = await CpaUsageApi.FetchAsync();
+            if (cpa != null) _cpaSnapshot = cpa;
+            RefreshAccount();
+            return;
+        }
+
         var startedFor = _accountUuid;
         var meters = await UsageApi.FetchAsync();
         // A failed call keeps the previous numbers rather than blanking the bar; RefreshAccount
@@ -623,6 +683,12 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     /// </summary>
     void RefreshAccount()
     {
+        if (CpaUsageApi.IsConfigured)
+        {
+            RefreshCpaAccount();
+            return;
+        }
+
         var acct = AccountScanner.Read();
 
         // A different account is signed in than the numbers in hand were fetched for, so those
@@ -646,32 +712,11 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         bool live = _liveMeters != null;
         var chosen = live ? _liveMeters! : acct.Meters;
 
-        // Codex's limits ride along in its rollout logs, so they cost nothing to add and are always
-        // first-hand — no API call, no credentials, no cache to second-guess. They come last so the
-        // Claude meters keep their established positions.
-        var combined = new List<UsageMeter>(chosen);
-        combined.AddRange(CodexScanner.PlanMeters);
-
-        // Compared by value, not by reference: the Codex meters are rebuilt from the rollout on every
-        // read, so a reference check would rebuild the bar every tick and kill any tooltip under the
-        // cursor. Percentages are whole numbers, so this settles almost immediately.
-        string sig = string.Join("|", combined.ConvertAll(m => $"{m.Label}:{m.Percent}:{m.Severity}"));
-        if (!string.Equals(sig, _appliedMeters as string, StringComparison.Ordinal))
-        {
-            _appliedMeters = sig;
-            Meters.Clear();
-            foreach (var m in combined) Meters.Add(m);
-        }
-
         var age = DateTime.Now - _liveAt;
-        bool stale = live && age > StaleAfter;
+        bool stale = live && age > DirectStaleAfter;
 
         var text = acct.Email.Length > 0 ? acct.Email : "Not signed in";
-        if (text != _accountText) { _accountText = text; AccountLabel.Text = text; }
-
         var state = stale ? $"· {AccountInfo.AgeText(age)} old" : !live ? "· cached" : "";
-        if (state != _usageState) { _usageState = state; UsageStateLabel.Text = state; }
-
         var tip = acct.Email.Length > 0 ? acct.Email : "Not signed in";
         if (acct.Organization.Length > 0) tip += $"\n{acct.Organization}";
         tip += live
@@ -679,9 +724,72 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             : acct.FetchedAt == DateTime.MinValue
                 ? "\nNo usage data available"
                 : $"\nFrom Claude Code's cache, written {acct.FetchedAt:h:mm tt}";
-        if (tip != _accountTip) { _accountTip = tip; AccountGroup.ToolTip = tip; }
 
-        UsageBar.Opacity = stale ? 0.5 : 1.0;
+        ApplyUsageBar(chosen, text, state, tip, stale);
+    }
+
+    /// <summary>Present the one Claude account CPA is currently routing, never a row merely present
+    /// in its account pool. The snapshot comes from the sanitized loopback dashboard — no auth file
+    /// or bearer token is opened by this app.</summary>
+    void RefreshCpaAccount()
+    {
+        var cpa = _cpaSnapshot;
+        if (cpa == null)
+        {
+            _accountUuid = null;
+            ApplyUsageBar(Array.Empty<UsageMeter>(), "CPA account unavailable", "· connecting",
+                "Waiting for the local CPA usage dashboard at 127.0.0.1:8318.", subdued: true);
+            return;
+        }
+
+        _accountUuid = cpa.AccountKey;
+        var age = cpa.CacheAge;
+        bool stale = cpa.HasData && age > CpaUsageApi.StaleAfter;
+        bool subdued = stale || !cpa.ProxyUp || !cpa.HasData;
+
+        string state = !cpa.ProxyUp ? "· CPA offline" :
+            !cpa.HasData ? "· no usage" :
+            stale ? $"· CPA · {AccountInfo.AgeText(age)} old" : "· CPA";
+
+        string text = cpa.Email.Length > 0 ? cpa.Email : "CPA account unavailable";
+        string tip = text + "\nSelected by CPA proxy";
+        if (cpa.BindingAt != DateTime.MinValue)
+            tip += $"\nCurrent binding recorded {cpa.BindingAt:g}";
+        tip += cpa.HasData
+            ? cpa.UsageFetchedAt == DateTime.MinValue
+                ? $"\nUsage cache is {AccountInfo.AgeText(age)} old"
+                : $"\nUsage updated {cpa.UsageFetchedAt:g} ({AccountInfo.AgeText(age)} ago)"
+            : "\nNo usage data is available for this account";
+        if (!cpa.ProxyUp) tip += "\nCPA proxy is not responding";
+
+        ApplyUsageBar(cpa.Meters, text, state, tip, subdued);
+    }
+
+    /// <summary>Mirror Claude plus Codex meters and the footer labels without rebuilding stable WPF
+    /// bindings. Keeping this shared prevents CPA mode and direct-login mode from drifting.</summary>
+    void ApplyUsageBar(IEnumerable<UsageMeter> claudeMeters, string text, string state, string tip,
+        bool subdued)
+    {
+        // Codex's limits ride along in its rollout logs, so they cost nothing to add and are always
+        // first-hand. They come last so the Claude meters keep their established positions.
+        var combined = new List<UsageMeter>(claudeMeters);
+        combined.AddRange(CodexScanner.PlanMeters);
+
+        // Compared by value, not by reference: Codex meters are rebuilt on every read. Include every
+        // tooltip-bearing value too, so a reset/source change is not hidden behind an identical %.
+        string sig = string.Join("|", combined.ConvertAll(m =>
+            $"{m.Label}:{m.Percent}:{m.Severity}:{m.ResetsAt.Ticks}:{m.Note}:{m.ReadAt.Ticks}"));
+        if (!string.Equals(sig, _appliedMeters as string, StringComparison.Ordinal))
+        {
+            _appliedMeters = sig;
+            Meters.Clear();
+            foreach (var m in combined) Meters.Add(m);
+        }
+
+        if (text != _accountText) { _accountText = text; AccountLabel.Text = text; }
+        if (state != _usageState) { _usageState = state; UsageStateLabel.Text = state; }
+        if (tip != _accountTip) { _accountTip = tip; AccountGroup.ToolTip = tip; }
+        UsageBar.Opacity = subdued ? 0.5 : 1.0;
     }
 
     void Grid_MouseDoubleClick(object sender, MouseButtonEventArgs e)

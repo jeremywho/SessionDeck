@@ -2,6 +2,26 @@ using System.Runtime.InteropServices;
 
 namespace ClaudeSessionMonitor;
 
+internal enum FileOwnerState
+{
+    Owned,
+    Unowned,
+    Indeterminate,
+}
+
+/// <summary>A Restart Manager ownership query without conflating "unowned" with "query failed".</summary>
+internal readonly record struct FileOwnerResult(
+    FileOwnerState State,
+    int Pid = 0,
+    int ErrorCode = 0,
+    string ErrorStage = "")
+{
+    public static FileOwnerResult Owned(int pid) => new(FileOwnerState.Owned, pid);
+    public static FileOwnerResult Unowned() => new(FileOwnerState.Unowned);
+    public static FileOwnerResult Indeterminate(string stage, int errorCode) =>
+        new(FileOwnerState.Indeterminate, ErrorCode: errorCode, ErrorStage: stage);
+}
+
 /// <summary>
 /// "Which process currently has this file open?", via the Restart Manager API.
 ///
@@ -54,31 +74,39 @@ internal static class FileHolders
     const int MaxProcs = 12;
 
     /// <summary>
-    /// PID of a process named <paramref name="processName"/>* that holds <paramref name="path"/> open,
-    /// or 0 for "nobody" / "couldn't tell". Never throws.
+    /// Whether a process named <paramref name="processName"/>* holds <paramref name="path"/> open.
+    /// A successful query with no matching process is <see cref="FileOwnerState.Unowned"/>; an API
+    /// or interop failure is <see cref="FileOwnerState.Indeterminate"/>. Never throws.
     /// </summary>
-    public static int OwnerPid(string path, string processName)
+    public static FileOwnerResult QueryOwner(string path, string processName)
     {
         uint handle = 0;
         try
         {
-            if (RmStartSession(out handle, 0, Guid.NewGuid().ToString()) != 0) return 0;
-            if (RmRegisterResources(handle, 1, new[] { path }, 0, IntPtr.Zero, 0, null) != 0) return 0;
+            int error = RmStartSession(out handle, 0, Guid.NewGuid().ToString());
+            if (error != 0) return FileOwnerResult.Indeterminate("start", error);
+
+            error = RmRegisterResources(handle, 1, new[] { path }, 0, IntPtr.Zero, 0, null);
+            if (error != 0) return FileOwnerResult.Indeterminate("register", error);
 
             uint count = MaxProcs, reasons = 0;
             var procs = new RM_PROCESS_INFO[MaxProcs];
-            if (RmGetList(handle, out _, ref count, procs, ref reasons) != 0) return 0;
+            error = RmGetList(handle, out _, ref count, procs, ref reasons);
+            if (error != 0) return FileOwnerResult.Indeterminate("list", error);
 
             for (int i = 0; i < count && i < procs.Length; i++)
             {
                 // strAppName is the process's exe name ("codex.exe"). Matching it here is what keeps a
                 // stray indexer or backup agent with the file open from being mistaken for the session.
                 if (procs[i].strAppName.StartsWith(processName, StringComparison.OrdinalIgnoreCase))
-                    return procs[i].Process.dwProcessId;
+                    return FileOwnerResult.Owned(procs[i].Process.dwProcessId);
             }
-            return 0;
+            return FileOwnerResult.Unowned();
         }
-        catch { return 0; }
+        catch (Exception ex)
+        {
+            return FileOwnerResult.Indeterminate("exception", System.Runtime.InteropServices.Marshal.GetHRForException(ex));
+        }
         finally { if (handle != 0) try { RmEndSession(handle); } catch { } }
     }
 }
