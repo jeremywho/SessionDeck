@@ -20,10 +20,12 @@
 
   <ItemGroup>
     <PackageReference Include="WPF-UI" Version="4.3.0" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4191.47" />
   </ItemGroup>
 
   <ItemGroup>
     <Resource Include="app.ico" />
+    <EmbeddedResource Include="wwwroot\**" LogicalName="www/%(Filename)%(Extension)" />
   </ItemGroup>
 
   <!-- Unit tests live under Tests/ (their own project). Keep the test sources out of this

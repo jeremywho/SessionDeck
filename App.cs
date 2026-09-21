@@ -160,6 +160,13 @@ internal sealed class App : Application
         Settings.Save();
     }
 
+    /// <summary>Resume a saved session in a deck tab; the window is shown first so the tab has a home.</summary>
+    public void ResumeInDeck(SavedSession s)
+    {
+        ShowWindow();
+        _window!.ResumeInDeck(s);
+    }
+
     void ShowWindow()
     {
         _window ??= new SessionsWindow(this);

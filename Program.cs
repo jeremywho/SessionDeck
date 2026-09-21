@@ -5,6 +5,13 @@ internal static class Program
     [STAThread]
     static void Main(string[] args)
     {
+        // One pseudoconsole per process: `--host` is the session host the app spawns and reattaches to.
+        if (args.Length > 0 && args[0] == "--host")
+        {
+            Environment.Exit(SessionDeck.Host.HostProgram.Run());
+            return;
+        }
+
         // Headless diagnostic: dump live sessions to a temp file and exit (verification / CLI use).
         if (args.Length > 0 && args[0] == "--list")
         {

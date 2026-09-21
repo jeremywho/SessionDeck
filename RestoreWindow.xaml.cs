@@ -27,7 +27,7 @@ internal partial class RestoreWindow : Wpf.Ui.Controls.FluentWindow
     void Resume_Click(object sender, RoutedEventArgs e)
     {
         foreach (var it in Items.Where(i => i.IsChecked))
-            SessionLauncher.Resume(it.Session, FlagsFor(it.Session.Provider));
+            _app.ResumeInDeck(it.Session);
         Close();
     }
 

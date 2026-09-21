@@ -115,6 +115,8 @@ internal static class SessionLauncher
            && string.IsNullOrEmpty(machineValue);
 
     /// <summary>Which color kill-switches our own process picked up from whatever launched it.</summary>
+    public static IEnumerable<string> InjectedColorKillSwitchesForChild() => InjectedColorKillSwitches();
+
     static IEnumerable<string> InjectedColorKillSwitches()
     {
         foreach (var name in ColorKillSwitches)

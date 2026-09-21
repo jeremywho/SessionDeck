@@ -82,6 +82,8 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
 
         InitColumns();
         SetupSort();
+        Deck.ApplyTheme(!string.Equals(_app.Settings.Theme, "Light", StringComparison.OrdinalIgnoreCase));
+        Loaded += (_, _) => ReattachHosts();
 
         if (ExperimentOptions.Mode != "normal")
             Title = $"{Title} — experiment: {ExperimentOptions.Mode}";
@@ -375,21 +377,22 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
 
     // ---------------- theme / on-top ----------------
 
-    void NewSessionButton_Click(object sender, RoutedEventArgs e) =>
-        SessionLauncher.LaunchNew(null, _app.Settings.ResumeFlags, LaunchTarget.NewWindow);
+    void NewSessionButton_Click(object sender, RoutedEventArgs e) => OpenNewClaudeInDeck(null);
 
     void NewTabButton_Click(object sender, RoutedEventArgs e) =>
         SessionLauncher.LaunchNew(null, _app.Settings.ResumeFlags, LaunchTarget.LastWindow);
 
     // Codex has no --name, so there are no named counterparts to these two — see NewCodexCommand.
-    void NewCodexSessionButton_Click(object sender, RoutedEventArgs e) =>
-        SessionLauncher.LaunchNewCodex(_app.Settings.CodexFlags, LaunchTarget.NewWindow);
+    void NewCodexSessionButton_Click(object sender, RoutedEventArgs e) => OpenNewCodexInDeck();
 
     void NewCodexTabButton_Click(object sender, RoutedEventArgs e) =>
         SessionLauncher.LaunchNewCodex(_app.Settings.CodexFlags, LaunchTarget.LastWindow);
 
-    void NewNamedSessionButton_Click(object sender, RoutedEventArgs e) =>
-        PromptThenLaunch(LaunchTarget.NewWindow);
+    void NewNamedSessionButton_Click(object sender, RoutedEventArgs e)
+    {
+        var prompt = new NamePromptWindow(this);
+        if (prompt.ShowDialog() == true) OpenNewClaudeInDeck(prompt.SessionName);
+    }
 
     void NewNamedTabButton_Click(object sender, RoutedEventArgs e) =>
         PromptThenLaunch(LaunchTarget.LastWindow);
@@ -403,6 +406,51 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
 
     void SettingsButton_Click(object sender, RoutedEventArgs e) => _app.ShowSettings();
 
+    // ---------------- deck: sessions hosted inside this window ----------------
+
+    void OpenNewClaudeInDeck(string? name)
+    {
+        string sessionId = Guid.NewGuid().ToString();
+        SpawnIntoDeck(sessionId, SessionProvider.Claude,
+            HostManager.NewClaudeCommand(sessionId, name, _app.Settings.ResumeFlags), HomeDir, name);
+    }
+
+    void OpenNewCodexInDeck() =>
+        SpawnIntoDeck("", SessionProvider.Codex, HostManager.NewCodexCommand(_app.Settings.CodexFlags), HomeDir, null);
+
+    /// <summary>Resume a saved session inside a deck tab rather than an external terminal.</summary>
+    public void ResumeInDeck(SavedSession s)
+    {
+        string cwd = string.IsNullOrWhiteSpace(s.Cwd) ? HomeDir : s.Cwd;
+        string cmd = s.Provider == SessionProvider.Codex
+            ? $"codex resume {s.Id} {_app.Settings.CodexFlags}".Trim()
+            : HostManager.ResumeClaudeCommand(s.Id, _app.Settings.ResumeFlags);
+        SpawnIntoDeck(s.Id, s.Provider, cmd, cwd, s.Name);
+    }
+
+    void SpawnIntoDeck(string sessionId, SessionProvider provider, string cmd, string cwd, string? title)
+    {
+        try
+        {
+            var host = HostManager.Spawn(sessionId, provider, cmd, cwd, title);
+            Deck.Open(host);
+        }
+        catch (Exception ex)
+        {
+            App.LogError(ex);
+            LiveLabel.Text = "Could not start the session host: " + ex.Message;
+        }
+    }
+
+    /// <summary>Hosts still running from a previous run of this app: reopen their tabs.</summary>
+    void ReattachHosts()
+    {
+        foreach (var host in HostManager.Discover().OrderBy(h => h.StartedAt))
+            Deck.Open(host);
+    }
+
+    static string HomeDir => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+
     /// <summary>Reveal the title-bar update button once a new version is staged.</summary>
     public void ShowUpdateReady(string tag)
     {
@@ -413,7 +461,11 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     void UpdateButton_Click(object sender, RoutedEventArgs e) => _app.ApplyUpdate();
 
     /// <summary>Called after a theme swap so the Context% color converter re-runs against the new palette.</summary>
-    public void RefreshAfterThemeChange() => SessionsGrid.Items.Refresh();
+    public void RefreshAfterThemeChange()
+    {
+        SessionsGrid.Items.Refresh();
+        Deck.ApplyTheme(!string.Equals(_app.Settings.Theme, "Light", StringComparison.OrdinalIgnoreCase));
+    }
 
     void OnTopButton_Click(object sender, RoutedEventArgs e)
     {
@@ -807,6 +859,9 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             LiveLabel.Text = "Background agent — it has no terminal window to focus.";
             return;
         }
+        // A session this app hosts opens in its own tab; anything else is in an external terminal.
+        var tab = Deck.FindBySession(row.SessionId);
+        if (tab != null) { Deck.Activate(tab); return; }
         if (!WindowActivator.Activate(row.Info))
             LiveLabel.Text = $"Could not find a window for PID {row.Info.Pid}.";
     }

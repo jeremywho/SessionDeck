@@ -5,8 +5,8 @@
                  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
                  xmlns:local="clr-namespace:SessionDeck"
                  Title="Session Deck"
-                 Width="500" Height="560"
-                 MinWidth="460" MinHeight="320"
+                 Width="1180" Height="720"
+                 MinWidth="760" MinHeight="400"
                  WindowStartupLocation="Manual"
                  ExtendsContentIntoTitleBar="True"
                  WindowBackdropType="Mica"
@@ -112,6 +112,15 @@
     <!-- solid surface for everything below the title bar (legible over Mica) -->
     <Border Grid.Row="1" Background="{DynamicResource SurfaceBrush}">
       <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition x:Name="ListColumn" Width="460" MinWidth="380"/>
+          <ColumnDefinition Width="Auto"/>
+          <ColumnDefinition Width="*" MinWidth="300"/>
+        </Grid.ColumnDefinitions>
+        <local:DeckPane x:Name="Deck" Grid.Column="2"/>
+        <GridSplitter Grid.Column="1" Width="4" HorizontalAlignment="Center" VerticalAlignment="Stretch"
+                      Background="{DynamicResource Border2Brush}" ShowsPreview="False"/>
+      <Grid Grid.Column="0">
         <Grid.LayoutTransform>
           <ScaleTransform x:Name="ZoomTransform" ScaleX="1" ScaleY="1"/>
         </Grid.LayoutTransform>
@@ -289,12 +298,12 @@
                          ToolTip="Claude Code" Foreground="{DynamicResource ClaudeMarkBrush}"/>
               <ui:Button x:Name="NewSessionButton" Appearance="Transparent" BorderThickness="0" MinHeight="0" MaxHeight="30" Width="36" Padding="0"
                          VerticalAlignment="Center" VerticalContentAlignment="Center" FontSize="15"
-                         Click="NewSessionButton_Click" ToolTip="New Claude session — new window">
-                <ui:Button.Icon><ui:SymbolIcon Symbol="WindowNew24"/></ui:Button.Icon>
+                         Click="NewSessionButton_Click" ToolTip="New Claude session — in a deck tab">
+                <ui:Button.Icon><ui:SymbolIcon Symbol="PanelRightContract20"/></ui:Button.Icon>
               </ui:Button>
               <ui:Button x:Name="NewNamedSessionButton" Appearance="Transparent" BorderThickness="0" MinHeight="0" MaxHeight="30" Width="36" Padding="0" Margin="2,0,0,0"
                          VerticalAlignment="Center" VerticalContentAlignment="Center" FontSize="15"
-                         Click="NewNamedSessionButton_Click" ToolTip="New named Claude session — new window…">
+                         Click="NewNamedSessionButton_Click" ToolTip="New named Claude session — in a deck tab…">
                 <ui:Button.Icon><ui:SymbolIcon Symbol="Rename24"/></ui:Button.Icon>
               </ui:Button>
 
@@ -304,12 +313,12 @@
 
               <ui:Button x:Name="NewTabButton" Appearance="Transparent" BorderThickness="0" MinHeight="0" MaxHeight="30" Width="36" Padding="0"
                          VerticalAlignment="Center" VerticalContentAlignment="Center" FontSize="15"
-                         Click="NewTabButton_Click" ToolTip="New Claude session — tab in the last terminal you used">
+                         Click="NewTabButton_Click" ToolTip="New Claude session — external Windows Terminal tab">
                 <ui:Button.Icon><ui:SymbolIcon Symbol="TabAdd24"/></ui:Button.Icon>
               </ui:Button>
               <ui:Button x:Name="NewNamedTabButton" Appearance="Transparent" BorderThickness="0" MinHeight="0" MaxHeight="30" Width="36" Padding="0" Margin="2,0,0,0"
                          VerticalAlignment="Center" VerticalContentAlignment="Center" FontSize="15"
-                         Click="NewNamedTabButton_Click" ToolTip="New named Claude session — tab in the last terminal you used…">
+                         Click="NewNamedTabButton_Click" ToolTip="New named Claude session — external Windows Terminal tab…">
                 <ui:Button.Icon><ui:SymbolIcon Symbol="Rename24"/></ui:Button.Icon>
               </ui:Button>
             </StackPanel>
@@ -322,8 +331,8 @@
                          ToolTip="Codex" Foreground="{DynamicResource CodexMarkBrush}"/>
               <ui:Button x:Name="NewCodexSessionButton" Appearance="Transparent" BorderThickness="0" MinHeight="0" MaxHeight="30" Width="36" Padding="0"
                          VerticalAlignment="Center" VerticalContentAlignment="Center" FontSize="15"
-                         Click="NewCodexSessionButton_Click" ToolTip="New Codex session — new window">
-                <ui:Button.Icon><ui:SymbolIcon Symbol="WindowNew24"/></ui:Button.Icon>
+                         Click="NewCodexSessionButton_Click" ToolTip="New Codex session — in a deck tab">
+                <ui:Button.Icon><ui:SymbolIcon Symbol="PanelRightContract20"/></ui:Button.Icon>
               </ui:Button>
 
               <!-- Empty stand-in for Claude's "named" button. Not dead markup: it holds the Codex row's
@@ -335,7 +344,7 @@
 
               <ui:Button x:Name="NewCodexTabButton" Appearance="Transparent" BorderThickness="0" MinHeight="0" MaxHeight="30" Width="36" Padding="0"
                          VerticalAlignment="Center" VerticalContentAlignment="Center" FontSize="15"
-                         Click="NewCodexTabButton_Click" ToolTip="New Codex session — tab in the last terminal you used">
+                         Click="NewCodexTabButton_Click" ToolTip="New Codex session — external Windows Terminal tab">
                 <ui:Button.Icon><ui:SymbolIcon Symbol="TabAdd24"/></ui:Button.Icon>
               </ui:Button>
             </StackPanel>
@@ -447,6 +456,7 @@
           </DockPanel>
         </Border>
 
+      </Grid>
       </Grid>
     </Border>
   </Grid>
