@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace ClaudeSessionMonitor;
+namespace SessionDeck;
 
 internal enum FileOwnerState
 {

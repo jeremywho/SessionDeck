@@ -1,6 +1,6 @@
 using Xunit;
 
-namespace ClaudeSessionMonitor.Tests;
+namespace SessionDeck.Tests;
 
 /// <summary>
 /// Companion threads — codex threads another app drives through the app server (the Claude Code

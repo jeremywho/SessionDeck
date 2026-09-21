@@ -2,7 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 
-namespace ClaudeSessionMonitor;
+namespace SessionDeck;
 
 /// <summary>
 /// Opt-in switches for separating the monitor's compositor surface from its recurring scanners.
@@ -11,11 +11,11 @@ namespace ClaudeSessionMonitor;
 /// </summary>
 internal static class DwmDiagnosticOptions
 {
-    internal const string EnabledVariable = "CSM_DWM_DIAGNOSTICS";
-    internal const string GuardVariable = "CSM_DWM_GUARD";
-    internal const string DisableBackdropVariable = "CSM_DISABLE_BACKDROP";
-    internal const string DisableBackgroundWorkVariable = "CSM_DISABLE_BACKGROUND_WORK";
-    internal const string OutputVariable = "CSM_DWM_DIAGNOSTIC_PATH";
+    internal const string EnabledVariable = "SD_DWM_DIAGNOSTICS";
+    internal const string GuardVariable = "SD_DWM_GUARD";
+    internal const string DisableBackdropVariable = "SD_DISABLE_BACKDROP";
+    internal const string DisableBackgroundWorkVariable = "SD_DISABLE_BACKGROUND_WORK";
+    internal const string OutputVariable = "SD_DWM_DIAGNOSTIC_PATH";
 
     internal static bool Enabled => IsEnabled(Environment.GetEnvironmentVariable(EnabledVariable));
     internal static bool GuardEnabled => Enabled && IsEnabled(Environment.GetEnvironmentVariable(GuardVariable));
@@ -87,7 +87,7 @@ internal static class DwmDiagnostics
             string requested = Environment.GetEnvironmentVariable(DwmDiagnosticOptions.OutputVariable) ?? "";
             FilePath = requested.Length > 0
                 ? Path.GetFullPath(requested)
-                : Path.Combine(Path.GetTempPath(), $"claude-session-monitor-dwm-{DateTime.Now:yyyyMMdd-HHmmss}.tsv");
+                : Path.Combine(Path.GetTempPath(), $"sessiondeck-dwm-{DateTime.Now:yyyyMMdd-HHmmss}.tsv");
             Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
             _writer = new StreamWriter(new FileStream(FilePath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite))
             {

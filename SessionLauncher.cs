@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 
-namespace ClaudeSessionMonitor;
+namespace SessionDeck;
 
 /// <summary>Where a launched session's terminal should land.</summary>
 internal enum LaunchTarget

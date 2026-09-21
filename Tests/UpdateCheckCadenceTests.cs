@@ -1,6 +1,6 @@
 using Xunit;
 
-namespace ClaudeSessionMonitor.Tests;
+namespace SessionDeck.Tests;
 
 /// <summary>
 /// The update check is now triggered from two places — a periodic timer and showing the window — so

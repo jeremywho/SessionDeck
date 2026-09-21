@@ -1,6 +1,6 @@
 using System.IO;
 
-namespace ClaudeSessionMonitor;
+namespace SessionDeck;
 
 /// <summary>
 /// Incremental count/activity cache for Claude's append-only subagent transcripts. A full directory

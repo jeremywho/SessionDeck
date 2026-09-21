@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace ClaudeSessionMonitor;
+namespace SessionDeck;
 
 /// <summary>A session recorded for possible restore after a crash/reboot.</summary>
 internal sealed class SavedSession

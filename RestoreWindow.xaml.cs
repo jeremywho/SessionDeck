@@ -2,7 +2,7 @@ using System.Collections.ObjectModel;
 using System.Linq;
 using System.Windows;
 
-namespace ClaudeSessionMonitor;
+namespace SessionDeck;
 
 internal partial class RestoreWindow : Wpf.Ui.Controls.FluentWindow
 {

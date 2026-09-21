@@ -1,6 +1,6 @@
 using Xunit;
 
-namespace ClaudeSessionMonitor.Tests;
+namespace SessionDeck.Tests;
 
 /// <summary>
 /// Claude Code stamps the effort that actually ran on each assistant transcript record, at the record

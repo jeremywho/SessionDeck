@@ -1,6 +1,6 @@
 using System.Linq;
 
-namespace ClaudeSessionMonitor;
+namespace SessionDeck;
 
 /// <summary>
 /// Brings a session's terminal window+tab to the foreground.

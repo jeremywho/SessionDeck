@@ -11,7 +11,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 
-namespace ClaudeSessionMonitor;
+namespace SessionDeck;
 
 internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
 {

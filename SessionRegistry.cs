@@ -2,7 +2,7 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 
-namespace ClaudeSessionMonitor;
+namespace SessionDeck;
 
 /// <summary>
 /// Persists the set of currently-live interactive sessions to active-sessions.json so they can be
@@ -13,11 +13,11 @@ namespace ClaudeSessionMonitor;
 /// </summary>
 internal static class SessionRegistry
 {
-    // CSM_DATA_DIR: test hook — points the registry at a scratch dir so tests never touch the
+    // SD_DATA_DIR: test hook — points the registry at a scratch dir so tests never touch the
     // real %APPDATA% file (the installed instance may be rewriting it at that very moment).
     static readonly string Dir =
-        Environment.GetEnvironmentVariable("CSM_DATA_DIR") is { Length: > 0 } dir ? dir :
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ClaudeSessionMonitor");
+        Environment.GetEnvironmentVariable("SD_DATA_DIR") is { Length: > 0 } dir ? dir :
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SessionDeck");
     static readonly string FilePath = Path.Combine(Dir, "active-sessions.json");
 
     static string _lastSig = "";

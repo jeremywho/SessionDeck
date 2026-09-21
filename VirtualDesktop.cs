@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace ClaudeSessionMonitor;
+namespace SessionDeck;
 
 /// <summary>
 /// Which virtual desktop a window is on. Uses the documented IVirtualDesktopManager

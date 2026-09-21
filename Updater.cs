@@ -4,7 +4,7 @@ using System.Reflection;
 using System.Text.Json;
 using System.Threading.Tasks;
 
-namespace ClaudeSessionMonitor;
+namespace SessionDeck;
 
 /// <summary>
 /// gh-based self-update. Checks the latest GitHub Release (private repo — auth via the installed `gh`
@@ -14,7 +14,7 @@ namespace ClaudeSessionMonitor;
 /// </summary>
 internal static class Updater
 {
-    const string Repo = "trainerroad/ClaudeSessionMonitor";
+    const string Repo = "jeremywho/SessionDeck";
 
     static string StagingDir => Path.Combine(Installer.InstallDir, "staging");
     static string MarkerPath => Path.Combine(Installer.InstallDir, "update.pending.json");
@@ -57,7 +57,7 @@ internal static class Updater
             if (string.IsNullOrEmpty(tag) || !TryParseTag(tag, out var v)) return;   // no release / unparsable
             if (v <= Current || StagedTag == tag) return;                            // up to date / already staged
 
-            string asset = $"ClaudeSessionMonitor-{tag}.exe";
+            string asset = $"SessionDeck-{tag}.exe";
             Directory.CreateDirectory(StagingDir);
             string dest = Path.Combine(StagingDir, asset);
             await Gh($"release download {tag} --repo {Repo} --pattern \"{asset}\" --dir \"{StagingDir}\" --clobber");

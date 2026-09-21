@@ -3,7 +3,7 @@ using System.Windows;
 using System.Windows.Data;
 using System.Windows.Media;
 
-namespace ClaudeSessionMonitor;
+namespace SessionDeck;
 
 /// <summary>
 /// Context % -> themed brush by threshold (&gt;85 red, &gt;70 amber, else neutral) — matches the omc

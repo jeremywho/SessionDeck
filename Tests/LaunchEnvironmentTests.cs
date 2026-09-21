@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using Xunit;
 
-namespace ClaudeSessionMonitor.Tests;
+namespace SessionDeck.Tests;
 
 /// <summary>
 /// Guards the launched terminal's environment and argument vector.

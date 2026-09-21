@@ -1,4 +1,4 @@
-namespace ClaudeSessionMonitor;
+namespace SessionDeck;
 
 /// <summary>Which CLI a session belongs to. Drives the provider badge and the launch/restore paths —
 /// the two scanners normalise very different on-disk shapes into one <see cref="SessionInfo"/>.</summary>

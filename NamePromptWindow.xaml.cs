@@ -1,6 +1,6 @@
 using System.Windows;
 
-namespace ClaudeSessionMonitor;
+namespace SessionDeck;
 
 /// <summary>Modal prompt for a new session's name. ShowDialog() == true when a name was entered.</summary>
 internal partial class NamePromptWindow : Wpf.Ui.Controls.FluentWindow

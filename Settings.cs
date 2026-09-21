@@ -1,9 +1,9 @@
 using System.IO;
 using System.Text.Json;
 
-namespace ClaudeSessionMonitor;
+namespace SessionDeck;
 
-/// <summary>User preferences persisted to %APPDATA%\ClaudeSessionMonitor\settings.json.</summary>
+/// <summary>User preferences persisted to %APPDATA%\SessionDeck\settings.json.</summary>
 internal sealed class Settings
 {
     public string Theme { get; set; } = "Dark";                       // "Dark" | "Light"
@@ -35,7 +35,7 @@ internal sealed class Settings
     public bool RunOnLogin { get; set; } = true;                            // HKCU Run registration (installed instance only)
 
     static string Dir => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ClaudeSessionMonitor");
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SessionDeck");
     static string FilePath => Path.Combine(Dir, "settings.json");
 
     public static Settings Load()

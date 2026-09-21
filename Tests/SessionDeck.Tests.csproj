@@ -18,7 +18,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\ClaudeSessionMonitor.csproj" />
+    <ProjectReference Include="..\SessionDeck.csproj" />
   </ItemGroup>
 
   <!-- Same WinForms/WPF implicit-usings collision as the app project. -->

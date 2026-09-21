@@ -1,7 +1,7 @@
 using System.IO;
 using System.Text.Json;
 
-namespace ClaudeSessionMonitor;
+namespace SessionDeck;
 
 /// <summary>
 /// One usage limit as the server reports it — the session (5h) window, the all-model weekly window,

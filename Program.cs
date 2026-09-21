@@ -1,4 +1,4 @@
-namespace ClaudeSessionMonitor;
+namespace SessionDeck;
 
 internal static class Program
 {
@@ -29,7 +29,7 @@ internal static class Program
             foreach (var s in all)
                 sb.AppendLine($"{s.Provider}\t{s.Pid}\t{(s.ApiError ? "ERROR" : s.Status)}\t{s.ShortId}\t{s.Model}\t{s.Effort}\t{s.ContextDisplay}\t{s.SubagentsActive}/{s.SubagentsTotal}\tcodex-tasks:{s.BackgroundTasks}\t{s.LastTool}\t{s.DisplayName}\t{s.Cwd}");
             System.IO.File.WriteAllText(
-                System.IO.Path.Combine(System.IO.Path.GetTempPath(), "claude-sessions-dump.txt"),
+                System.IO.Path.Combine(System.IO.Path.GetTempPath(), "sessiondeck-dump.txt"),
                 sb.ToString());
             return;
         }
@@ -47,7 +47,7 @@ internal static class Program
             foreach (var s in all)
                 sb.AppendLine($"{s.Provider}\t{s.DisplayName}\t(pid {s.Pid})\t-> {WindowActivator.DebugPick(s, byPid)}");
             System.IO.File.WriteAllText(
-                System.IO.Path.Combine(System.IO.Path.GetTempPath(), "claude-windows-test.txt"), sb.ToString());
+                System.IO.Path.Combine(System.IO.Path.GetTempPath(), "sessiondeck-windows-test.txt"), sb.ToString());
             return;
         }
 
@@ -72,7 +72,7 @@ internal static class Program
         int retries = afterUpdate ? 80 : 0;   // ~8s of 100ms retries to let the old instance release the mutex
         for (int i = 0; ; i++)
         {
-            var m = new Mutex(true, "ClaudeSessionMonitor_SingleInstance", out bool isNew);
+            var m = new Mutex(true, "SessionDeck_SingleInstance", out bool isNew);
             if (isNew) return m;
             m.Dispose();
             if (i >= retries) return null;     // held and out of retries -> a genuine second instance, exit

@@ -6,42 +6,42 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
-$exe = Join-Path $repo 'bin\DwmDiagnostic\ClaudeSessionMonitor.exe'
+$exe = Join-Path $repo 'bin\DwmDiagnostic\SessionDeck.exe'
 
 if (-not (Test-Path -LiteralPath $exe)) {
     throw "Publish the diagnostic binary first with the .NET 10.0.11 command in docs\dwm-diagnostics.md"
 }
 
-$running = Get-Process -Name ClaudeSessionMonitor -ErrorAction SilentlyContinue
+$running = Get-Process -Name SessionDeck -ErrorAction SilentlyContinue
 if ($running) {
     throw "Claude Session Monitor is already running (PID $($running.Id -join ', ')). Exit it from its tray menu before starting an isolated experiment."
 }
 
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-$logDir = Join-Path $env:TEMP 'ClaudeSessionMonitor-Dwm'
+$logDir = Join-Path $env:TEMP 'SessionDeck-Dwm'
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 $logPath = Join-Path $logDir "$stamp-$($Mode.ToLowerInvariant()).tsv"
 
 $start = [System.Diagnostics.ProcessStartInfo]::new($exe)
 $start.WorkingDirectory = $repo
 $start.UseShellExecute = $false
-$start.Environment['CSM_NO_INSTALL'] = '1'
-$start.Environment['CSM_DWM_DIAGNOSTICS'] = '1'
-$start.Environment['CSM_DWM_GUARD'] = '1'
-$start.Environment['CSM_DWM_DIAGNOSTIC_PATH'] = $logPath
+$start.Environment['SD_NO_INSTALL'] = '1'
+$start.Environment['SD_DWM_DIAGNOSTICS'] = '1'
+$start.Environment['SD_DWM_GUARD'] = '1'
+$start.Environment['SD_DWM_DIAGNOSTIC_PATH'] = $logPath
 
 switch ($Mode) {
     'NoBackdrop' {
-        $start.Environment['CSM_DISABLE_BACKDROP'] = '1'
-        $start.Environment.Remove('CSM_DISABLE_BACKGROUND_WORK') | Out-Null
+        $start.Environment['SD_DISABLE_BACKDROP'] = '1'
+        $start.Environment.Remove('SD_DISABLE_BACKGROUND_WORK') | Out-Null
     }
     'BackdropOnly' {
-        $start.Environment.Remove('CSM_DISABLE_BACKDROP') | Out-Null
-        $start.Environment['CSM_DISABLE_BACKGROUND_WORK'] = '1'
+        $start.Environment.Remove('SD_DISABLE_BACKDROP') | Out-Null
+        $start.Environment['SD_DISABLE_BACKGROUND_WORK'] = '1'
     }
     'Full' {
-        $start.Environment.Remove('CSM_DISABLE_BACKDROP') | Out-Null
-        $start.Environment.Remove('CSM_DISABLE_BACKGROUND_WORK') | Out-Null
+        $start.Environment.Remove('SD_DISABLE_BACKDROP') | Out-Null
+        $start.Environment.Remove('SD_DISABLE_BACKGROUND_WORK') | Out-Null
     }
 }
 

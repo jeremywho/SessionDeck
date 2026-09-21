@@ -1,4 +1,4 @@
-namespace ClaudeSessionMonitor;
+namespace SessionDeck;
 
 /// <summary>The four display states the UI color-codes and sorts by (attention-first).</summary>
 internal enum SessionState { Completed, Awaiting, Idle, Working, Error }

@@ -1,6 +1,6 @@
 using System.Threading.Tasks;
 
-namespace ClaudeSessionMonitor;
+namespace SessionDeck;
 
 /// <summary>
 /// Runs an async operation with at most one run in flight and at most one run queued behind it.

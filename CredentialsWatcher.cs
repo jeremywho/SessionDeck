@@ -1,7 +1,7 @@
 using System.IO;
 using System.Threading;
 
-namespace ClaudeSessionMonitor;
+namespace SessionDeck;
 
 /// <summary>
 /// Watches Claude Code's credentials file and reports, once per burst, that it has been rewritten —

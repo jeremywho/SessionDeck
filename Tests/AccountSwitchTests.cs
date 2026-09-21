@@ -3,7 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Xunit;
 
-namespace ClaudeSessionMonitor.Tests;
+namespace SessionDeck.Tests;
 
 /// <summary>
 /// Switching the machine's Claude account rewrites <c>~/.claude/.credentials.json</c> and then, a few

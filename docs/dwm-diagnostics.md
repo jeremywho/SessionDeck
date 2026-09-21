@@ -8,7 +8,7 @@ without launching. Pinning the runtime here makes the diagnostic executable self
 same .NET 10.0.11 servicing release as the installed app, even if the workstation runtime is older:
 
 ```powershell
-dotnet publish ClaudeSessionMonitor.csproj -c Release -r win-x64 --self-contained true `
+dotnet publish SessionDeck.csproj -c Release -r win-x64 --self-contained true `
   -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
   -p:EnableCompressionInSingleFile=true -p:RuntimeFrameworkVersion=10.0.11 `
   -o bin\DwmDiagnostic
@@ -31,7 +31,7 @@ Modes:
   compositor surface from background work.
 - `Full`: normal Mica and normal background work, with telemetry and the guard enabled.
 
-Each run writes a one-second TSV under `%TEMP%\ClaudeSessionMonitor-Dwm`. Event rows correlate startup,
+Each run writes a one-second TSV under `%TEMP%\SessionDeck-Dwm`. Event rows correlate startup,
 window visibility, session scans, UI application, Codex probes, and virtual-desktop UIA sweeps with DWM
 and app CPU, resident/private memory, handle/thread counts, and app GDI/USER objects.
 

@@ -3,7 +3,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace ClaudeSessionMonitor;
+namespace SessionDeck;
 
 /// <summary>One sanitized reading from the loopback-only CPA usage dashboard.</summary>
 internal sealed class CpaUsageSnapshot
@@ -31,7 +31,7 @@ internal sealed class CpaUsageSnapshot
 internal static class CpaUsageApi
 {
     const string DefaultUrl = "http://127.0.0.1:8318/api/usage";
-    internal const string UrlVariable = "CSM_CPA_USAGE_URL";
+    internal const string UrlVariable = "SD_CPA_USAGE_URL";
 
     static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(40) };
 

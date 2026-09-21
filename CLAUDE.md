@@ -1,4 +1,4 @@
-# ClaudeSessionMonitor — agent guide
+# SessionDeck — agent guide
 
 Windows system-tray app (**.NET 10, WPF + [WPF-UI](https://github.com/lepoco/wpfui)/Fluent**) that
 lists live local Claude Code **and Codex CLI** sessions, read from `~/.claude/` and `~/.codex/` on
@@ -13,25 +13,25 @@ adding anything else that touches the network or credentials.
 ## Build, run, verify
 ```
 dotnet build -c Release
-bin\Release\net10.0-windows\ClaudeSessionMonitor.exe
-dotnet test Tests\ClaudeSessionMonitor.Tests.csproj
+bin\Release\net10.0-windows\SessionDeck.exe
+dotnet test Tests\SessionDeck.Tests.csproj
 ```
 - It's a **tray app with no console** — failures are silent. After a launch, check
-  `%TEMP%\claude-session-monitor-error.log`.
-- Slow recurring work is written sparingly to `%TEMP%\claude-session-monitor-performance.log`:
+  `%TEMP%\sessiondeck-error.log`.
+- Slow recurring work is written sparingly to `%TEMP%\sessiondeck-performance.log`:
   session scans at 1s+, UI application at 250ms+, and Codex probes/UIA sweeps at 2s+. The file rotates
   at 1MB. Keep this thresholded; logging every pass would itself become background I/O.
 - DWM investigation is opt-in and documented in `docs/dwm-diagnostics.md`. The diagnostic launcher
   separates Mica from recurring work, records one-second DWM/app telemetry, and exits only the test app
   if the known sustained-DWM-CPU/resident-growth signature appears. Never enable that logging normally.
-- The diagnostic launcher can run `Normal` with `CSM_EXPERIMENT_LOG` set: telemetry then records the
+- The diagnostic launcher can run `Normal` with `SD_EXPERIMENT_LOG` set: telemetry then records the
   production behavior without enabling any isolation switch. Its paired health watcher records DWM,
   Terminal, system, and monitor-process counters once per minute and exits with the monitored PID.
 - Iteration loop that works well here: kill the running exe → build → launch → **screenshot to
   verify** (the UI is the spec; `PrintWindow` with flag `2` captures it). `--list` / `--windows` dump
   the session list / focus mapping to `%TEMP%` for headless checks.
 - Source files are **CRLF** (Windows). Keep them CRLF when editing.
-- Settings persist to `%APPDATA%\ClaudeSessionMonitor\settings.json` — **shared across builds**, so a
+- Settings persist to `%APPDATA%\SessionDeck\settings.json` — **shared across builds**, so a
   debug run can clobber your real prefs. Restore anything a test changes.
 
 ## Architecture (data flow)
@@ -106,10 +106,10 @@ back; after that it's a tail read gated on mtime **and size**. There is delibera
 ## Usage bar (`UsageApi.cs`, `CpaUsageApi.cs`, `AccountScanner.cs`)
 The second footer bar: signed-in address on the left, one fill-behind pill per plan limit on the right.
 - **CPA mode is selected automatically** when `ANTHROPIC_BASE_URL` points to loopback port 8317 (or
-  `CSM_CPA_USAGE_URL` is explicitly set). `CpaUsageApi` polls the sanitized local dashboard at
+  `SD_CPA_USAGE_URL` is explicitly set). `CpaUsageApi` polls the sanitized local dashboard at
   `http://127.0.0.1:8318/api/usage` every 20s and shows only the row named by `serving.account` — the
   account CPA is actually routing, not merely the highest-priority row in its pool. It never opens
-  CPA auth files or receives a token. `CSM_CPA_USAGE_URL` can redirect the dashboard endpoint.
+  CPA auth files or receives a token. `SD_CPA_USAGE_URL` can redirect the dashboard endpoint.
 - **CPA failures retain the last good selected account and visibly age it.** Five minutes is stale:
   the dashboard attempts to refresh its cache after two minutes, so this represents more than two
   missed refresh opportunities. Before the first good snapshot, show `CPA account unavailable`
@@ -282,7 +282,7 @@ choppy, with compositor load only partially recovering after the app exited.
 
 ## Auto-update / install (`Installer.cs`, `Updater.cs`)
 - **Dormant unless installed.** Both no-op unless `Installer.IsInstalledInstance()` (running from
-  `%LOCALAPPDATA%\Programs\ClaudeSessionMonitor\`). A `\bin\` dev build never self-installs or
+  `%LOCALAPPDATA%\Programs\SessionDeck\`). A `\bin\` dev build never self-installs or
   self-updates, so your local build/verify loop is unaffected.
 - **First run** anywhere else copies the exe to the install dir (+ Start Menu shortcut via WScript.Shell
   COM) and relaunches from there. Only correct for the **self-contained single-file** release exe — a
@@ -300,9 +300,9 @@ choppy, with compositor load only partially recovering after the app exited.
   opens can't respawn `gh`. **The show-trigger is gated on `_updaterStarted`**: the first `ShowWindow`
   runs *before* `StartUpdater` subscribes to `UpdateStaged`, so checking there could stage a release
   with nothing listening — and the button would stay hidden, which is the bug this all exists to fix.
-- **Test hooks:** `CSM_INSTALL_DIR` (redirect install dir to a temp path), `CSM_NO_INSTALL=1` (skip
-  self-install), `CSM_FAKE_UPDATE=<tag>` (force the title-bar button), `CSM_DATA_DIR` (redirect the
-  `active-sessions.json` dir — the unit tests set it), `CSM_NO_USAGE_API=1` (force the usage fetch to
+- **Test hooks:** `SD_INSTALL_DIR` (redirect install dir to a temp path), `SD_NO_INSTALL=1` (skip
+  self-install), `SD_FAKE_UPDATE=<tag>` (force the title-bar button), `SD_DATA_DIR` (redirect the
+  `active-sessions.json` dir — the unit tests set it), `SD_NO_USAGE_API=1` (force the usage fetch to
   fail, so the cache fallback can be verified without unplugging anything). The full
   download→swap→relaunch cycle can only be truly validated by cutting a real release.
 - **Version stamping:** release.yml passes `-p:Version=<tag>` so the running assembly version == the
@@ -316,7 +316,7 @@ choppy, with compositor load only partially recovering after the app exited.
 
 ## Conventions
 - **Worktrees only.** Never edit the main checkout. Branch into
-  `C:\Data\Repos\.worktrees\ClaudeSessionMonitor\<branch>`, build + verify there, fast-forward merge to
+  `C:\Data\Repos\.worktrees\SessionDeck\<branch>`, build + verify there, fast-forward merge to
   `main`, push, then remove the worktree.
 - **Releases are manual** — Actions → Release → Run workflow (never on push). Ships an unsigned
   self-contained `.exe`.

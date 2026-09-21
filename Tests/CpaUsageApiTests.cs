@@ -1,6 +1,6 @@
 using Xunit;
 
-namespace ClaudeSessionMonitor.Tests;
+namespace SessionDeck.Tests;
 
 public class CpaUsageApiTests
 {

@@ -1,7 +1,7 @@
 using System.Text;
 using System.Windows.Automation;
 
-namespace ClaudeSessionMonitor;
+namespace SessionDeck;
 
 /// <summary>
 /// UI Automation matching of Windows Terminal tabs. WT exposes every tab (including inactive ones)

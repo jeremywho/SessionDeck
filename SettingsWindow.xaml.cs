@@ -1,6 +1,6 @@
 using System.Windows;
 
-namespace ClaudeSessionMonitor;
+namespace SessionDeck;
 
 internal partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
 {

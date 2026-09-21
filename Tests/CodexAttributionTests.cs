@@ -1,6 +1,6 @@
 using Xunit;
 
-namespace ClaudeSessionMonitor.Tests;
+namespace SessionDeck.Tests;
 
 /// <summary>
 /// Headless Codex threads (the codex plugin's "Codex Companion Task" second opinions, and `codex exec`

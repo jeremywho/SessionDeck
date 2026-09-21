@@ -1,4 +1,4 @@
-namespace ClaudeSessionMonitor;
+namespace SessionDeck;
 
 /// <summary>
 /// Narrow, opt-in switches used to separate the recurring DataGrid and Windows Terminal UIA paths.
@@ -7,9 +7,9 @@ namespace ClaudeSessionMonitor;
 /// </summary>
 internal static class ExperimentOptions
 {
-    internal const string DisableDesktopUiaVariable = "CSM_EXPERIMENT_DISABLE_DESKTOP_UIA";
-    internal const string FreezeGridVariable = "CSM_EXPERIMENT_FREEZE_GRID";
-    internal const string LogPathVariable = "CSM_EXPERIMENT_LOG";
+    internal const string DisableDesktopUiaVariable = "SD_EXPERIMENT_DISABLE_DESKTOP_UIA";
+    internal const string FreezeGridVariable = "SD_EXPERIMENT_FREEZE_GRID";
+    internal const string LogPathVariable = "SD_EXPERIMENT_LOG";
 
     internal static bool DisableDesktopUia => Enabled(DisableDesktopUiaVariable);
     internal static bool FreezeGrid => Enabled(FreezeGridVariable);

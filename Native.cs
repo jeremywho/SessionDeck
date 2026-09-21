@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Text;
 
-namespace ClaudeSessionMonitor;
+namespace SessionDeck;
 
 internal static class Native
 {

@@ -4,7 +4,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace ClaudeSessionMonitor;
+namespace SessionDeck;
 
 /// <summary>
 /// Fetches plan usage straight from the account's usage endpoint, rather than reading whatever
@@ -40,8 +40,8 @@ internal static class UsageApi
     public static async Task<List<UsageMeter>?> FetchAsync(CancellationToken ct = default)
     {
         // Test hook: force the offline/failed-call path so the cache fallback can be exercised
-        // without unplugging anything. Same spirit as CSM_FAKE_UPDATE / CSM_NO_INSTALL.
-        if (Environment.GetEnvironmentVariable("CSM_NO_USAGE_API") == "1") return null;
+        // without unplugging anything. Same spirit as SD_FAKE_UPDATE / SD_NO_INSTALL.
+        if (Environment.GetEnvironmentVariable("SD_NO_USAGE_API") == "1") return null;
 
         try
         {
@@ -54,7 +54,7 @@ internal static class UsageApi
             req.Headers.TryAddWithoutValidation("Authorization", "Bearer " + token);
             req.Headers.TryAddWithoutValidation("anthropic-beta", "oauth-2025-04-20");
             req.Headers.TryAddWithoutValidation("anthropic-version", "2023-06-01");
-            req.Headers.TryAddWithoutValidation("User-Agent", "ClaudeSessionMonitor");
+            req.Headers.TryAddWithoutValidation("User-Agent", "SessionDeck");
 
             using var res = await Http.SendAsync(req, ct);
             if (!res.IsSuccessStatusCode) return null;

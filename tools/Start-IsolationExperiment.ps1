@@ -6,14 +6,14 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
-$exe = Join-Path $repo 'bin\AnimationFreeCpaV1\ClaudeSessionMonitor.exe'
+$exe = Join-Path $repo 'bin\AnimationFreeCpaV1\SessionDeck.exe'
 $watchScript = Join-Path $PSScriptRoot 'Watch-DesktopComposition.ps1'
 
 if (-not (Test-Path -LiteralPath $exe)) {
     throw "Missing experiment build: $exe"
 }
 
-$running = Get-Process -Name ClaudeSessionMonitor -ErrorAction SilentlyContinue
+$running = Get-Process -Name SessionDeck -ErrorAction SilentlyContinue
 if ($running) {
     throw "Claude Session Monitor is already running (PID $($running.Id -join ', ')). Exit it from its tray menu first."
 }
@@ -21,19 +21,19 @@ if ($running) {
 $start = [System.Diagnostics.ProcessStartInfo]::new($exe)
 $start.WorkingDirectory = $repo
 $start.UseShellExecute = $false
-$start.Environment['CSM_NO_INSTALL'] = '1'
-$start.Environment.Remove('CSM_EXPERIMENT_DISABLE_DESKTOP_UIA') | Out-Null
-$start.Environment.Remove('CSM_EXPERIMENT_FREEZE_GRID') | Out-Null
+$start.Environment['SD_NO_INSTALL'] = '1'
+$start.Environment.Remove('SD_EXPERIMENT_DISABLE_DESKTOP_UIA') | Out-Null
+$start.Environment.Remove('SD_EXPERIMENT_FREEZE_GRID') | Out-Null
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-$logDir = Join-Path $env:TEMP 'ClaudeSessionMonitor-Isolation'
+$logDir = Join-Path $env:TEMP 'SessionDeck-Isolation'
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 $logPath = Join-Path $logDir "$stamp-$($Mode.ToLowerInvariant()).tsv"
 $healthPath = Join-Path $logDir "$stamp-$($Mode.ToLowerInvariant())-health.csv"
-$start.Environment['CSM_EXPERIMENT_LOG'] = $logPath
+$start.Environment['SD_EXPERIMENT_LOG'] = $logPath
 
 switch ($Mode) {
-    'NoDesktopUia' { $start.Environment['CSM_EXPERIMENT_DISABLE_DESKTOP_UIA'] = '1' }
-    'FrozenGrid' { $start.Environment['CSM_EXPERIMENT_FREEZE_GRID'] = '1' }
+    'NoDesktopUia' { $start.Environment['SD_EXPERIMENT_DISABLE_DESKTOP_UIA'] = '1' }
+    'FrozenGrid' { $start.Environment['SD_EXPERIMENT_FREEZE_GRID'] = '1' }
 }
 
 Write-Host "Starting instrumented Claude Session Monitor: $Mode"

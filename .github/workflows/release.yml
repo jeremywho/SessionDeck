@@ -23,7 +23,7 @@ jobs:
       # Signing turns on automatically once SIGNING_CERT_BASE64 is set in repo/org secrets.
       # Until then the workflow still runs and ships an UNSIGNED exe.
       SIGNING_AVAILABLE: ${{ secrets.SIGNING_CERT_BASE64 != '' }}
-      ASSET: ClaudeSessionMonitor-${{ inputs.version }}.exe
+      ASSET: SessionDeck-${{ inputs.version }}.exe
     steps:
       - uses: actions/checkout@v4
 
@@ -43,7 +43,7 @@ jobs:
 
       - name: Publish self-contained single-file exe
         run: >
-          dotnet publish ClaudeSessionMonitor.csproj -c Release -r win-x64
+          dotnet publish SessionDeck.csproj -c Release -r win-x64
           --self-contained true
           -p:PublishSingleFile=true
           -p:IncludeNativeLibrariesForSelfExtract=true
@@ -53,7 +53,7 @@ jobs:
 
       - name: Name the asset with the version
         shell: pwsh
-        run: Rename-Item "publish\ClaudeSessionMonitor.exe" "$env:ASSET"
+        run: Rename-Item "publish\SessionDeck.exe" "$env:ASSET"
 
       # --- Code signing -------------------------------------------------------------------
       # Removes the SmartScreen "unknown publisher" warning — but ONLY with a TRUSTED cert

@@ -3,7 +3,7 @@ using System.IO;
 using System.Text;
 using System.Text.Json;
 
-namespace ClaudeSessionMonitor;
+namespace SessionDeck;
 
 /// <summary>Aggregate, privacy-safe results from one rollout ownership probe pass.</summary>
 internal sealed class CodexProbeStats

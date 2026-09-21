@@ -1,7 +1,7 @@
 using System.IO;
 using System.Linq;
 
-namespace ClaudeSessionMonitor;
+namespace SessionDeck;
 
 /// <summary>
 /// Folds headless Codex work back onto the Claude session that started it.

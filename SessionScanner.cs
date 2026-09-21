@@ -4,7 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
-namespace ClaudeSessionMonitor;
+namespace SessionDeck;
 
 /// <summary>
 /// Discovers live sessions from ~/.claude/sessions/&lt;pid&gt;.json (one heartbeat file per live

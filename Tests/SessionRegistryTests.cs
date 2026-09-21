@@ -1,7 +1,7 @@
 using System.IO;
 using Xunit;
 
-namespace ClaudeSessionMonitor.Tests;
+namespace SessionDeck.Tests;
 
 public class SessionRegistryTests
 {
@@ -13,7 +13,7 @@ public class SessionRegistryTests
         // in a static initializer. Keeps the tests away from the real %APPDATA% file, which the
         // installed instance may be rewriting at that very moment.
         DataDir = Path.Combine(Path.GetTempPath(), "csm-tests-" + Guid.NewGuid().ToString("N"));
-        Environment.SetEnvironmentVariable("CSM_DATA_DIR", DataDir);
+        Environment.SetEnvironmentVariable("SD_DATA_DIR", DataDir);
     }
 
     static string RegistryFile => Path.Combine(DataDir, "active-sessions.json");
@@ -26,7 +26,7 @@ public class SessionRegistryTests
     [Fact]
     public void Frozen_snapshot_preserves_the_last_live_set()
     {
-        // Seed two live sessions. This first write also proves the CSM_DATA_DIR redirect works —
+        // Seed two live sessions. This first write also proves the SD_DATA_DIR redirect works —
         // everything below would be meaningless (and dangerous) if writes hit the real %APPDATA%.
         SessionRegistry.Snapshot(new[] { Session("aaa"), Session("bbb") });
         Assert.True(File.Exists(RegistryFile), "registry file was not written to the redirected dir");

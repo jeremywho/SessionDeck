@@ -3,7 +3,7 @@ using System.Globalization;
 using System.IO;
 using System.Text;
 
-namespace ClaudeSessionMonitor;
+namespace SessionDeck;
 
 /// <summary>Low-rate telemetry for instrumented builds. No session names or ids are recorded.</summary>
 internal static class IsolationTelemetry

@@ -1,7 +1,7 @@
 using System.IO;
 using Xunit;
 
-namespace ClaudeSessionMonitor.Tests;
+namespace SessionDeck.Tests;
 
 public sealed class SubagentCounterTests : IDisposable
 {

@@ -1,4 +1,4 @@
-# ClaudeSessionMonitor
+# SessionDeck
 
 A Windows tray app that lists every **live local Claude Code and Codex CLI session** at a glance, lets
 you jump to one, and restores them after a reboot. It reads each CLI's on-disk state — no configuration
@@ -88,15 +88,15 @@ the window's position/size is remembered on close, so it reopens where you left 
 - **Bounded background refresh** — session discovery runs off the UI thread at most every 5s, with
   overlapping passes dropped. Busy heartbeat streams cannot create a scan backlog — no hooks and no
   config changes.
-- Settings persist to `%APPDATA%\ClaudeSessionMonitor\settings.json`; unhandled errors are logged to
-  `%TEMP%\claude-session-monitor-error.log`.
+- Settings persist to `%APPDATA%\SessionDeck\settings.json`; unhandled errors are logged to
+  `%TEMP%\sessiondeck-error.log`.
 - Slow background scans and Windows UI Automation sweeps are recorded in the bounded
-  `%TEMP%\claude-session-monitor-performance.log` for troubleshooting.
+  `%TEMP%\sessiondeck-performance.log` for troubleshooting.
 - `--list` / `--windows` headless modes dump the session list / focus mapping to `%TEMP%`.
 
 ## Install & updates
 The released exe is **self-installing**. Run it once from anywhere and it copies itself to
-**`%LOCALAPPDATA%\Programs\ClaudeSessionMonitor\`** (per-user — no admin), drops a Start Menu
+**`%LOCALAPPDATA%\Programs\SessionDeck\`** (per-user — no admin), drops a Start Menu
 shortcut, and relaunches from there. That per-user location is the whole trick to **seamless
 auto-update**: the app can rewrite its own exe without a UAC prompt.
 
@@ -110,11 +110,11 @@ window position, columns, the live list) is already on disk. If a freshly-update
 on startup, it automatically **rolls back** to the previous exe.
 
 Auto-update is dormant unless the app runs from its install dir, so a `bin\` dev build never
-self-installs or self-updates. (Test hooks: `CSM_INSTALL_DIR` redirects the install dir,
-`CSM_NO_INSTALL=1` skips self-install, `CSM_FAKE_UPDATE=<tag>` forces the update button.)
+self-installs or self-updates. (Test hooks: `SD_INSTALL_DIR` redirects the install dir,
+`SD_NO_INSTALL=1` skips self-install, `SD_FAKE_UPDATE=<tag>` forces the update button.)
 
 ## Session restore
-The app keeps `%APPDATA%\ClaudeSessionMonitor\active-sessions.json` in sync with the live interactive
+The app keeps `%APPDATA%\SessionDeck\active-sessions.json` in sync with the live interactive
 sessions of **both** CLIs (snapshot-on-change). If the machine crashes or reboots, that file still holds
 whatever was running — so on the next launch the app offers a **restore picker**: a checklist of the
 sessions that were running but aren't now, each marked with its provider, reopening the selected ones in
@@ -145,11 +145,11 @@ argument it exits on.
 Requires .NET SDK 10.
 
     dotnet build -c Release
-    bin\Release\net10.0-windows\ClaudeSessionMonitor.exe
+    bin\Release\net10.0-windows\SessionDeck.exe
 
 To produce a distributable single `.exe` (self-contained, no .NET install needed, ~74 MB):
 
-    dotnet publish ClaudeSessionMonitor.csproj -c Release -r win-x64 --self-contained true `
+    dotnet publish SessionDeck.csproj -c Release -r win-x64 --self-contained true `
       -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
       -p:EnableCompressionInSingleFile=true -o bin\publish
 

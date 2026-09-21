@@ -7,7 +7,7 @@ using Application = System.Windows.Application;
 using WpfContextMenu = System.Windows.Controls.ContextMenu;
 using WpfMenuItem = System.Windows.Controls.MenuItem;
 
-namespace ClaudeSessionMonitor;
+namespace SessionDeck;
 
 /// <summary>WPF application shell. Owns the tray icon, the theme palette, and the sessions window.</summary>
 internal sealed class App : Application
@@ -50,7 +50,7 @@ internal sealed class App : Application
         {
             Icon = LoadAppIcon(),
             Visible = true,
-            Text = "Claude Sessions",
+            Text = "Session Deck",
         };
         _trayMenu = BuildTrayMenu();
         _tray.MouseUp += OnTrayMouseUp;   // WPF menu (per-monitor DPI safe), not the WinForms one
@@ -93,7 +93,7 @@ internal sealed class App : Application
         settle.Start();
 
         // Test hook: force the "update ready" button without cutting a real release.
-        var fake = Environment.GetEnvironmentVariable("CSM_FAKE_UPDATE");
+        var fake = Environment.GetEnvironmentVariable("SD_FAKE_UPDATE");
         if (!string.IsNullOrEmpty(fake)) { _window?.ShowUpdateReady(fake); return; }
 
         Updater.UpdateStaged += () => Dispatcher.InvokeAsync(() => _window?.ShowUpdateReady(Updater.StagedTag ?? ""));
@@ -114,7 +114,7 @@ internal sealed class App : Application
     /// debounced inside <see cref="Updater.CheckAsync"/> so repeated opens don't re-run `gh`.</summary>
     void CheckForUpdateOnShow()
     {
-        if (Environment.GetEnvironmentVariable("CSM_FAKE_UPDATE") is { Length: > 0 }) return;
+        if (Environment.GetEnvironmentVariable("SD_FAKE_UPDATE") is { Length: > 0 }) return;
         _ = Updater.CheckAsync();
     }
 
@@ -199,7 +199,7 @@ internal sealed class App : Application
         var orphaned = ComputeOrphaned();
         if (orphaned.Count == 0)
         {
-            _tray.ShowBalloonTip(2500, "Claude Sessions", "No previous sessions to restore.", ToolTipIcon.Info);
+            _tray.ShowBalloonTip(2500, "Session Deck", "No previous sessions to restore.", ToolTipIcon.Info);
             return;
         }
         ShowRestore(orphaned);
@@ -302,7 +302,7 @@ internal sealed class App : Application
         try
         {
             System.IO.File.AppendAllText(
-                System.IO.Path.Combine(System.IO.Path.GetTempPath(), "claude-session-monitor-error.log"),
+                System.IO.Path.Combine(System.IO.Path.GetTempPath(), "sessiondeck-error.log"),
                 $"[{DateTime.Now:o}] {ex}{Environment.NewLine}{Environment.NewLine}");
         }
         catch { }
