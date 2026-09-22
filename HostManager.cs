@@ -211,6 +211,12 @@ internal static class HostManager
         });
     }
 
+    /// <summary>Drop an exited host's record so its row goes away.</summary>
+    public static void Forget(HostRecord rec)
+    {
+        try { File.Delete(Path.Combine(HostsDir, rec.Id + ".json")); } catch { }
+    }
+
     public static HostRecord? ReadRecord(string path)
     {
         for (int i = 0; i < 5; i++)

@@ -25,8 +25,8 @@
                       MouseDown="Tab_MouseDown" AllowDrop="True" Drop="Tab_Drop" Tag="{Binding}">
                 <Border.ContextMenu>
                   <ContextMenu>
-                    <MenuItem Header="Close tab (keep session running)" Click="CloseTabMenu_Click" Tag="{Binding}"/>
-                    <MenuItem Header="Stop session" Click="StopMenu_Click" Tag="{Binding}"/>
+                    <MenuItem Header="Close tab (session keeps running)" Click="CloseTabMenu_Click" Tag="{Binding}"/>
+                    <MenuItem Header="Close &amp; end session" Click="StopMenu_Click" Tag="{Binding}"/>
                     <Separator/>
                     <MenuItem Header="Copy session id" Click="CopyIdMenu_Click" Tag="{Binding}"/>
                     <MenuItem Header="Copy folder" Click="CopyCwdMenu_Click" Tag="{Binding}"/>
@@ -43,7 +43,7 @@
                              Visibility="{Binding ExitedVisibility}"/>
                   <ui:Button Appearance="Transparent" BorderThickness="0" MinHeight="0" MaxHeight="22" Width="22" Padding="0"
                              Margin="6,0,0,0" Click="CloseTab_Click" Tag="{Binding}" ToolTip="Close tab (session keeps running) — middle-click also closes">
-                    <ui:Button.Icon><ui:SymbolIcon Symbol="Dismiss12" FontSize="10"/></ui:Button.Icon>
+                    <ui:Button.Icon><ui:SymbolIcon Symbol="Dismiss24" FontSize="10"/></ui:Button.Icon>
                   </ui:Button>
                 </StackPanel>
               </Border>

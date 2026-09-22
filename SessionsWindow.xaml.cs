@@ -25,6 +25,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
 
     public ObservableCollection<SessionRow> Rows { get; } = new();
     readonly Dictionary<string, SessionRow> _rowsById = new();
+    volatile SessionInfo[] _externalSnapshot = Array.Empty<SessionInfo>();
     public ObservableCollection<UsageMeter> Meters { get; } = new();
     List<UsageMeter>? _liveMeters;      // last successful API fetch; null until one lands
     DateTime _liveAt;                   // when that fetch succeeded
@@ -311,7 +312,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             new Col("Glyph", "", ColGlyph, false, true),
             new Col("Session", "Session", ColSession, false, true),
             new Col("CtxPct", "Context", ColCtxPct, false, true),
-            new Col("Idle", "Idle", ColIdle, false, true),
+            new Col("End", "", ColEnd, false, true),
             new Col("Status", "Status", ColStatus, true, false),
             new Col("Pid", "PID", ColPid, true, false),
             new Col("Id", "Id", ColId, true, false),
@@ -392,14 +393,8 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
 
     void NewSessionButton_Click(object sender, RoutedEventArgs e) => OpenNewClaudeInDeck(null);
 
-    void NewTabButton_Click(object sender, RoutedEventArgs e) =>
-        SessionLauncher.LaunchNew(null, _app.Settings.ResumeFlags, LaunchTarget.LastWindow);
-
     // Codex has no --name, so there are no named counterparts to these two — see NewCodexCommand.
     void NewCodexSessionButton_Click(object sender, RoutedEventArgs e) => OpenNewCodexInDeck();
-
-    void NewCodexTabButton_Click(object sender, RoutedEventArgs e) =>
-        SessionLauncher.LaunchNewCodex(_app.Settings.CodexFlags, LaunchTarget.LastWindow);
 
     void NewNamedSessionButton_Click(object sender, RoutedEventArgs e)
     {
@@ -407,17 +402,43 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         if (prompt.ShowDialog() == true) OpenNewClaudeInDeck(prompt.SessionName);
     }
 
-    void NewNamedTabButton_Click(object sender, RoutedEventArgs e) =>
-        PromptThenLaunch(LaunchTarget.LastWindow);
+    void SettingsButton_Click(object sender, RoutedEventArgs e) => _app.ShowSettings();
 
-    void PromptThenLaunch(LaunchTarget target)
+    void AdoptButton_Click(object sender, RoutedEventArgs e)
     {
-        var prompt = new NamePromptWindow(this);
-        if (prompt.ShowDialog() == true)
-            SessionLauncher.LaunchNew(prompt.SessionName, _app.Settings.ResumeFlags, target);
+        PerformanceLog.Write($"adopt-button external={_externalSnapshot.Length}");
+        try
+        {
+            var picker = new AdoptWindow(this, _externalSnapshot);
+            picker.Show();
+            picker.Activate();
+            PerformanceLog.Write($"adopt-picker shown visible={picker.IsVisible} left={picker.Left} top={picker.Top} w={picker.ActualWidth} h={picker.ActualHeight}");
+        }
+        catch (Exception ex)
+        {
+            App.LogError(ex);
+            LiveLabel.Text = "Could not open the adopt picker: " + ex.Message;
+        }
     }
 
-    void SettingsButton_Click(object sender, RoutedEventArgs e) => _app.ShowSettings();
+    /// <summary>The X at the end of a row: end the session (host and CLI). An exited host's row is
+    /// just removed. Nothing here asks — the X only appears on hover, and a stopped session can be
+    /// resumed from the restore picker.</summary>
+    void EndSession_Click(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        if (sender is not FrameworkElement { Tag: SessionRow row }) return;
+        var tab = Deck.FindByHost(row.Host.Id);
+        if (row.Host.HasExited)
+        {
+            if (tab != null) Deck.Close(tab);
+            HostManager.Forget(row.Host);
+            RequestRefresh();
+            return;
+        }
+        HostManager.Kill(row.Host);
+        if (tab != null) Deck.Close(tab);
+    }
 
     // ---------------- deck: sessions hosted inside this window ----------------
 
@@ -595,7 +616,6 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
                 var found = CodexAttribution.Fold(claude, codex, parents);
                 long attributionMs = phase.ElapsedMilliseconds;
                 phase.Restart();
-                SessionRegistry.Snapshot(found.Where(IsRestorable).ToList());
                 long registryMs = phase.ElapsedMilliseconds;
                 total.Stop();
                 System.Threading.Interlocked.Exchange(ref _lastScanMs, total.ElapsedMilliseconds);
@@ -611,7 +631,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
                     CodexRows: found.Count(s => s.Provider == SessionProvider.Codex));
             });
             var apply = Stopwatch.StartNew();
-            var changes = ApplyRefresh(scan.Sessions);
+            var changes = ApplyRefresh(scan.Sessions, HostManager.Discover(), Native.BuildParentMap());
             apply.Stop();
             if (ExperimentOptions.TelemetryActive)
             {
@@ -637,9 +657,27 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         finally { System.Threading.Interlocked.Exchange(ref _scanRunning, 0); }
     }
 
-    /// <summary>Apply a completed discovery snapshot to WPF-bound state on the dispatcher.</summary>
-    (int Added, int Removed, int PropertyChanges) ApplyRefresh(List<SessionInfo> live)
+    /// <summary>
+    /// The list is the deck's hosts, one row each, whether or not a tab is open. The machine-wide
+    /// scan only enriches them: a scanned session belongs to a host when its id matches (Claude,
+    /// whose id the deck chose) or when its process descends from the host's child (Codex, which
+    /// names its own thread). Everything the scan found that belongs to no host is remembered for
+    /// the Adopt picker and never becomes a row.
+    /// </summary>
+    (int Added, int Removed, int PropertyChanges) ApplyRefresh(List<SessionInfo> live, List<Host.HostRecord> hosts, Dictionary<int, int> parents)
     {
+        var claimed = new HashSet<SessionInfo>();
+        var byHost = new List<(Host.HostRecord Host, SessionInfo Info)>();
+        foreach (var h in hosts)
+        {
+            SessionInfo? match = null;
+            if (h.SessionId.Length > 0)
+                match = live.FirstOrDefault(s => string.Equals(s.SessionId, h.SessionId, StringComparison.OrdinalIgnoreCase));
+            match ??= live.FirstOrDefault(s => !claimed.Contains(s) && s.Pid > 0 && DescendsFrom(s.Pid, h.ChildPid, parents));
+            if (match != null) claimed.Add(match);
+            byHost.Add((h, match ?? SessionRow.Placeholder(h)));
+        }
+
         var seen = new HashSet<string>();
         int added = 0;
         int removed = 0;
@@ -647,13 +685,11 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         bool mutateGrid = !ExperimentOptions.FreezeGrid || Rows.Count == 0;
         if (mutateGrid)
         {
-            var hosted = new HashSet<string>(Deck.OpenHosts.Select(h => h.SessionId).Where(id => id.Length > 0), StringComparer.OrdinalIgnoreCase);
-            foreach (var s in live)
+            foreach (var (h, s) in byHost)
             {
-                seen.Add(s.SessionId);
-                if (_rowsById.TryGetValue(s.SessionId, out var row)) propertyChanges += row.Update(s);
-                else { row = new SessionRow(s); _rowsById[s.SessionId] = row; Rows.Add(row); added++; }
-                row.SetHosted(hosted.Contains(s.SessionId));
+                seen.Add(h.Id);
+                if (_rowsById.TryGetValue(h.Id, out var row)) propertyChanges += row.Update(s);
+                else { row = new SessionRow(h, s); _rowsById[h.Id] = row; Rows.Add(row); added++; }
             }
             for (int i = Rows.Count - 1; i >= 0; i--)
                 if (!seen.Contains(Rows[i].SessionId))
@@ -664,16 +700,27 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
                 }
         }
 
-        _sessionsSnapshot = live.ToArray();
+        _sessionsSnapshot = byHost.Select(x => x.Info).ToArray();
+        _externalSnapshot = live.Where(s => !claimed.Contains(s)).ToArray();
+        SessionRegistry.Snapshot(byHost.Where(x => !x.Host.HasExited && x.Info.SessionId.Length > 0 && IsRestorable(x.Info)).Select(x => x.Info).ToList());
 
-        // The count stays short and the provider split goes in the tooltip: the legend beside it
-        // already runs to the window edge at the 460px minimum, so a longer label overlaps it.
-        int codex = live.Count(s => s.Provider == SessionProvider.Codex);
-        LiveLabel.Text = $"{live.Count} live session{(live.Count == 1 ? "" : "s")}";
-        LiveLabel.ToolTip = codex > 0 ? $"{live.Count - codex} Claude · {codex} Codex" : null;
+        int hostsLive = hosts.Count(h => !h.HasExited);
+        int external = _externalSnapshot.Count(s => s.Kind != "companion");
+        LiveLabel.Text = $"{hostsLive} in deck" + (external > 0 ? $" · {external} elsewhere" : "");
+        LiveLabel.ToolTip = external > 0 ? "Sessions in other terminals can be brought in with Adopt" : null;
 
         RefreshAccount();
         return (added, removed, propertyChanges);
+    }
+
+    static bool DescendsFrom(int pid, int ancestor, Dictionary<int, int> parents)
+    {
+        for (int hops = 0; hops < 12 && pid > 0; hops++)
+        {
+            if (pid == ancestor) return true;
+            if (!parents.TryGetValue(pid, out pid)) return false;
+        }
+        return false;
     }
 
     /// <summary>Is this a session a human is sitting in front of, and could therefore want back?</summary>
@@ -873,8 +920,18 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     void Grid_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
         if (RowAt(e.OriginalSource) is not { } row) return;
-        var tab = Deck.FindBySession(row.SessionId);
-        if (tab != null) Deck.Activate(tab);
+        if (e.OriginalSource is DependencyObject d && FindAncestor<System.Windows.Controls.Primitives.ButtonBase>(d) != null) return;
+        Deck.Open(row.Host);
+    }
+
+    static T? FindAncestor<T>(DependencyObject d) where T : DependencyObject
+    {
+        while (d != null && d is not DataGridRow)
+        {
+            if (d is T t) return t;
+            d = VisualTreeHelper.GetParent(d);
+        }
+        return null;
     }
 
     readonly ContextMenu _rowMenu = new();
@@ -884,22 +941,19 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         if (RowAt(e.OriginalSource) is not { } row || row.IsBackgroundAgent) return;
         e.Handled = true;
         _rowMenu.Items.Clear();
-        var tab = Deck.FindBySession(row.SessionId);
-        if (tab != null)
+        var tab = Deck.FindByHost(row.Host.Id);
+        if (row.Host.HasExited)
         {
-            _rowMenu.Items.Add(Item("Show tab", () => Deck.Activate(tab)));
-            _rowMenu.Items.Add(Item("Stop session", () => Deck.Stop(tab)));
+            _rowMenu.Items.Add(Item("Remove", () => { if (tab != null) Deck.Close(tab); HostManager.Forget(row.Host); RequestRefresh(); }));
         }
         else
         {
-            _rowMenu.Items.Add(Item("Focus terminal window", () =>
-            {
-                if (!WindowActivator.Activate(row.Info)) LiveLabel.Text = $"Could not find a window for PID {row.Info.Pid}.";
-            }));
-            _rowMenu.Items.Add(Item("Adopt into deck…", () => AdoptIntoDeck(row.Info)));
+            _rowMenu.Items.Add(Item(tab != null ? "Show tab" : "Open tab", () => Deck.Open(row.Host)));
+            if (tab != null) _rowMenu.Items.Add(Item("Close tab (keep running)", () => Deck.Close(tab)));
+            _rowMenu.Items.Add(Item("End session", () => { HostManager.Kill(row.Host); if (tab != null) Deck.Close(tab); }));
         }
         _rowMenu.Items.Add(new Separator());
-        _rowMenu.Items.Add(Item("Copy session id", () => TrySetClipboard(row.SessionId)));
+        _rowMenu.Items.Add(Item("Copy session id", () => TrySetClipboard(row.Host.SessionId)));
         _rowMenu.Items.Add(Item("Copy folder", () => TrySetClipboard(row.Cwd)));
         _rowMenu.PlacementTarget = SessionsGrid;
         _rowMenu.Placement = PlacementMode.MousePoint;
@@ -926,9 +980,8 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     /// Bring an external session into the deck: end its process tree, then resume the same
     /// conversation in a hosted tab. The kill is the destructive half, so it is confirmed first.
     /// </summary>
-    void AdoptIntoDeck(SessionInfo s)
+    public void AdoptIntoDeck(SessionInfo s, bool confirm = true)
     {
-        PerformanceLog.Write($"adopt-start pid={s.Pid} transcript={(s.TranscriptPath.Length > 0 && File.Exists(s.TranscriptPath))}");
         string what = s.Provider == SessionProvider.Codex ? "Codex thread" : "Claude session";
         if (s.Provider == SessionProvider.Claude && (s.TranscriptPath.Length == 0 || !File.Exists(s.TranscriptPath)))
         {
@@ -938,11 +991,14 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
                 "Adopt into deck", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
-        var answer = System.Windows.MessageBox.Show(this,
-            $"Stop the external {what} \"{s.DisplayName}\" (PID {s.Pid}) and resume it in a deck tab?\n\n" +
-            "Anything it is doing right now is interrupted; the conversation itself is kept.",
-            "Adopt into deck", MessageBoxButton.OKCancel, MessageBoxImage.Question);
-        if (answer != MessageBoxResult.OK) return;
+        if (confirm)
+        {
+            var answer = System.Windows.MessageBox.Show(this,
+                $"Stop the external {what} \"{s.DisplayName}\" (PID {s.Pid}) and resume it in a deck tab?\n\n" +
+                "Anything it is doing right now is interrupted; the conversation itself is kept.",
+                "Adopt into deck", MessageBoxButton.OKCancel, MessageBoxImage.Question);
+            if (answer != MessageBoxResult.OK) return;
+        }
         try
         {
             using var p = Process.GetProcessById(s.Pid);
@@ -973,11 +1029,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             LiveLabel.Text = "Background agent — it has no terminal window to focus.";
             return;
         }
-        // A session this app hosts opens in its own tab; anything else is in an external terminal.
-        var tab = Deck.FindBySession(row.SessionId);
-        if (tab != null) { Deck.Activate(tab); return; }
-        if (!WindowActivator.Activate(row.Info))
-            LiveLabel.Text = $"Could not find a window for PID {row.Info.Pid}.";
+        Deck.Open(row.Host);
     }
 
     protected override void OnClosing(CancelEventArgs e)

@@ -15,7 +15,35 @@ internal sealed class SessionRow : INotifyPropertyChanged
     public string SessionId { get; }
     SessionInfo _s;
 
-    public SessionRow(SessionInfo s) { SessionId = s.SessionId; _s = s; }
+    /// <summary>The deck host this row stands for. Rows exist only for hosts; the scanner's
+    /// <see cref="SessionInfo"/> is what it knows about the CLI running inside the host, and it can be
+    /// a placeholder before the CLI has registered itself.</summary>
+    public Host.HostRecord Host { get; }
+
+    public SessionRow(Host.HostRecord host, SessionInfo s)
+    {
+        Host = host;
+        SessionId = host.Id;
+        _s = s;
+        _hosted = true;
+    }
+
+    /// <summary>A row with no real host behind it, for tests of the view-model's own derivations.</summary>
+    public SessionRow(SessionInfo s) : this(new Host.HostRecord { Id = s.SessionId, SessionId = s.SessionId, Provider = s.Provider.ToString(), Cwd = s.Cwd, ChildPid = s.Pid }, s) { }
+
+    /// <summary>What the scanner has not told us yet: a row for a host whose CLI has not written its
+    /// registry entry (a Codex TUI before its first turn, a Claude that is still starting).</summary>
+    public static SessionInfo Placeholder(Host.HostRecord h) => new()
+    {
+        Provider = string.Equals(h.Provider, "Codex", StringComparison.OrdinalIgnoreCase) ? SessionProvider.Codex : SessionProvider.Claude,
+        Pid = h.ChildPid,
+        SessionId = h.SessionId,
+        Cwd = h.Cwd,
+        Status = h.HasExited ? "exited" : "",
+        Kind = "interactive",
+        StartedAt = h.StartedAt,
+        UpdatedAt = h.StartedAt,
+    };
 
     public int Update(SessionInfo s)
     {
@@ -75,7 +103,17 @@ internal sealed class SessionRow : INotifyPropertyChanged
     public SessionInfo Info => _s;
 
     public int Pid => _s.Pid;
-    public string Name => IsBackgroundAgent ? CompanionName(_s.DisplayName) : _s.DisplayName;
+    public string Name =>
+        IsBackgroundAgent ? CompanionName(_s.DisplayName)
+        : _s.Name.Length > 0 ? _s.Name
+        : _s.Title.Length > 0 && !LooksLikeId(_s.Title) ? _s.Title
+        : Host.Title.Length > 0 && !LooksLikeId(Host.Title) ? Host.Title
+        : _s.Provider == SessionProvider.Codex ? "Codex"
+        : _s.SessionId.Length > 0 ? _s.ShortId
+        : Host.Provider;
+
+    /// <summary>A bare uuid or hex handle is not a name worth showing; the provider's word is.</summary>
+    static bool LooksLikeId(string s) => Regex.IsMatch(s.Trim(), "^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$|^[0-9a-fA-F]{12,}$");
 
     // --- background agents (companion threads driven by another app, not a terminal) ---
 
@@ -104,27 +142,14 @@ internal sealed class SessionRow : INotifyPropertyChanged
         return n.Length > 0 ? n : "Codex agent";
     }
     public string Status => _s.Status;                            // raw status (optional column)
-    public SessionState State => _s.ApiError ? SessionState.Error : SessionStateMap.FromStatus(_s.Status);
+    public bool HostExited => Host.HasExited;
+    public SessionState State => Host.HasExited ? SessionState.Idle : _s.ApiError ? SessionState.Error : SessionStateMap.FromStatus(_s.Status);
     public bool ApiError => _s.ApiError;
 
     /// <summary>When the status last changed — secondary sort key (most-recent-first within each group).</summary>
     public DateTime LastChanged => _s.StatusUpdatedAt > DateTime.MinValue ? _s.StatusUpdatedAt : _s.UpdatedAt;
 
-    // --- hosted in this app's deck (set by the window from the live host records) ---
-    bool _hosted;
-    public bool IsHosted => _hosted;
-    public string HostedGlyph => _hosted ? "\u25A3" : "";
-
-    public void SetHosted(bool hosted)
-    {
-        if (_hosted == hosted) return;
-        _hosted = hosted;
-        var h = PropertyChanged;
-        if (h == null) return;
-        h(this, new PropertyChangedEventArgs(nameof(IsHosted)));
-        h(this, new PropertyChangedEventArgs(nameof(HostedGlyph)));
-        h(this, new PropertyChangedEventArgs(nameof(RowTooltip)));
-    }
+    readonly bool _hosted;
 
     // --- virtual desktop (set by the throttled resolver, independent of the status scan) ---
     int _desktopIndex = -1;       // 0 = Desktop 1, 1 = Desktop 2, …; -1 = unknown
@@ -181,8 +206,8 @@ internal sealed class SessionRow : INotifyPropertyChanged
             };
             if (IsBackgroundAgent)
                 lines.Insert(1, "Background agent — driven by another app; no terminal window");
-            if (_hosted)
-                lines.Insert(1, "Hosted in this deck — click to show its tab");
+            if (Host.HasExited)
+                lines.Insert(1, "Session ended — click the X to remove");
             lines.AddRange(new[]
             {
                 $"Context: {ContextPct}% ({ContextTokensDisplay} of {Window / 1000}k)",
@@ -196,7 +221,7 @@ internal sealed class SessionRow : INotifyPropertyChanged
             return string.Join("\n", lines);
         }
     }
-    public int SortPriority => State switch
+    public int SortPriority => Host.HasExited ? 8 : State switch
     {
         SessionState.Error => 0,      // API error / stuck — top
         SessionState.Awaiting => 1,   // needs your feedback

@@ -113,7 +113,7 @@
     <Border Grid.Row="1" Background="{DynamicResource SurfaceBrush}">
       <Grid>
         <Grid.ColumnDefinitions>
-          <ColumnDefinition x:Name="ListColumn" Width="460" MinWidth="380"/>
+          <ColumnDefinition x:Name="ListColumn" Width="400" MinWidth="320"/>
           <ColumnDefinition Width="Auto"/>
           <ColumnDefinition Width="*" MinWidth="300"/>
         </Grid.ColumnDefinitions>
@@ -196,10 +196,6 @@
                                      Foreground="{DynamicResource Fg3Brush}" VerticalAlignment="Center"/>
                         </StackPanel>
                       </Border>
-                      <TextBlock DockPanel.Dock="Left" Text="{Binding HostedGlyph}" FontSize="9" VerticalAlignment="Center"
-                                 Margin="0,0,6,0" Foreground="{DynamicResource BlueBrush}"
-                                 Visibility="{Binding IsHosted, Converter={StaticResource BoolToVis}}"
-                                 ToolTip="Hosted in this deck"/>
                       <TextBlock Text="{Binding Name}" FontSize="14.5" VerticalAlignment="Center"
                                  Foreground="{DynamicResource FgBrush}" TextTrimming="CharacterEllipsis"/>
                     </DockPanel>
@@ -250,15 +246,45 @@
               </DataGridTemplateColumn.CellTemplate>
             </DataGridTemplateColumn>
 
-            <DataGridTemplateColumn x:Name="ColIdle" Width="94" Header="IDLE" HeaderStyle="{StaticResource HdrRightInset}">
+            <DataGridTemplateColumn x:Name="ColEnd" Width="44" CanUserResize="False" CanUserReorder="False">
               <DataGridTemplateColumn.CellTemplate>
                 <DataTemplate>
-                  <!-- transparent Border = full-cell hover target for the per-row details tooltip -->
                   <Border Background="Transparent" ToolTip="{Binding RowTooltip}"
                           ToolTipService.InitialShowDelay="250" ToolTipService.ShowDuration="60000">
-                    <TextBlock Text="{Binding IdleDisplay}" FontFamily="Cascadia Mono, Consolas" FontSize="12"
-                               HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,16,0"
-                               Foreground="{DynamicResource Fg3Brush}"/>
+                    <Button x:Name="EndButton" Width="26" Height="26" Padding="0" BorderThickness="0" Background="Transparent"
+                            HorizontalAlignment="Center" VerticalAlignment="Center" Cursor="Hand"
+                            Click="EndSession_Click" Tag="{Binding}" ToolTip="End this session">
+                      <Button.Style>
+                        <Style TargetType="Button">
+                          <Setter Property="Opacity" Value="0"/>
+                          <Setter Property="Template">
+                            <Setter.Value>
+                              <ControlTemplate TargetType="Button">
+                                <Border x:Name="Bg" CornerRadius="6" Background="Transparent">
+                                  <TextBlock Text="&#xE711;" FontFamily="Segoe MDL2 Assets" FontSize="11"
+                                             Foreground="{DynamicResource Fg2Brush}"
+                                             HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                  <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Bg" Property="Background" Value="{DynamicResource RedBrush}"/>
+                                  </Trigger>
+                                </ControlTemplate.Triggers>
+                              </ControlTemplate>
+                            </Setter.Value>
+                          </Setter>
+                          <Style.Triggers>
+                            <DataTrigger Binding="{Binding RelativeSource={RelativeSource AncestorType=DataGridRow}, Path=IsMouseOver}" Value="True">
+                              <Setter Property="Opacity" Value="1"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding HostExited}" Value="True">
+                              <Setter Property="Opacity" Value="1"/>
+                              <Setter Property="ToolTip" Value="Session ended — remove"/>
+                            </DataTrigger>
+                          </Style.Triggers>
+                        </Style>
+                      </Button.Style>
+                    </Button>
                   </Border>
                 </DataTemplate>
               </DataGridTemplateColumn.CellTemplate>
@@ -289,71 +315,39 @@
           <Border.Effect>
             <DropShadowEffect BlurRadius="14" ShadowDepth="2" Opacity="0.45"/>
           </Border.Effect>
-          <!-- One row per CLI, each led by its provider mark so the rows don't need labels. Within a
-               row: two groups, divider between — new WINDOW on the left, new TAB in the last-used
-               terminal on the right; plain then named within each group.
-               The Codex row is SHORTER on purpose: codex has no name argument (it rejects one), because
-               a Codex thread is named from inside the TUI once it's running, so the two "named"
-               buttons have no Codex equivalent to point at. -->
-          <StackPanel>
-            <StackPanel Orientation="Horizontal">
-              <!-- Fixed width, not auto: ✳ and ◆ measure differently, and letting each row's glyph set
-                   its own width knocked the two rows ~4px out of alignment with each other. -->
-              <TextBlock Text="✳" FontSize="10" Width="12" TextAlignment="Center"
-                         VerticalAlignment="Center" Margin="4,0,7,0"
-                         ToolTip="Claude Code" Foreground="{DynamicResource ClaudeMarkBrush}"/>
-              <ui:Button x:Name="NewSessionButton" Appearance="Transparent" BorderThickness="0" MinHeight="0" MaxHeight="30" Width="36" Padding="0"
-                         VerticalAlignment="Center" VerticalContentAlignment="Center" FontSize="15"
-                         Click="NewSessionButton_Click" ToolTip="New Claude session — in a deck tab">
-                <ui:Button.Icon><ui:SymbolIcon Symbol="PanelRightContract20"/></ui:Button.Icon>
-              </ui:Button>
-              <ui:Button x:Name="NewNamedSessionButton" Appearance="Transparent" BorderThickness="0" MinHeight="0" MaxHeight="30" Width="36" Padding="0" Margin="2,0,0,0"
-                         VerticalAlignment="Center" VerticalContentAlignment="Center" FontSize="15"
-                         Click="NewNamedSessionButton_Click" ToolTip="New named Claude session — in a deck tab…">
-                <ui:Button.Icon><ui:SymbolIcon Symbol="Rename24"/></ui:Button.Icon>
-              </ui:Button>
+          <StackPanel Orientation="Horizontal">
+            <TextBlock Text="✳" FontSize="10" Width="12" TextAlignment="Center"
+                       VerticalAlignment="Center" Margin="4,0,7,0"
+                       ToolTip="Claude Code" Foreground="{DynamicResource ClaudeMarkBrush}"/>
+            <ui:Button x:Name="NewSessionButton" Appearance="Transparent" BorderThickness="0" MinHeight="0" MaxHeight="30" Width="36" Padding="0"
+                       VerticalAlignment="Center" VerticalContentAlignment="Center" FontSize="15"
+                       Click="NewSessionButton_Click" ToolTip="New Claude session">
+              <ui:Button.Icon><ui:SymbolIcon Symbol="AddCircle24"/></ui:Button.Icon>
+            </ui:Button>
+            <ui:Button x:Name="NewNamedSessionButton" Appearance="Transparent" BorderThickness="0" MinHeight="0" MaxHeight="30" Width="36" Padding="0" Margin="2,0,0,0"
+                       VerticalAlignment="Center" VerticalContentAlignment="Center" FontSize="15"
+                       Click="NewNamedSessionButton_Click" ToolTip="New named Claude session…">
+              <ui:Button.Icon><ui:SymbolIcon Symbol="Rename24"/></ui:Button.Icon>
+            </ui:Button>
 
-              <!-- Carries the whole window-vs-tab distinction (the "named" glyph repeats in both
-                   groups), so it has to actually be visible — BorderStrongBrush was not. -->
-              <Border Width="1" Margin="7,4,7,4" Opacity="0.55" Background="{DynamicResource Fg3Brush}"/>
+            <Border Width="1" Margin="7,4,7,4" Opacity="0.55" Background="{DynamicResource Fg3Brush}"/>
 
-              <ui:Button x:Name="NewTabButton" Appearance="Transparent" BorderThickness="0" MinHeight="0" MaxHeight="30" Width="36" Padding="0"
-                         VerticalAlignment="Center" VerticalContentAlignment="Center" FontSize="15"
-                         Click="NewTabButton_Click" ToolTip="New Claude session — external Windows Terminal tab">
-                <ui:Button.Icon><ui:SymbolIcon Symbol="TabAdd24"/></ui:Button.Icon>
-              </ui:Button>
-              <ui:Button x:Name="NewNamedTabButton" Appearance="Transparent" BorderThickness="0" MinHeight="0" MaxHeight="30" Width="36" Padding="0" Margin="2,0,0,0"
-                         VerticalAlignment="Center" VerticalContentAlignment="Center" FontSize="15"
-                         Click="NewNamedTabButton_Click" ToolTip="New named Claude session — external Windows Terminal tab…">
-                <ui:Button.Icon><ui:SymbolIcon Symbol="Rename24"/></ui:Button.Icon>
-              </ui:Button>
-            </StackPanel>
+            <TextBlock Text="◆" FontSize="10" Width="12" TextAlignment="Center"
+                       VerticalAlignment="Center" Margin="0,0,7,0"
+                       ToolTip="Codex" Foreground="{DynamicResource CodexMarkBrush}"/>
+            <ui:Button x:Name="NewCodexSessionButton" Appearance="Transparent" BorderThickness="0" MinHeight="0" MaxHeight="30" Width="36" Padding="0"
+                       VerticalAlignment="Center" VerticalContentAlignment="Center" FontSize="15"
+                       Click="NewCodexSessionButton_Click" ToolTip="New Codex session">
+              <ui:Button.Icon><ui:SymbolIcon Symbol="AddCircle24"/></ui:Button.Icon>
+            </ui:Button>
 
-            <Border Height="1" Margin="4,5,4,5" Opacity="0.4" Background="{DynamicResource Fg3Brush}"/>
+            <Border Width="1" Margin="7,4,7,4" Opacity="0.55" Background="{DynamicResource Fg3Brush}"/>
 
-            <StackPanel Orientation="Horizontal">
-              <TextBlock Text="◆" FontSize="10" Width="12" TextAlignment="Center"
-                         VerticalAlignment="Center" Margin="4,0,7,0"
-                         ToolTip="Codex" Foreground="{DynamicResource CodexMarkBrush}"/>
-              <ui:Button x:Name="NewCodexSessionButton" Appearance="Transparent" BorderThickness="0" MinHeight="0" MaxHeight="30" Width="36" Padding="0"
-                         VerticalAlignment="Center" VerticalContentAlignment="Center" FontSize="15"
-                         Click="NewCodexSessionButton_Click" ToolTip="New Codex session — in a deck tab">
-                <ui:Button.Icon><ui:SymbolIcon Symbol="PanelRightContract20"/></ui:Button.Icon>
-              </ui:Button>
-
-              <!-- Empty stand-in for Claude's "named" button. Not dead markup: it holds the Codex row's
-                   divider and tab button in the same columns as the row above, which is the only reason
-                   the two rows read as a grid. Its width must track the buttons' (36 + 2 margin). -->
-              <Border Width="36" Margin="2,0,0,0" Background="Transparent" IsHitTestVisible="False"/>
-
-              <Border Width="1" Margin="7,4,7,4" Opacity="0.55" Background="{DynamicResource Fg3Brush}"/>
-
-              <ui:Button x:Name="NewCodexTabButton" Appearance="Transparent" BorderThickness="0" MinHeight="0" MaxHeight="30" Width="36" Padding="0"
-                         VerticalAlignment="Center" VerticalContentAlignment="Center" FontSize="15"
-                         Click="NewCodexTabButton_Click" ToolTip="New Codex session — external Windows Terminal tab">
-                <ui:Button.Icon><ui:SymbolIcon Symbol="TabAdd24"/></ui:Button.Icon>
-              </ui:Button>
-            </StackPanel>
+            <ui:Button x:Name="AdoptButton" Appearance="Transparent" BorderThickness="0" MinHeight="0" MaxHeight="30" Width="36" Padding="0"
+                       VerticalAlignment="Center" VerticalContentAlignment="Center" FontSize="15"
+                       Click="AdoptButton_Click" ToolTip="Adopt a session from another terminal…">
+              <ui:Button.Icon><ui:SymbolIcon Symbol="ArrowImport24"/></ui:Button.Icon>
+            </ui:Button>
           </StackPanel>
         </Border>
 
@@ -364,7 +358,7 @@
             <TextBlock x:Name="LiveLabel" DockPanel.Dock="Left" VerticalAlignment="Center" FontSize="11.5"
                        Foreground="{DynamicResource Fg3Brush}" Text="Starting…"/>
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-              <StackPanel Orientation="Horizontal" Margin="0,0,14,0">
+              <StackPanel Orientation="Horizontal" Margin="0,0,10,0">
                 <Grid Width="13" Height="13" VerticalAlignment="Center">
                   <Ellipse Width="13" Height="13" Fill="{DynamicResource RedBrush}"/>
                   <TextBlock Text="!" Foreground="White" FontSize="9" FontWeight="Bold"
@@ -373,7 +367,7 @@
                 <TextBlock Text="Error" Margin="6,0,0,0" FontSize="11.5" VerticalAlignment="Center"
                            Foreground="{DynamicResource Fg2Brush}"/>
               </StackPanel>
-              <StackPanel Orientation="Horizontal" Margin="0,0,14,0">
+              <StackPanel Orientation="Horizontal" Margin="0,0,10,0">
                 <Grid Width="13" Height="13" VerticalAlignment="Center">
                   <Ellipse Width="13" Height="13" Fill="{DynamicResource GreenBrush}"/>
                   <TextBlock Text="&#x2713;" Foreground="White" FontSize="8" FontWeight="Bold"
@@ -382,16 +376,10 @@
                 <TextBlock Text="Completed" Margin="6,0,0,0" FontSize="11.5" VerticalAlignment="Center"
                            Foreground="{DynamicResource Fg2Brush}"/>
               </StackPanel>
-              <StackPanel Orientation="Horizontal" Margin="0,0,14,0">
+              <StackPanel Orientation="Horizontal" Margin="0,0,10,0">
                 <Ellipse Width="13" Height="13" Stroke="{DynamicResource AmberBrush}" StrokeThickness="2"
                          Fill="Transparent" VerticalAlignment="Center"/>
                 <TextBlock Text="Awaiting" Margin="6,0,0,0" FontSize="11.5" VerticalAlignment="Center"
-                           Foreground="{DynamicResource Fg2Brush}"/>
-              </StackPanel>
-              <StackPanel Orientation="Horizontal" Margin="0,0,14,0">
-                <Ellipse Width="13" Height="13" Stroke="{DynamicResource SlateBrush}" StrokeThickness="2"
-                         Fill="Transparent" VerticalAlignment="Center"/>
-                <TextBlock Text="Idle" Margin="6,0,0,0" FontSize="11.5" VerticalAlignment="Center"
                            Foreground="{DynamicResource Fg2Brush}"/>
               </StackPanel>
               <StackPanel Orientation="Horizontal">
