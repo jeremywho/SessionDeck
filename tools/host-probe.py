@@ -80,7 +80,8 @@ def main():
     if "--send" in args:
         send = args[args.index("--send") + 1]
     s, buf = handshake(rec["Port"], rec["Token"])
-    send_text(s, json.dumps({"type": "resize", "cols": 120, "rows": 30}))
+    if "--cols" in args and "--rows" in args:
+        send_text(s, json.dumps({"type": "resize", "cols": int(args[args.index("--cols") + 1]), "rows": int(args[args.index("--rows") + 1])}))
     if send is not None:
         send_text(s, json.dumps({"type": "input", "data": send}))
     s.settimeout(2 if not follow else 60)
