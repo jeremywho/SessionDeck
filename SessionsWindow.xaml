@@ -138,7 +138,9 @@
                   CanUserSortColumns="False" CanUserReorderColumns="True" CanUserResizeColumns="True"
                   SelectionMode="Single" RowHeight="46" ColumnHeaderHeight="34"
                   Foreground="{DynamicResource FgBrush}"
-                  MouseDoubleClick="Grid_MouseDoubleClick">
+                  MouseDoubleClick="Grid_MouseDoubleClick"
+                  MouseLeftButtonUp="Grid_MouseLeftButtonUp"
+                  PreviewMouseRightButtonUp="Grid_MouseRightButtonUp">
           <DataGrid.CellStyle>
             <Style TargetType="DataGridCell">
               <Setter Property="BorderThickness" Value="0"/>
@@ -194,6 +196,10 @@
                                      Foreground="{DynamicResource Fg3Brush}" VerticalAlignment="Center"/>
                         </StackPanel>
                       </Border>
+                      <TextBlock DockPanel.Dock="Left" Text="{Binding HostedGlyph}" FontSize="9" VerticalAlignment="Center"
+                                 Margin="0,0,6,0" Foreground="{DynamicResource BlueBrush}"
+                                 Visibility="{Binding IsHosted, Converter={StaticResource BoolToVis}}"
+                                 ToolTip="Hosted in this deck"/>
                       <TextBlock Text="{Binding Name}" FontSize="14.5" VerticalAlignment="Center"
                                  Foreground="{DynamicResource FgBrush}" TextTrimming="CharacterEllipsis"/>
                     </DockPanel>

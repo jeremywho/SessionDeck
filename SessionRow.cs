@@ -110,6 +110,22 @@ internal sealed class SessionRow : INotifyPropertyChanged
     /// <summary>When the status last changed — secondary sort key (most-recent-first within each group).</summary>
     public DateTime LastChanged => _s.StatusUpdatedAt > DateTime.MinValue ? _s.StatusUpdatedAt : _s.UpdatedAt;
 
+    // --- hosted in this app's deck (set by the window from the live host records) ---
+    bool _hosted;
+    public bool IsHosted => _hosted;
+    public string HostedGlyph => _hosted ? "\u25A3" : "";
+
+    public void SetHosted(bool hosted)
+    {
+        if (_hosted == hosted) return;
+        _hosted = hosted;
+        var h = PropertyChanged;
+        if (h == null) return;
+        h(this, new PropertyChangedEventArgs(nameof(IsHosted)));
+        h(this, new PropertyChangedEventArgs(nameof(HostedGlyph)));
+        h(this, new PropertyChangedEventArgs(nameof(RowTooltip)));
+    }
+
     // --- virtual desktop (set by the throttled resolver, independent of the status scan) ---
     int _desktopIndex = -1;       // 0 = Desktop 1, 1 = Desktop 2, …; -1 = unknown
     bool _onCurrentDesktop = true;
@@ -165,6 +181,8 @@ internal sealed class SessionRow : INotifyPropertyChanged
             };
             if (IsBackgroundAgent)
                 lines.Insert(1, "Background agent — driven by another app; no terminal window");
+            if (_hosted)
+                lines.Insert(1, "Hosted in this deck — click to show its tab");
             lines.AddRange(new[]
             {
                 $"Context: {ContextPct}% ({ContextTokensDisplay} of {Window / 1000}k)",

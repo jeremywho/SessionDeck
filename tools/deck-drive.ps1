@@ -68,9 +68,6 @@ switch ($Action) {
         } | Format-Table -AutoSize | Out-String -Width 200
     }
     'kill-app' {
-        $hostPids = @(Get-ChildItem "$env:APPDATA\SessionDeck\hosts\*.json" -ErrorAction SilentlyContinue | ForEach-Object { (Get-Content $_.FullName -Encoding UTF8 | ConvertFrom-Json).HostPid })
-        $apps = Get-Process SessionDeck -ErrorAction SilentlyContinue | Where-Object { $hostPids -notcontains $_.Id }
-        $apps | Stop-Process -Force
-        "killed app pids: $($apps.Id -join ',')  (hosts left alone: $($hostPids -join ','))"
+        & "$PSScriptRoot\deck-stop.ps1" app
     }
 }

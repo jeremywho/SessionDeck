@@ -14,6 +14,9 @@ namespace SessionDeck;
 /// One xterm.js terminal attached to one pty host. A WebView2 whose only page is the embedded
 /// <c>terminal.html</c>; the page talks to the host over a loopback WebSocket directly, so this
 /// class carries no bytes — it only relays title, exit and link events back to WPF.
+/// <para>A view that is not showing can be <see cref="Suspend"/>ed: the WebView2 (and its renderer
+/// process) is dropped, and <see cref="Resume"/> recreates it. The host keeps the scrollback, so the
+/// page replays from the ring on reattach and nothing is lost.</para>
 /// </summary>
 internal sealed class TerminalView : Grid
 {
@@ -21,7 +24,7 @@ internal sealed class TerminalView : Grid
     static readonly Assembly Self = typeof(TerminalView).Assembly;
     static Task<CoreWebView2Environment>? _env;
 
-    readonly WebView2 _web = new();
+    WebView2? _web;
     readonly TextBlock _status = new()
     {
         HorizontalAlignment = HorizontalAlignment.Center,
@@ -31,9 +34,10 @@ internal sealed class TerminalView : Grid
     };
     bool _dark;
 
-    public HostRecord Host { get; private set; }
+    public HostRecord Host { get; }
     public string Title { get; private set; }
     public bool Exited { get; private set; }
+    public bool IsSuspended => _web == null;
 
     public event Action<TerminalView>? TitleChanged;
     public event Action<TerminalView>? ExitedChanged;
@@ -45,10 +49,6 @@ internal sealed class TerminalView : Grid
         _dark = dark;
         Exited = host.HasExited;
         Children.Add(_status);
-        Children.Add(_web);
-        _web.Visibility = Visibility.Hidden;
-        _web.DefaultBackgroundColor = System.Drawing.Color.Transparent;
-        Loaded += async (_, _) => await InitAsync();
     }
 
     static string DefaultTitle(HostRecord h) =>
@@ -61,15 +61,21 @@ internal sealed class TerminalView : Grid
             new CoreWebView2EnvironmentOptions { AdditionalBrowserArguments = "--disable-features=msSmartScreenProtection" });
     }
 
-    bool _inited;
-    async Task InitAsync()
+    /// <summary>Create the WebView2 if it is not there. Safe to call repeatedly.</summary>
+    public async void Resume()
     {
-        if (_inited) return;
-        _inited = true;
+        if (_web != null) return;
+        var web = new WebView2 { DefaultBackgroundColor = System.Drawing.Color.Transparent, Visibility = Visibility.Hidden };
+        _web = web;
+        Children.Add(web);
+        _status.Visibility = Visibility.Visible;
+        _status.Text = "Attaching…";
         try
         {
-            await _web.EnsureCoreWebView2Async(await Environment_());
-            var core = _web.CoreWebView2;
+            try { await web.EnsureCoreWebView2Async(await Environment_()); }
+            catch when (_web != web) { return; }
+            if (_web != web) return;
+            var core = web.CoreWebView2;
             core.Settings.AreDefaultContextMenusEnabled = false;
             core.Settings.AreDevToolsEnabled = true;
             core.Settings.IsStatusBarEnabled = false;
@@ -79,7 +85,7 @@ internal sealed class TerminalView : Grid
             core.WebMessageReceived += OnMessage;
             core.NewWindowRequested += (_, e) => { e.Handled = true; OpenOutside(e.Uri); };
             core.Navigate($"https://{VirtualHost}/terminal.html?port={Host.Port}&token={Host.Token}&theme={(_dark ? "dark" : "light")}");
-            _web.Visibility = Visibility.Visible;
+            web.Visibility = Visibility.Visible;
             _status.Visibility = Visibility.Collapsed;
         }
         catch (Exception ex)
@@ -89,9 +95,21 @@ internal sealed class TerminalView : Grid
         }
     }
 
+    /// <summary>Drop the WebView2. The host is untouched; <see cref="Resume"/> reattaches from the ring.</summary>
+    public void Suspend()
+    {
+        var web = _web;
+        if (web == null) return;
+        _web = null;
+        Children.Remove(web);
+        try { web.Dispose(); } catch { }
+        _status.Text = "Attaching…";
+        _status.Visibility = Visibility.Visible;
+    }
+
     void ServeEmbedded(object? sender, CoreWebView2WebResourceRequestedEventArgs e)
     {
-        var core = _web.CoreWebView2;
+        if (sender is not CoreWebView2 core) return;
         string path = new Uri(e.Request.Uri).AbsolutePath.TrimStart('/');
         var stream = Self.GetManifestResourceStream("www/" + path);
         if (stream == null)
@@ -142,18 +160,19 @@ internal sealed class TerminalView : Grid
 
     void Post(object msg)
     {
-        try { _web.CoreWebView2?.PostWebMessageAsJson(JsonSerializer.Serialize(msg)); } catch { }
+        try { _web?.CoreWebView2?.PostWebMessageAsJson(JsonSerializer.Serialize(msg)); } catch { }
     }
 
     public void FocusTerminal()
     {
-        _web.Focus();
+        _web?.Focus();
         Post(new { type = "focus" });
     }
 
     public void Fit() => Post(new { type = "fit" });
 
-    public void Kill() => Post(new { type = "kill" });
+    /// <summary>Ask the host to end its child. Works whether or not a WebView2 is attached.</summary>
+    public void Kill() => HostManager.Kill(Host);
 
     public void ApplyTheme(bool dark)
     {
@@ -161,8 +180,5 @@ internal sealed class TerminalView : Grid
         Post(new { type = "theme", dark });
     }
 
-    public void Shutdown()
-    {
-        try { _web.Dispose(); } catch { }
-    }
+    public void Shutdown() => Suspend();
 }

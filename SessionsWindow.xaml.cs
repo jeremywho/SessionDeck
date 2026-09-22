@@ -260,9 +260,22 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
 
     protected override void OnPreviewKeyDown(KeyEventArgs e)
     {
-        if ((Keyboard.Modifiers & ModifierKeys.Control) != 0 && (e.Key == Key.D0 || e.Key == Key.NumPad0))
+        bool ctrl = (Keyboard.Modifiers & ModifierKeys.Control) != 0;
+        if (ctrl && (e.Key == Key.D0 || e.Key == Key.NumPad0))
         {
             SetZoom(1.0);
+            e.Handled = true;
+            return;
+        }
+        if (ctrl && e.Key == Key.Tab)
+        {
+            Deck.CycleActive((Keyboard.Modifiers & ModifierKeys.Shift) != 0 ? -1 : 1);
+            e.Handled = true;
+            return;
+        }
+        if (ctrl && (Keyboard.Modifiers & ModifierKeys.Shift) != 0 && e.Key == Key.W)
+        {
+            Deck.CloseActive();
             e.Handled = true;
             return;
         }
@@ -331,7 +344,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         }
 
         SessionsGrid.ColumnReordered += (_, _) => { PersistLayout(); _app.Settings.Save(); };
-        SessionsGrid.PreviewMouseRightButtonUp += OnHeaderRightClick;   // right-click a header to choose columns
+        SessionsGrid.PreviewMouseRightButtonUp += OnHeaderRightClick;
     }
 
     void ApplyColumnOrder()
@@ -445,8 +458,11 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     /// <summary>Hosts still running from a previous run of this app: reopen their tabs.</summary>
     void ReattachHosts()
     {
-        foreach (var host in HostManager.Discover().OrderBy(h => h.StartedAt))
-            Deck.Open(host);
+        var hosts = HostManager.Discover().OrderBy(h => h.StartedAt).ToList();
+        PerformanceLog.Write($"reattach hosts={hosts.Count} ids={string.Join(",", hosts.Select(h => h.Id))}");
+        foreach (var host in hosts)
+            Deck.Open(host, activate: false);
+        if (Deck.Active == null && Deck.Tabs.Count > 0) Deck.Activate(Deck.Tabs[^1]);
     }
 
     static string HomeDir => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -631,11 +647,13 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         bool mutateGrid = !ExperimentOptions.FreezeGrid || Rows.Count == 0;
         if (mutateGrid)
         {
+            var hosted = new HashSet<string>(Deck.OpenHosts.Select(h => h.SessionId).Where(id => id.Length > 0), StringComparer.OrdinalIgnoreCase);
             foreach (var s in live)
             {
                 seen.Add(s.SessionId);
                 if (_rowsById.TryGetValue(s.SessionId, out var row)) propertyChanges += row.Update(s);
                 else { row = new SessionRow(s); _rowsById[s.SessionId] = row; Rows.Add(row); added++; }
+                row.SetHosted(hosted.Contains(s.SessionId));
             }
             for (int i = Rows.Count - 1; i >= 0; i--)
                 if (!seen.Contains(Rows[i].SessionId))
@@ -842,6 +860,97 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         if (state != _usageState) { _usageState = state; UsageStateLabel.Text = state; }
         if (tip != _accountTip) { _accountTip = tip; AccountGroup.ToolTip = tip; }
         UsageBar.Opacity = subdued ? 0.5 : 1.0;
+    }
+
+    static SessionRow? RowAt(object? originalSource)
+    {
+        var dep = originalSource as DependencyObject;
+        while (dep != null && dep is not DataGridRow) dep = VisualTreeHelper.GetParent(dep);
+        return (dep as DataGridRow)?.Item as SessionRow;
+    }
+
+    /// <summary>A single click on a hosted row shows its tab; external sessions still need a double-click.</summary>
+    void Grid_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (RowAt(e.OriginalSource) is not { } row) return;
+        var tab = Deck.FindBySession(row.SessionId);
+        if (tab != null) Deck.Activate(tab);
+    }
+
+    readonly ContextMenu _rowMenu = new();
+
+    void Grid_MouseRightButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (RowAt(e.OriginalSource) is not { } row || row.IsBackgroundAgent) return;
+        e.Handled = true;
+        _rowMenu.Items.Clear();
+        var tab = Deck.FindBySession(row.SessionId);
+        if (tab != null)
+        {
+            _rowMenu.Items.Add(Item("Show tab", () => Deck.Activate(tab)));
+            _rowMenu.Items.Add(Item("Stop session", () => Deck.Stop(tab)));
+        }
+        else
+        {
+            _rowMenu.Items.Add(Item("Focus terminal window", () =>
+            {
+                if (!WindowActivator.Activate(row.Info)) LiveLabel.Text = $"Could not find a window for PID {row.Info.Pid}.";
+            }));
+            _rowMenu.Items.Add(Item("Adopt into deck…", () => AdoptIntoDeck(row.Info)));
+        }
+        _rowMenu.Items.Add(new Separator());
+        _rowMenu.Items.Add(Item("Copy session id", () => TrySetClipboard(row.SessionId)));
+        _rowMenu.Items.Add(Item("Copy folder", () => TrySetClipboard(row.Cwd)));
+        _rowMenu.PlacementTarget = SessionsGrid;
+        _rowMenu.Placement = PlacementMode.MousePoint;
+        Dispatcher.BeginInvoke(() => _rowMenu.IsOpen = true, DispatcherPriority.Input);
+    }
+
+    static MenuItem Item(string header, Action run)
+    {
+        var mi = new MenuItem { Header = header };
+        mi.Click += (_, _) => run();
+        return mi;
+    }
+
+    static void TrySetClipboard(string text)
+    {
+        try { Clipboard.SetText(text); } catch { }
+    }
+
+    /// <summary>
+    /// Bring an external session into the deck: end its process tree, then resume the same
+    /// conversation in a hosted tab. The kill is the destructive half, so it is confirmed first.
+    /// </summary>
+    void AdoptIntoDeck(SessionInfo s)
+    {
+        string what = s.Provider == SessionProvider.Codex ? "Codex thread" : "Claude session";
+        if (s.Provider == SessionProvider.Claude && (s.TranscriptPath.Length == 0 || !File.Exists(s.TranscriptPath)))
+        {
+            System.Windows.MessageBox.Show(this,
+                $"\"{s.DisplayName}\" has no conversation on disk yet, so there is nothing to resume.\n\n" +
+                "Send it one message first, then adopt it.",
+                "Adopt into deck", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        var answer = System.Windows.MessageBox.Show(this,
+            $"Stop the external {what} \"{s.DisplayName}\" (PID {s.Pid}) and resume it in a deck tab?\n\n" +
+            "Anything it is doing right now is interrupted; the conversation itself is kept.",
+            "Adopt into deck", MessageBoxButton.OKCancel, MessageBoxImage.Question);
+        if (answer != MessageBoxResult.OK) return;
+        try
+        {
+            using var p = Process.GetProcessById(s.Pid);
+            p.Kill(entireProcessTree: true);
+            p.WaitForExit(5000);
+        }
+        catch (Exception ex)
+        {
+            App.LogError(ex);
+            LiveLabel.Text = "Could not stop the external session: " + ex.Message;
+            return;
+        }
+        ResumeInDeck(new SavedSession { Id = s.SessionId, Cwd = s.Cwd, Name = s.Name, Provider = s.Provider });
     }
 
     void Grid_MouseDoubleClick(object sender, MouseButtonEventArgs e)

@@ -62,7 +62,7 @@ internal static class HostManager
             HostsDir = HostsDir,
         };
 
-        var psi = new ProcessStartInfo(Environment.ProcessPath!)
+        var psi = new ProcessStartInfo(HostExe())
         {
             UseShellExecute = false,
             RedirectStandardInput = true,
@@ -84,6 +84,56 @@ internal static class HostManager
         var rec = ReadRecord(Path.Combine(HostsDir, id + ".json")) ?? throw new InvalidOperationException("host wrote no record");
         if (!string.IsNullOrWhiteSpace(title)) rec.Title = title;
         return rec;
+    }
+
+    /// <summary>
+    /// The binary a host runs from. Never the app's own exe: a host lives for hours and holds its
+    /// image open, which would pin the build in a dev tree and block an installed update from
+    /// swapping the exe. Each build is copied once into a stamped folder under the data dir, keyed
+    /// by the app exe's write time, and hosts run from there. Stale stamped folders whose hosts
+    /// have all exited are removed on the way.
+    /// </summary>
+    static string HostExe()
+    {
+        string src = Environment.ProcessPath!;
+        string srcDir = Path.GetDirectoryName(src)!;
+        string stamp = File.GetLastWriteTimeUtc(src).Ticks.ToString();
+        string root = Path.Combine(Path.GetDirectoryName(HostsDir)!, "host-bin");
+        string dst = Path.Combine(root, stamp);
+        string exe = Path.Combine(dst, Path.GetFileName(src));
+        if (!File.Exists(exe))
+        {
+            CopyTree(srcDir, dst);
+            if (!File.Exists(exe)) throw new InvalidOperationException("host binary copy failed: " + exe);
+        }
+        PruneHostBins(root, dst);
+        return exe;
+    }
+
+    static void CopyTree(string from, string to)
+    {
+        string tmp = to + ".tmp";
+        if (Directory.Exists(tmp)) Directory.Delete(tmp, true);
+        foreach (var dir in Directory.GetDirectories(from, "*", SearchOption.AllDirectories))
+            Directory.CreateDirectory(Path.Combine(tmp, Path.GetRelativePath(from, dir)));
+        Directory.CreateDirectory(tmp);
+        foreach (var file in Directory.GetFiles(from, "*", SearchOption.AllDirectories))
+        {
+            if (file.EndsWith(".pdb", StringComparison.OrdinalIgnoreCase)) continue;
+            string rel = Path.GetRelativePath(from, file);
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(tmp, rel))!);
+            File.Copy(file, Path.Combine(tmp, rel), overwrite: true);
+        }
+        Directory.Move(tmp, to);
+    }
+
+    static void PruneHostBins(string root, string keep)
+    {
+        foreach (var dir in Directory.GetDirectories(root))
+        {
+            if (string.Equals(dir, keep, StringComparison.OrdinalIgnoreCase)) continue;
+            try { Directory.Delete(dir, true); } catch { }
+        }
     }
 
     /// <summary>
@@ -117,16 +167,48 @@ internal static class HostManager
         return list;
     }
 
+    /// <summary>
+    /// Alive means the recorded pid is running and, when the start time can be read, it matches the
+    /// record — pid reuse after a reboot must not resurrect a stale record. A start time that cannot
+    /// be read (access denied, process exiting) is treated as a match: dropping a live host's record
+    /// on a transient read is worse than keeping a dead one for one more scan.
+    /// </summary>
     public static bool IsAlive(HostRecord rec)
     {
-        try
-        {
-            using var p = Process.GetProcessById(rec.HostPid);
-            if (p.HasExited) return false;
-            long start = p.StartTime.ToUniversalTime().Ticks;
-            return Math.Abs(start - rec.HostStartTicks) < TimeSpan.TicksPerSecond;
-        }
+        Process p;
+        try { p = Process.GetProcessById(rec.HostPid); }
         catch { return false; }
+        using (p)
+        {
+            try { if (p.HasExited) return false; } catch { }
+            try
+            {
+                long start = p.StartTime.ToUniversalTime().Ticks;
+                return Math.Abs(start - rec.HostStartTicks) < TimeSpan.TicksPerSecond * 2;
+            }
+            catch { return true; }
+        }
+    }
+
+    /// <summary>
+    /// Tell a host to end its child. One short WebSocket round trip on a background thread; the
+    /// host's own job object does the actual killing, so this works with no viewer attached.
+    /// </summary>
+    public static void Kill(HostRecord rec)
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var ws = new System.Net.WebSockets.ClientWebSocket();
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                await ws.ConnectAsync(new Uri($"ws://127.0.0.1:{rec.Port}/attach?token={rec.Token}&after={long.MaxValue}"), cts.Token);
+                var msg = System.Text.Encoding.UTF8.GetBytes("{\"type\":\"kill\"}");
+                await ws.SendAsync(msg, System.Net.WebSockets.WebSocketMessageType.Text, true, cts.Token);
+                await Task.Delay(200, cts.Token);
+            }
+            catch (Exception ex) { App.LogError(ex); }
+        });
     }
 
     public static HostRecord? ReadRecord(string path)

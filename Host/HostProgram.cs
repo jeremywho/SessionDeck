@@ -210,7 +210,7 @@ internal static class HostProgram
                 }
                 continue;
             }
-            if (b == 0x07 || b == 0x1b || b == 0x9c)
+            if (b == 0x07 || b == 0x1b)
             {
                 _inOsc = false;
                 string s = Encoding.UTF8.GetString(_oscBuf.GetBuffer(), 0, (int)_oscBuf.Length);
