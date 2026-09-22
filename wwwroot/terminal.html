@@ -4,9 +4,10 @@
 <meta charset="utf-8">
 <link rel="stylesheet" href="xterm.css">
 <style>
-  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: var(--bg, #1d1e21); }
-  #term { position: absolute; inset: 0; padding: 6px 0 0 8px; }
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: transparent; }
+  #term { position: absolute; inset: 0; padding: 6px 0 0 8px; background: var(--bg, rgba(12,12,12,0.96)); }
   .xterm .xterm-viewport { background: transparent !important; }
+  .xterm .xterm-screen canvas { background: transparent !important; }
 </style>
 </head>
 <body>
@@ -14,7 +15,6 @@
 <script src="xterm.js"></script>
 <script src="addon-fit.js"></script>
 <script src="addon-unicode11.js"></script>
-<script src="addon-webgl.js"></script>
 <script src="addon-web-links.js"></script>
 <script>
 (() => {
@@ -22,6 +22,23 @@
   const port = q.get('port');
   const token = q.get('token');
   const dark = q.get('theme') !== 'light';
+
+  const schemes = {
+    Campbell: {
+      background: '#0c0c0c', foreground: '#cccccc', cursor: '#ffffff', selectionBackground: '#ffffff40',
+      black: '#0c0c0c', red: '#c50f1f', green: '#13a10e', yellow: '#c19c00', blue: '#0037da',
+      magenta: '#881798', cyan: '#3a96dd', white: '#cccccc', brightBlack: '#767676', brightRed: '#e74856',
+      brightGreen: '#16c60c', brightYellow: '#f9f1a5', brightBlue: '#3b78ff', brightMagenta: '#b4009e',
+      brightCyan: '#61d6d6', brightWhite: '#f2f2f2',
+    },
+    'One Half Dark': {
+      background: '#282c34', foreground: '#dcdfe4', cursor: '#dcdfe4', selectionBackground: '#ffffff40',
+      black: '#282c34', red: '#e06c75', green: '#98c379', yellow: '#e5c07b', blue: '#61afef',
+      magenta: '#c678dd', cyan: '#56b6c2', white: '#dcdfe4', brightBlack: '#5a6374', brightRed: '#e06c75',
+      brightGreen: '#98c379', brightYellow: '#e5c07b', brightBlue: '#61afef', brightMagenta: '#c678dd',
+      brightCyan: '#56b6c2', brightWhite: '#dcdfe4',
+    },
+  };
 
   const themes = {
     dark: {
@@ -39,15 +56,45 @@
       brightCyan: '#00acc1', brightWhite: '#1a1c1f',
     },
   };
-  document.documentElement.style.setProperty('--bg', dark ? themes.dark.background : themes.light.background);
+  schemes.Deck = themes.dark;
+  schemes['Deck Light'] = themes.light;
+
+  function lookFrom(src) {
+    return {
+      font: src.font || 'CaskaydiaCove NF',
+      size: Number(src.size) || 12,
+      opacity: Math.max(0, Math.min(100, Number(src.opacity ?? 96))),
+      scheme: src.scheme || 'Campbell',
+    };
+  }
+  function hexToRgba(hex, alpha) {
+    const h = hex.replace('#', '');
+    const n = parseInt(h.length === 3 ? h.split('').map(c => c + c).join('') : h.slice(0, 6), 16);
+    return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+  }
+  function applyLook(look, isDark) {
+    const base = schemes[look.scheme] || (isDark ? themes.dark : themes.light);
+    // xterm paints its own background per cell; keep it fully transparent and let #term carry the
+    // tinted, translucent surface so the window behind shows through at the chosen opacity.
+    term.options.theme = Object.assign({}, base, { background: '#00000000' });
+    term.options.fontFamily = `"${look.font}", "Cascadia Code", "Cascadia Mono", Consolas, monospace`;
+    term.options.fontSize = look.size;
+    document.documentElement.style.setProperty('--bg', hexToRgba(base.background, look.opacity / 100));
+    fit.fit();
+  }
+
+  const initialLook = lookFrom({ font: q.get('font'), size: q.get('size'), opacity: q.get('opacity'), scheme: q.get('scheme') });
+  const initialBase = schemes[initialLook.scheme] || (dark ? themes.dark : themes.light);
+  document.documentElement.style.setProperty('--bg', hexToRgba(initialBase.background, initialLook.opacity / 100));
 
   const term = new Terminal({
-    theme: dark ? themes.dark : themes.light,
-    fontFamily: '"Cascadia Code", "Cascadia Mono", Consolas, monospace',
-    fontSize: 13,
+    theme: Object.assign({}, initialBase, { background: '#00000000' }),
+    fontFamily: `"${initialLook.font}", "Cascadia Code", "Cascadia Mono", Consolas, monospace`,
+    fontSize: initialLook.size,
     scrollback: 20000,
     cursorBlink: true,
     allowProposedApi: true,
+    allowTransparency: true,
     linkHandler: { activate: (_e, uri) => post({ type: 'open', uri }) },
   });
   const fit = new FitAddon.FitAddon();
@@ -56,11 +103,6 @@
   term.unicode.activeVersion = '11';
   term.loadAddon(new WebLinksAddon.WebLinksAddon((_e, uri) => post({ type: 'open', uri })));
   term.open(document.getElementById('term'));
-  try {
-    const gl = new WebglAddon.WebglAddon();
-    gl.onContextLoss(() => gl.dispose());
-    term.loadAddon(gl);
-  } catch (e) { /* canvas renderer fallback */ }
   fit.fit();
 
   function post(msg) {
@@ -142,8 +184,7 @@
       else if (m.type === 'fit') fit.fit();
       else if (m.type === 'kill') send({ type: 'kill' });
       else if (m.type === 'theme') {
-        term.options.theme = m.dark ? themes.dark : themes.light;
-        document.documentElement.style.setProperty('--bg', m.dark ? themes.dark.background : themes.light.background);
+        applyLook(lookFrom(m.look || {}), !!m.dark);
       }
     });
   }

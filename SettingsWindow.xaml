@@ -4,7 +4,7 @@
                  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
                  Title="Settings"
-                 Width="470" Height="412"
+                 Width="470" Height="560"
                  ResizeMode="NoResize"
                  WindowStartupLocation="CenterScreen"
                  ExtendsContentIntoTitleBar="True"
@@ -43,6 +43,30 @@
           </StackPanel>
           <ui:ToggleSwitch x:Name="RunOnLoginToggle" Grid.Column="1" VerticalAlignment="Center"/>
         </Grid>
+
+        <TextBlock Text="Terminal" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource FgBrush}" Margin="0,20,0,0"/>
+        <Grid Margin="0,8,0,0">
+          <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="70"/></Grid.ColumnDefinitions>
+          <ui:TextBox x:Name="FontBox" Grid.Column="0" PlaceholderText="e.g. CaskaydiaCove NF"/>
+          <ui:NumberBox x:Name="FontSizeBox" Grid.Column="2" Minimum="8" Maximum="28" SmallChange="1" ClearButtonEnabled="False"/>
+        </Grid>
+        <Grid Margin="0,8,0,0">
+          <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+          <TextBlock Grid.Column="0" Text="Opacity" VerticalAlignment="Center" Margin="0,0,10,0" Foreground="{DynamicResource FgBrush}"/>
+          <Slider x:Name="OpacitySlider" Grid.Column="1" Minimum="30" Maximum="100" TickFrequency="1" IsSnapToTickEnabled="True" VerticalAlignment="Center"/>
+          <TextBlock x:Name="OpacityLabel" Grid.Column="2" VerticalAlignment="Center" Margin="10,0,0,0" MinWidth="34" TextAlignment="Right" Foreground="{DynamicResource Fg2Brush}"/>
+        </Grid>
+        <Grid Margin="0,8,0,0">
+          <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+          <TextBlock Grid.Column="0" Text="Colors" VerticalAlignment="Center" Margin="0,0,10,0" Foreground="{DynamicResource FgBrush}"/>
+          <ComboBox x:Name="SchemeBox" Grid.Column="1">
+            <ComboBoxItem Content="Campbell"/>
+            <ComboBoxItem Content="One Half Dark"/>
+            <ComboBoxItem Content="Deck"/>
+          </ComboBox>
+        </Grid>
+        <TextBlock Text="Font, opacity and colors follow Windows Terminal's defaults; applied to open tabs on save." FontSize="11.5"
+                   Foreground="{DynamicResource Fg3Brush}" Margin="0,4,0,0"/>
 
         <TextBlock Text="Claude flags" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource FgBrush}" Margin="0,20,0,0"/>
         <TextBlock Text="Appended to every new or resumed Claude session (space-separated)." FontSize="11.5"

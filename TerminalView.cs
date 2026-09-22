@@ -33,6 +33,8 @@ internal sealed class TerminalView : Grid
         Text = "Attaching…",
     };
     bool _dark;
+    static Settings? _settings;
+    public static void UseSettings(Settings s) => _settings = s;
 
     public HostRecord Host { get; }
     public string Title { get; private set; }
@@ -84,7 +86,7 @@ internal sealed class TerminalView : Grid
             core.WebResourceRequested += ServeEmbedded;
             core.WebMessageReceived += OnMessage;
             core.NewWindowRequested += (_, e) => { e.Handled = true; OpenOutside(e.Uri); };
-            core.Navigate($"https://{VirtualHost}/terminal.html?port={Host.Port}&token={Host.Token}&theme={(_dark ? "dark" : "light")}");
+            core.Navigate($"https://{VirtualHost}/terminal.html?port={Host.Port}&token={Host.Token}&theme={(_dark ? "dark" : "light")}{LookQuery()}");
             web.Visibility = Visibility.Visible;
             _status.Visibility = Visibility.Collapsed;
         }
@@ -177,8 +179,22 @@ internal sealed class TerminalView : Grid
     public void ApplyTheme(bool dark)
     {
         _dark = dark;
-        Post(new { type = "theme", dark });
+        Post(new { type = "theme", dark, look = Look() });
     }
+
+    static object Look()
+    {
+        var s = _settings ?? new Settings();
+        return new { font = s.TerminalFont, size = s.TerminalFontSize, opacity = Math.Clamp(s.TerminalOpacity, 0, 100), scheme = s.TerminalScheme };
+    }
+
+    static string LookQuery()
+    {
+        var s = _settings ?? new Settings();
+        return $"&font={Uri.EscapeDataString(s.TerminalFont)}&size={s.TerminalFontSize}&opacity={Math.Clamp(s.TerminalOpacity, 0, 100)}&scheme={Uri.EscapeDataString(s.TerminalScheme)}";
+    }
+
+    public void ApplyLook() => Post(new { type = "theme", dark = _dark, look = Look() });
 
     public void Shutdown() => Suspend();
 }

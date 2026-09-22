@@ -195,6 +195,8 @@ internal sealed class App : Application
         if (Installer.IsInstalledInstance()) Installer.SyncRunAtLogin(Settings.RunOnLogin);
     }
 
+    public void ApplyTerminalLook() => _window?.RefreshTerminalLook();
+
     /// <summary>Apply the "show in taskbar" preference to the live window.</summary>
     public void ApplyShowInTaskbar()
     {

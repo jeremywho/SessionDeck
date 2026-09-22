@@ -32,6 +32,10 @@ internal sealed class Settings
     public double? WindowTop { get; set; }
     public double Zoom { get; set; } = 1.0;                                 // content zoom (Ctrl+wheel), 0.6–2.5
     public bool ShowInTaskbar { get; set; } = true;                         // false = tray-only (no taskbar button)
+    public string TerminalFont { get; set; } = "CaskaydiaCove NF";          // xterm font family; falls back down the stack in terminal.html
+    public double TerminalFontSize { get; set; } = 12;
+    public int TerminalOpacity { get; set; } = 96;                          // 0-100, like Windows Terminal's `opacity`
+    public string TerminalScheme { get; set; } = "Campbell";                // Campbell | One Half Dark | Deck
     public bool RunOnLogin { get; set; } = true;                            // HKCU Run registration (installed instance only)
 
     static string Dir => Path.Combine(

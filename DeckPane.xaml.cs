@@ -141,6 +141,11 @@ internal partial class DeckPane : UserControl
         foreach (var t in Tabs) t.View.ApplyTheme(dark);
     }
 
+    public void ApplyLook()
+    {
+        foreach (var t in Tabs) t.View.ApplyLook();
+    }
+
     public void FocusActive() => _active?.View.FocusTerminal();
 
     static DeckTab? TabOf(object sender) => sender is FrameworkElement { Tag: DeckTab tab } ? tab : null;

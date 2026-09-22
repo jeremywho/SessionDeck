@@ -83,6 +83,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
 
         InitColumns();
         SetupSort();
+        TerminalView.UseSettings(_app.Settings);
         Deck.ApplyTheme(!string.Equals(_app.Settings.Theme, "Light", StringComparison.OrdinalIgnoreCase));
         Loaded += (_, _) => ReattachHosts();
 
@@ -503,6 +504,8 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         SessionsGrid.Items.Refresh();
         Deck.ApplyTheme(!string.Equals(_app.Settings.Theme, "Light", StringComparison.OrdinalIgnoreCase));
     }
+
+    public void RefreshTerminalLook() => Deck.ApplyLook();
 
     void OnTopButton_Click(object sender, RoutedEventArgs e)
     {
