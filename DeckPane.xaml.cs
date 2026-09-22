@@ -16,12 +16,21 @@ internal partial class DeckPane : UserControl
         public TerminalView View { get; }
         public DeckTab(TerminalView v) { View = v; }
 
-        public string Title => View.Title;
+        public string Title => StripMark(View.Title);
         public string Glyph => View.Host.Provider == "Codex" ? "◆" : "✳";
+
+        /// <summary>Claude titles its own window "✳ …"; the tab already leads with that mark.</summary>
+        internal static string StripMark(string t)
+        {
+            t = t.Trim();
+            foreach (var mark in new[] { "✳", "◆", "✻" })
+                if (t.StartsWith(mark, StringComparison.Ordinal)) return t[mark.Length..].TrimStart();
+            return t;
+        }
         public Brush GlyphBrush =>
             Application.Current.TryFindResource(View.Host.Provider == "Codex" ? "CodexMarkBrush" : "ClaudeMarkBrush") as Brush ?? Brushes.Gray;
         public Visibility ExitedVisibility => View.Exited ? Visibility.Visible : Visibility.Collapsed;
-        public string Tooltip => $"{View.Title}\n{View.Host.Cwd}\n{View.Host.Provider} · session {View.Host.SessionId}\nhost pid {View.Host.HostPid} · child pid {View.Host.ChildPid}";
+        public string Tooltip => $"{StripMark(View.Title)}\n{View.Host.Cwd}\n{View.Host.Provider} · session {View.Host.SessionId}\nhost pid {View.Host.HostPid} · child pid {View.Host.ChildPid}";
 
         bool _active;
         public bool IsActive

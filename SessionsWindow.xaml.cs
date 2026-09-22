@@ -98,6 +98,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         if (!DwmDiagnosticOptions.DisableBackgroundWork)
         {
             _timer.Start();
+            StartRegistryWatcher();
             StartCodexProbe();
             if (!ExperimentOptions.DisableDesktopUia)
                 StartDesktopResolver();
@@ -112,6 +113,73 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         DwmDiagnostics.Mark("window-config",
             $"backdrop={WindowBackdropType}; animations=false; " +
             $"backgroundWork={!DwmDiagnosticOptions.DisableBackgroundWork}; desktopUia={!ExperimentOptions.DisableDesktopUia}");
+    }
+
+    int _scanCount;
+    long _scanTotalMs;
+    long _scanMaxMs;
+    long _scanWindowStart = Environment.TickCount64;
+
+    /// <summary>One line a minute on what the refresh loop costs, so a watcher that starts firing
+    /// too often shows up in the log instead of only in Task Manager.</summary>
+    void NoteScan(long ms)
+    {
+        int n = System.Threading.Interlocked.Increment(ref _scanCount);
+        System.Threading.Interlocked.Add(ref _scanTotalMs, ms);
+        long max;
+        do { max = System.Threading.Interlocked.Read(ref _scanMaxMs); }
+        while (ms > max && System.Threading.Interlocked.CompareExchange(ref _scanMaxMs, ms, max) != max);
+        long now = Environment.TickCount64;
+        if (now - _scanWindowStart < 60_000) return;
+        long total = System.Threading.Interlocked.Exchange(ref _scanTotalMs, 0);
+        long peak = System.Threading.Interlocked.Exchange(ref _scanMaxMs, 0);
+        System.Threading.Interlocked.Exchange(ref _scanCount, 0);
+        _scanWindowStart = now;
+        PerformanceLog.Write($"scan-rate {n}/min avg={(n > 0 ? total / n : 0)}ms max={peak}ms");
+    }
+
+    FileSystemWatcher? _registryWatcher;
+    DispatcherTimer? _registryDebounce;
+    DateTime _lastWatchedRefresh;
+
+    /// <summary>
+    /// Claude rewrites <c>~/.claude/sessions/&lt;pid&gt;.json</c> the moment its status changes, so a
+    /// watcher on that folder is the fastest zero-config signal there is. Events are debounced and
+    /// rate-limited: a busy session heartbeats that file continuously, and the list is a handful of
+    /// hosted rows, so two refreshes a second is plenty and cannot pile up (the refresh is
+    /// single-flight).
+    /// </summary>
+    void StartRegistryWatcher()
+    {
+        string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude", "sessions");
+        if (!Directory.Exists(dir)) return;
+        _registryDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
+        _registryDebounce.Tick += (_, _) =>
+        {
+            _registryDebounce.Stop();
+            if (DateTime.UtcNow - _lastWatchedRefresh < TimeSpan.FromMilliseconds(500))
+            {
+                _registryDebounce.Start();
+                return;
+            }
+            _lastWatchedRefresh = DateTime.UtcNow;
+            RequestRefresh();
+        };
+        try
+        {
+            _registryWatcher = new FileSystemWatcher(dir, "*.json")
+            {
+                NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size,
+                IncludeSubdirectories = false,
+            };
+            FileSystemEventHandler kick = (_, _) => Dispatcher.BeginInvoke(() => { _registryDebounce.Stop(); _registryDebounce.Start(); });
+            _registryWatcher.Changed += kick;
+            _registryWatcher.Created += kick;
+            _registryWatcher.Deleted += kick;
+            _registryWatcher.Renamed += (_, _) => Dispatcher.BeginInvoke(() => { _registryDebounce.Stop(); _registryDebounce.Start(); });
+            _registryWatcher.EnableRaisingEvents = true;
+        }
+        catch (Exception ex) { App.LogError(ex); }
     }
 
     /// <summary>
@@ -619,22 +687,26 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
                 var found = CodexAttribution.Fold(claude, codex, parents);
                 long attributionMs = phase.ElapsedMilliseconds;
                 phase.Restart();
+                var hosts = HostManager.Discover();
                 long registryMs = phase.ElapsedMilliseconds;
                 total.Stop();
                 System.Threading.Interlocked.Exchange(ref _lastScanMs, total.ElapsedMilliseconds);
+                NoteScan(total.ElapsedMilliseconds);
                 if (DwmDiagnosticOptions.Enabled || total.ElapsedMilliseconds >= 1000)
                     PerformanceLog.Write($"session-scan {total.ElapsedMilliseconds}ms claude={claudeMs} codex={codexMs} " +
-                        $"processes={processesMs} attribution={attributionMs} registry={registryMs} sessions={found.Count}");
+                        $"processes={processesMs} attribution={attributionMs} hosts={registryMs} sessions={found.Count}");
                 DwmDiagnostics.Mark("session-scan", $"elapsedMs={total.ElapsedMilliseconds}; claudeMs={claudeMs}; codexMs={codexMs}; processesMs={processesMs}; attributionMs={attributionMs}; registryMs={registryMs}; sessions={found.Count}");
                 return (
                     Sessions: found,
+                    Hosts: hosts,
+                    Parents: parents,
                     ClaudeDiscovered: claude.Count,
                     CodexDiscovered: codex.Count,
                     ClaudeRows: found.Count(s => s.Provider == SessionProvider.Claude),
                     CodexRows: found.Count(s => s.Provider == SessionProvider.Codex));
             });
             var apply = Stopwatch.StartNew();
-            var changes = ApplyRefresh(scan.Sessions, HostManager.Discover(), Native.BuildParentMap());
+            var changes = ApplyRefresh(scan.Sessions, scan.Hosts, scan.Parents);
             apply.Stop();
             if (ExperimentOptions.TelemetryActive)
             {
