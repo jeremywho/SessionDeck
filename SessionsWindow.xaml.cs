@@ -139,6 +139,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     }
 
     FileSystemWatcher? _registryWatcher;
+    FileSystemWatcher? _hostsWatcher;
     DispatcherTimer? _registryDebounce;
     DateTime _lastWatchedRefresh;
 
@@ -153,6 +154,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     {
         string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude", "sessions");
         if (!Directory.Exists(dir)) return;
+        Directory.CreateDirectory(HostManager.HostsDir);
         _registryDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
         _registryDebounce.Tick += (_, _) =>
         {
@@ -178,6 +180,15 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             _registryWatcher.Deleted += kick;
             _registryWatcher.Renamed += (_, _) => Dispatcher.BeginInvoke(() => { _registryDebounce.Stop(); _registryDebounce.Start(); });
             _registryWatcher.EnableRaisingEvents = true;
+            _hostsWatcher = new FileSystemWatcher(HostManager.HostsDir, "*.json")
+            {
+                NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size,
+            };
+            _hostsWatcher.Changed += kick;
+            _hostsWatcher.Created += kick;
+            _hostsWatcher.Deleted += kick;
+            _hostsWatcher.Renamed += (_, _) => Dispatcher.BeginInvoke(() => { _registryDebounce.Stop(); _registryDebounce.Start(); });
+            _hostsWatcher.EnableRaisingEvents = true;
         }
         catch (Exception ex) { App.LogError(ex); }
     }
@@ -526,7 +537,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     {
         string cwd = string.IsNullOrWhiteSpace(s.Cwd) ? HomeDir : s.Cwd;
         string cmd = s.Provider == SessionProvider.Codex
-            ? $"codex resume {s.Id} {_app.Settings.CodexFlags}".Trim()
+            ? HostManager.ResumeCodexCommand(s.Id, _app.Settings.CodexFlags)
             : HostManager.ResumeClaudeCommand(s.Id, _app.Settings.ResumeFlags);
         SpawnIntoDeck(s.Id, s.Provider, cmd, cwd, s.Name);
     }
@@ -552,7 +563,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         PerformanceLog.Write($"reattach hosts={hosts.Count} ids={string.Join(",", hosts.Select(h => h.Id))}");
         foreach (var host in hosts)
             Deck.Open(host, activate: false);
-        if (Deck.Active == null && Deck.Tabs.Count > 0) Deck.Activate(Deck.Tabs[^1]);
+        if (Deck.Tabs.Count > 0) Deck.Activate(Deck.Tabs[^1]);
     }
 
     static string HomeDir => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -750,7 +761,9 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
                 match = live.FirstOrDefault(s => string.Equals(s.SessionId, h.SessionId, StringComparison.OrdinalIgnoreCase));
             match ??= live.FirstOrDefault(s => !claimed.Contains(s) && s.Pid > 0 && DescendsFrom(s.Pid, h.ChildPid, parents));
             if (match != null) claimed.Add(match);
-            byHost.Add((h, match ?? SessionRow.Placeholder(h)));
+            var info = match ?? SessionRow.Placeholder(h);
+            ApplyHookState(h, info);
+            byHost.Add((h, info));
         }
 
         var seen = new HashSet<string>();
@@ -786,6 +799,26 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
 
         RefreshAccount();
         return (added, removed, propertyChanges);
+    }
+
+    /// <summary>
+    /// What the session's own hooks reported beats what the scanner inferred, whenever it is newer.
+    /// Claude's registry is authoritative for busy/idle and lands within a second, so hooks mostly add
+    /// the tool name there; for Codex the hook is the only live status there is.
+    /// </summary>
+    static void ApplyHookState(Host.HostRecord h, SessionInfo info)
+    {
+        if (h.StatusAt is not DateTime at) return;
+        if (h.AgentStatus == "ended" || h.HasExited) return;
+        bool newer = at > info.StatusUpdatedAt.ToUniversalTime();
+        if (h.AgentStatus.Length > 0 && (newer || info.Status.Length == 0))
+        {
+            info.Status = h.AgentStatus;
+            info.StatusUpdatedAt = at.ToLocalTime();
+        }
+        if (h.LastTool.Length > 0 && (newer || info.LastTool.Length == 0)) info.LastTool = h.LastTool;
+        if (info.SessionId.Length == 0 && h.SessionId.Length > 0) info.SessionId = h.SessionId;
+        if (info.TranscriptPath.Length == 0 && h.TranscriptPath.Length > 0) info.TranscriptPath = h.TranscriptPath;
     }
 
     static bool DescendsFrom(int pid, int ancestor, Dictionary<int, int> parents)

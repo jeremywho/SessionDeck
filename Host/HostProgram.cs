@@ -46,6 +46,12 @@ internal sealed class HostRecord
     public DateTime StartedAt { get; set; }
     public uint? ExitCode { get; set; }
     public DateTime? ExitedAt { get; set; }
+    public string AgentStatus { get; set; } = "";
+    public string LastEvent { get; set; } = "";
+    public string LastTool { get; set; } = "";
+    public DateTime? StatusAt { get; set; }
+    public string TranscriptPath { get; set; } = "";
+    public int HookEvents { get; set; }
 
     [JsonIgnore] public bool HasExited => ExitCode.HasValue;
 }
@@ -124,10 +130,22 @@ internal static class HostProgram
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        string token = Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
+
+        string hookCmd = Hooks.HookCommand(Environment.ProcessPath!, port, token);
+        string commandLine = spec.CommandLine.Replace(Hooks.CommandPlaceholder, hookCmd);
+        if (commandLine.Contains(Hooks.ClaudeSettingsPlaceholder))
+        {
+            string settingsDir = Path.Combine(Path.GetDirectoryName(spec.HostsDir)!, "hook-settings");
+            Directory.CreateDirectory(settingsDir);
+            string settingsPath = Path.Combine(settingsDir, spec.Id + ".claude.json");
+            File.WriteAllText(settingsPath, Hooks.ClaudeSettingsJson(hookCmd));
+            commandLine = commandLine.Replace(Hooks.ClaudeSettingsPlaceholder, settingsPath.Replace('\\', '/'));
+        }
 
         var ready = Console.Out;
         DetachStdHandles();
-        _pty = new ConPty(spec.CommandLine, spec.Cwd, spec.Cols, spec.Rows);
+        _pty = new ConPty(commandLine, spec.Cwd, spec.Cols, spec.Rows);
         var self = Process.GetCurrentProcess();
         _record = new HostRecord
         {
@@ -140,7 +158,7 @@ internal static class HostProgram
             HostStartTicks = self.StartTime.ToUniversalTime().Ticks,
             ChildPid = _pty.Pid,
             Port = port,
-            Token = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)),
+            Token = token,
             StartedAt = DateTime.UtcNow,
         };
         WriteRecord();
@@ -164,6 +182,7 @@ internal static class HostProgram
         _record.ExitCode = _exitCode;
         _record.ExitedAt = DateTime.UtcNow;
         WriteRecord();
+        try { File.Delete(Path.Combine(Path.GetDirectoryName(spec.HostsDir)!, "hook-settings", spec.Id + ".claude.json")); } catch { }
         Broadcast(true, Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { type = "exit", code = _exitCode })));
         lock (ClientsLock) foreach (var c in Clients) c.Out.Writer.TryComplete();
         listener.Stop();
@@ -253,12 +272,18 @@ internal static class HostProgram
         tcp.NoDelay = true;
         using var _ = tcp;
         var stream = tcp.GetStream();
-        string? request = await ReadHttpHead(stream);
+        var (request, leftover) = await ReadHttpHead(stream);
         if (request == null) return;
         var lines = request.Split("\r\n");
         var reqLine = lines[0].Split(' ');
-        if (reqLine.Length < 2 || reqLine[0] != "GET") return;
+        if (reqLine.Length < 2) return;
         string path = reqLine[1];
+        if (reqLine[0] == "POST")
+        {
+            await ServeHook(stream, lines, path, leftover);
+            return;
+        }
+        if (reqLine[0] != "GET") return;
         string? key = null;
         foreach (var l in lines.Skip(1))
             if (l.StartsWith("Sec-WebSocket-Key:", StringComparison.OrdinalIgnoreCase)) key = l[18..].Trim();
@@ -348,19 +373,73 @@ internal static class HostProgram
         catch (Exception ex) { Log($"message: {ex.Message}"); }
     }
 
-    static async Task<string?> ReadHttpHead(NetworkStream s)
+    static async Task<(string? Head, byte[] Leftover)> ReadHttpHead(NetworkStream s)
     {
-        var buf = new byte[8192];
+        var buf = new byte[65536];
         int len = 0;
         while (len < buf.Length)
         {
             int n = await s.ReadAsync(buf.AsMemory(len));
-            if (n <= 0) return null;
+            if (n <= 0) return (null, Array.Empty<byte>());
             len += n;
             int at = buf.AsSpan(0, len).IndexOf("\r\n\r\n"u8);
-            if (at >= 0) return Encoding.ASCII.GetString(buf, 0, at);
+            if (at >= 0) return (Encoding.ASCII.GetString(buf, 0, at), buf.AsSpan(at + 4, len - at - 4).ToArray());
         }
-        return null;
+        return (null, Array.Empty<byte>());
+    }
+
+    /// <summary><c>POST /hook?token=…</c> from <c>SessionDeck.exe --hook</c>: one CLI hook event as
+    /// JSON. Updates the record (status, last tool, identity) and tells attached viewers.</summary>
+    static async Task ServeHook(NetworkStream stream, string[] lines, string path, byte[] leftover)
+    {
+        var query = ParseQuery(path);
+        if (!path.StartsWith("/hook") || !query.TryGetValue("token", out var token) || token != _record.Token)
+        {
+            await WriteAscii(stream, "HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+            return;
+        }
+        int length = 0;
+        foreach (var l in lines.Skip(1))
+            if (l.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase)) int.TryParse(l[15..].Trim(), out length);
+        length = Math.Min(length, 1 << 20);
+        var body = new byte[length];
+        int have = Math.Min(leftover.Length, length);
+        Array.Copy(leftover, body, have);
+        while (have < length)
+        {
+            int n = await stream.ReadAsync(body.AsMemory(have));
+            if (n <= 0) break;
+            have += n;
+        }
+        try
+        {
+            using var doc = JsonDocument.Parse(body.AsMemory(0, have));
+            ApplyHook(doc.RootElement);
+        }
+        catch (Exception ex) { Log($"hook: {ex.Message}"); }
+        await WriteAscii(stream, "HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n");
+    }
+
+    static void ApplyHook(JsonElement root)
+    {
+        string ev = root.TryGetProperty("hook_event_name", out var e) && e.ValueKind == JsonValueKind.String ? e.GetString() ?? "" : "";
+        if (ev.Length == 0) return;
+        lock (_record)
+        {
+            _record.HookEvents++;
+            _record.LastEvent = ev;
+            _record.StatusAt = DateTime.UtcNow;
+            string? status = Hooks.StatusFor(ev, root);
+            if (status != null) _record.AgentStatus = status;
+            if (root.TryGetProperty("tool_name", out var t) && t.ValueKind == JsonValueKind.String && ev == "PreToolUse")
+                _record.LastTool = t.GetString() ?? "";
+            if (root.TryGetProperty("session_id", out var sid) && sid.ValueKind == JsonValueKind.String && _record.SessionId.Length == 0)
+                _record.SessionId = sid.GetString() ?? "";
+            if (root.TryGetProperty("transcript_path", out var tp) && tp.ValueKind == JsonValueKind.String && _record.TranscriptPath.Length == 0)
+                _record.TranscriptPath = tp.GetString() ?? "";
+        }
+        WriteRecord();
+        Broadcast(true, Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { type = "hook", @event = ev, status = _record.AgentStatus, tool = _record.LastTool })));
     }
 
     static Dictionary<string, string> ParseQuery(string path)

@@ -12,6 +12,22 @@ internal static class Program
             return;
         }
 
+        // A CLI hook: forward the event JSON on stdin to this session's host. Never fails the CLI:
+        // any error is swallowed and the exit code is 0.
+        if (args.Length == 3 && args[0] == "--hook")
+        {
+            try
+            {
+                string body = Console.In.ReadToEnd();
+                using var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(3) };
+                using var content = new System.Net.Http.StringContent(body, System.Text.Encoding.UTF8, "application/json");
+                http.PostAsync($"http://127.0.0.1:{args[1]}/hook?token={args[2]}", content).GetAwaiter().GetResult();
+            }
+            catch { }
+            Environment.Exit(0);
+            return;
+        }
+
         // Headless diagnostic: dump live sessions to a temp file and exit (verification / CLI use).
         if (args.Length > 0 && args[0] == "--list")
         {

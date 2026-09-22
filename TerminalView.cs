@@ -67,7 +67,8 @@ internal sealed class TerminalView : Grid
     public async void Resume()
     {
         if (_web != null) return;
-        var web = new WebView2 { DefaultBackgroundColor = System.Drawing.Color.Transparent, Visibility = Visibility.Hidden };
+        bool opaque = Environment.GetEnvironmentVariable("SD_OPAQUE_WEBVIEW") == "1";
+        var web = new WebView2 { DefaultBackgroundColor = opaque ? System.Drawing.Color.FromArgb(12, 12, 12) : System.Drawing.Color.Transparent, Visibility = Visibility.Hidden };
         _web = web;
         Children.Add(web);
         _status.Visibility = Visibility.Visible;

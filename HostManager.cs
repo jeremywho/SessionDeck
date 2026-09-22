@@ -24,22 +24,33 @@ internal static class HostManager
         string cmd = $"claude --session-id {sessionId}";
         if (!string.IsNullOrWhiteSpace(name)) cmd += $" --name \"{name.Replace("\"", "\\\"")}\"";
         if (!string.IsNullOrWhiteSpace(extraFlags)) cmd += " " + extraFlags.Trim();
-        return cmd;
+        return cmd + ClaudeHookArgs;
     }
 
     public static string ResumeClaudeCommand(string sessionId, string extraFlags)
     {
         string cmd = $"claude --resume {sessionId}";
         if (!string.IsNullOrWhiteSpace(extraFlags)) cmd += " " + extraFlags.Trim();
-        return cmd;
+        return cmd + ClaudeHookArgs;
     }
 
     public static string NewCodexCommand(string extraFlags)
     {
         string cmd = "codex";
         if (!string.IsNullOrWhiteSpace(extraFlags)) cmd += " " + extraFlags.Trim();
-        return cmd;
+        return cmd + CodexHookArgs;
     }
+
+    public static string ResumeCodexCommand(string threadId, string extraFlags)
+    {
+        string cmd = $"codex resume {threadId}";
+        if (!string.IsNullOrWhiteSpace(extraFlags)) cmd += " " + extraFlags.Trim();
+        return cmd + CodexHookArgs;
+    }
+
+    /// <summary>Filled in by the host once it knows its port and token — see <see cref="Host.Hooks"/>.</summary>
+    const string ClaudeHookArgs = " --settings \"" + Host.Hooks.ClaudeSettingsPlaceholder + "\"";
+    static readonly string CodexHookArgs = " " + Host.Hooks.CodexArgs(Host.Hooks.CommandPlaceholder);
 
     /// <summary>
     /// The host runs the CLI under pwsh so its own PATH resolution and profile apply, exactly as a
