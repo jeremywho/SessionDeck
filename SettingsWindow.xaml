@@ -4,7 +4,7 @@
                  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
                  Title="Settings"
-                 Width="470" Height="560"
+                 Width="470" Height="600"
                  ResizeMode="NoResize"
                  WindowStartupLocation="CenterScreen"
                  ExtendsContentIntoTitleBar="True"
@@ -46,9 +46,10 @@
 
         <TextBlock Text="Terminal" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource FgBrush}" Margin="0,20,0,0"/>
         <Grid Margin="0,8,0,0">
-          <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="70"/></Grid.ColumnDefinitions>
+          <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="110"/></Grid.ColumnDefinitions>
           <ui:TextBox x:Name="FontBox" Grid.Column="0" PlaceholderText="e.g. CaskaydiaCove NF"/>
-          <ui:NumberBox x:Name="FontSizeBox" Grid.Column="2" Minimum="8" Maximum="28" SmallChange="1" ClearButtonEnabled="False"/>
+          <ui:NumberBox x:Name="FontSizeBox" Grid.Column="2" Minimum="8" Maximum="28" SmallChange="1" ClearButtonEnabled="False"
+                        SpinButtonPlacementMode="Inline" ToolTip="Font size (px)"/>
         </Grid>
         <Grid Margin="0,8,0,0">
           <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
