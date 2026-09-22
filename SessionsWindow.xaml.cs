@@ -906,10 +906,14 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         Dispatcher.BeginInvoke(() => _rowMenu.IsOpen = true, DispatcherPriority.Input);
     }
 
-    static MenuItem Item(string header, Action run)
+    MenuItem Item(string header, Action run)
     {
         var mi = new MenuItem { Header = header };
-        mi.Click += (_, _) => run();
+        mi.Click += (_, _) =>
+        {
+            PerformanceLog.Write($"row-menu click: {header}");
+            Dispatcher.BeginInvoke(run, DispatcherPriority.Background);
+        };
         return mi;
     }
 
@@ -924,6 +928,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     /// </summary>
     void AdoptIntoDeck(SessionInfo s)
     {
+        PerformanceLog.Write($"adopt-start pid={s.Pid} transcript={(s.TranscriptPath.Length > 0 && File.Exists(s.TranscriptPath))}");
         string what = s.Provider == SessionProvider.Codex ? "Codex thread" : "Claude session";
         if (s.Provider == SessionProvider.Claude && (s.TranscriptPath.Length == 0 || !File.Exists(s.TranscriptPath)))
         {
