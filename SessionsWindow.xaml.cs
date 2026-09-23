@@ -806,7 +806,9 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
 
         _sessionsSnapshot = byHost.Select(x => x.Info).ToArray();
         _externalSnapshot = live.Where(s => !claimed.Contains(s)).ToArray();
-        SessionRegistry.Snapshot(byHost.Where(x => !x.Host.HasExited && x.Info.SessionId.Length > 0 && IsRestorable(x.Info)).Select(x => x.Info).ToList());
+        // A CLI that has exited leaves its host alive (the shell wrapper stays open), so hook status is
+        // what says the session is really over; otherwise it would be offered for restore next launch.
+        SessionRegistry.Snapshot(byHost.Where(x => !x.Host.HasExited && x.Host.AgentStatus != "ended" && x.Info.SessionId.Length > 0 && IsRestorable(x.Info)).Select(x => x.Info).ToList());
 
         int hostsLive = hosts.Count(h => !h.HasExited);
         int external = _externalSnapshot.Count(s => s.Kind != "companion");
