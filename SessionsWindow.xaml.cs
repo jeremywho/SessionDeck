@@ -52,6 +52,8 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         InitializeComponent();
         if (DwmDiagnosticOptions.DisableBackdrop)
             WindowBackdropType = Wpf.Ui.Controls.WindowBackdropType.None;
+        if (string.Equals(_app.Settings.WindowBackdrop, "Acrylic", StringComparison.OrdinalIgnoreCase))
+            WindowBackdropType = Wpf.Ui.Controls.WindowBackdropType.Acrylic;
         IsolationTelemetry.Start();
         SessionsGrid.LoadingRow += (_, _) => IsolationTelemetry.RowLoaded();
         SessionsGrid.UnloadingRow += (_, _) => IsolationTelemetry.RowUnloaded();
@@ -590,6 +592,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     }
 
     public void RefreshTerminalLook() => Deck.ApplyLook();
+
 
     void OnTopButton_Click(object sender, RoutedEventArgs e)
     {

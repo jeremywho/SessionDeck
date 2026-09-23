@@ -34,6 +34,8 @@ internal partial class DeckPane : UserControl
         public Visibility ExitedVisibility => View.Exited ? Visibility.Visible : Visibility.Collapsed;
         public string Tooltip => $"{StripMark(View.Title)}\n{View.Host.Cwd}\n{View.Host.Provider} · session {View.Host.SessionId}\nhost pid {View.Host.HostPid} · child pid {View.Host.ChildPid}";
 
+        public DateTime? HiddenSince { get; set; }
+
         bool _active;
         public bool IsActive
         {
@@ -57,6 +59,9 @@ internal partial class DeckPane : UserControl
     {
         InitializeComponent();
         DataContext = this;
+        var sweep = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMinutes(1) };
+        sweep.Tick += (_, _) => SuspendStale();
+        sweep.Start();
     }
 
     public bool HasTabs => Tabs.Count > 0;
@@ -87,6 +92,11 @@ internal partial class DeckPane : UserControl
         return tab;
     }
 
+    /// <summary>
+    /// Switching tabs only flips visibility: a hidden tab keeps its browser so coming back is
+    /// instant. Browsers are dropped by <see cref="SuspendStale"/> once a tab has been hidden for
+    /// a while, which is what bounds memory rather than the switch itself.
+    /// </summary>
     public void Activate(DeckTab tab)
     {
         if (_active == tab) { tab.View.FocusTerminal(); return; }
@@ -95,13 +105,22 @@ internal partial class DeckPane : UserControl
             bool on = t == tab;
             t.IsActive = on;
             t.View.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
-            if (on) t.View.Resume();
-            else t.View.Suspend();
+            t.HiddenSince = on ? null : (t.HiddenSince ?? DateTime.UtcNow);
         }
         _active = tab;
+        tab.View.Resume();
         Placeholder.Visibility = Visibility.Collapsed;
         tab.View.Fit();
         tab.View.FocusTerminal();
+    }
+
+    static readonly TimeSpan SuspendAfter = TimeSpan.FromMinutes(10);
+
+    void SuspendStale()
+    {
+        foreach (var t in Tabs)
+            if (t != _active && t.HiddenSince is DateTime since && DateTime.UtcNow - since > SuspendAfter && !t.View.IsSuspended)
+                t.View.Suspend();
     }
 
     public void CycleActive(int delta)

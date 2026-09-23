@@ -35,6 +35,7 @@ internal sealed class Settings
     public string TerminalFont { get; set; } = "CaskaydiaCove NF";          // xterm font family; falls back down the stack in terminal.html
     public double TerminalFontSize { get; set; } = 12;                     // points, like Windows Terminal's font.size
     public int TerminalOpacity { get; set; } = 98;                          // 0-100, like Windows Terminal's `opacity`
+    public string WindowBackdrop { get; set; } = "Acrylic";                 // Acrylic (blurred see-through, like Windows Terminal with acrylic) | Mica
     public string TerminalScheme { get; set; } = "Campbell";                // Campbell | One Half Dark | Deck
     public List<string> RecentFolders { get; set; } = new();                // most recent first, capped
     public string LastClaudeModel { get; set; } = "";
