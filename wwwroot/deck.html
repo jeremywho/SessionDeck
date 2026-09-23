@@ -5,7 +5,11 @@
 <title>terminal</title>
 <link rel="stylesheet" href="xterm.css">
 <style>
+  html { color-scheme: dark; }
   html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: transparent; }
+  /* xterm keeps a native scrollbar on the viewport under its own fading overlay slider; only the overlay should show. */
+  .xterm .xterm-viewport { scrollbar-width: none; }
+  .xterm .xterm-viewport::-webkit-scrollbar { display: none; }
   .pane { position: absolute; inset: 0; padding: 6px 0 0 8px; background: var(--bg, rgba(12,12,12,0.96)); visibility: hidden; }
   .pane.shown { visibility: visible; }
   #empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center;
@@ -80,6 +84,14 @@
 
   let look = lookFrom({ font: q.get('font'), size: q.get('size'), opacity: q.get('opacity'), scheme: q.get('scheme') });
   const baseOf = () => schemes[look.scheme] || (dark ? themes.dark : themes.light);
+  function sliderColours() {
+    const ink = dark ? '255, 255, 255' : '0, 0, 0';
+    return {
+      scrollbarSliderBackground: `rgba(${ink}, 0.22)`,
+      scrollbarSliderHoverBackground: `rgba(${ink}, 0.34)`,
+      scrollbarSliderActiveBackground: `rgba(${ink}, 0.46)`,
+    };
+  }
   function setSurface() {
     document.documentElement.style.setProperty('--bg', hexToRgba(baseOf().background, look.opacity / 100));
     document.documentElement.style.setProperty('--fg3', dark ? '#8a8d93' : '#6b6f78');
@@ -94,7 +106,7 @@
   // tinted, translucent surface so the window behind shows through at the chosen opacity.
   function termOptions() {
     return {
-      theme: Object.assign({}, baseOf(), { background: '#00000000' }),
+      theme: Object.assign({}, baseOf(), { background: '#00000000' }, sliderColours()),
       fontFamily: `"${look.font}", "Cascadia Code", "Cascadia Mono", Consolas, monospace`,
       fontSize: Math.round(look.size * 96 / 72),
       lineHeight: look.lineHeight,
