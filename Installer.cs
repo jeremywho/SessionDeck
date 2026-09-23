@@ -77,7 +77,7 @@ internal static class Installer
         try
         {
             string programs = Environment.GetFolderPath(Environment.SpecialFolder.Programs);
-            string lnk = Path.Combine(programs, "Claude Sessions.lnk");
+            string lnk = Path.Combine(programs, "Session Deck.lnk");
             var t = Type.GetTypeFromProgID("WScript.Shell");
             if (t == null) return;
             dynamic shell = Activator.CreateInstance(t)!;
@@ -85,7 +85,7 @@ internal static class Installer
             sc.TargetPath = InstalledExe;
             sc.WorkingDirectory = InstallDir;
             sc.IconLocation = InstalledExe + ",0";
-            sc.Description = "Claude Sessions — live Claude Code session monitor";
+            sc.Description = "Session Deck — Claude Code and Codex sessions side by side";
             sc.Save();
         }
         catch (Exception ex) { App.LogError(ex); }
