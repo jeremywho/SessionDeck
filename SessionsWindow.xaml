@@ -320,7 +320,7 @@
                        ToolTip="Claude Code" Foreground="{DynamicResource ClaudeMarkBrush}"/>
             <ui:Button x:Name="NewSessionButton" Appearance="Transparent" BorderThickness="0" MinHeight="0" MaxHeight="30" Width="36" Padding="0"
                        VerticalAlignment="Center" VerticalContentAlignment="Center" FontSize="15"
-                       Click="NewSessionButton_Click" ToolTip="New Claude session…">
+                       Click="NewSessionButton_Click" ToolTip="New Claude session">
               <ui:Button.Icon><ui:SymbolIcon Symbol="AddCircle24"/></ui:Button.Icon>
             </ui:Button>
 
@@ -331,11 +331,17 @@
                        ToolTip="Codex" Foreground="{DynamicResource CodexMarkBrush}"/>
             <ui:Button x:Name="NewCodexSessionButton" Appearance="Transparent" BorderThickness="0" MinHeight="0" MaxHeight="30" Width="36" Padding="0"
                        VerticalAlignment="Center" VerticalContentAlignment="Center" FontSize="15"
-                       Click="NewCodexSessionButton_Click" ToolTip="New Codex session…">
+                       Click="NewCodexSessionButton_Click" ToolTip="New Codex session">
               <ui:Button.Icon><ui:SymbolIcon Symbol="AddCircle24"/></ui:Button.Icon>
             </ui:Button>
 
             <Border Width="1" Margin="7,4,7,4" Opacity="0.55" Background="{DynamicResource Fg3Brush}"/>
+
+            <ui:Button x:Name="NewSessionDialogButton" Appearance="Transparent" BorderThickness="0" MinHeight="0" MaxHeight="30" Width="36" Padding="0"
+                       VerticalAlignment="Center" VerticalContentAlignment="Center" FontSize="15"
+                       Click="NewSessionDialogButton_Click" ToolTip="New session with options: folder, model, first prompt…">
+              <ui:Button.Icon><ui:SymbolIcon Symbol="Options24"/></ui:Button.Icon>
+            </ui:Button>
 
             <ui:Button x:Name="AdoptButton" Appearance="Transparent" BorderThickness="0" MinHeight="0" MaxHeight="30" Width="36" Padding="0"
                        VerticalAlignment="Center" VerticalContentAlignment="Center" FontSize="15"

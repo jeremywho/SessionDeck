@@ -471,10 +471,17 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
 
     // ---------------- theme / on-top ----------------
 
-    void NewSessionButton_Click(object sender, RoutedEventArgs e) => NewSessionDialog(SessionProvider.Claude);
+    void NewSessionButton_Click(object sender, RoutedEventArgs e)
+    {
+        string sessionId = Guid.NewGuid().ToString();
+        SpawnIntoDeck(sessionId, SessionProvider.Claude, HostManager.NewClaudeCommand(sessionId, null, _app.Settings.ResumeFlags), HomeDir, null);
+    }
 
     // Codex has no --name, so there are no named counterparts to these two — see NewCodexCommand.
-    void NewCodexSessionButton_Click(object sender, RoutedEventArgs e) => NewSessionDialog(SessionProvider.Codex);
+    void NewCodexSessionButton_Click(object sender, RoutedEventArgs e) =>
+        SpawnIntoDeck("", SessionProvider.Codex, HostManager.NewCodexCommand(_app.Settings.CodexFlags), HomeDir, null);
+
+    void NewSessionDialogButton_Click(object sender, RoutedEventArgs e) => NewSessionDialog(SessionProvider.Claude);
 
     void NewSessionDialog(SessionProvider initial)
     {
