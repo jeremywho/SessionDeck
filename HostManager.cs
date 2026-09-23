@@ -227,6 +227,9 @@ internal static class HostManager
         });
     }
 
+    /// <summary>The record as the host last wrote it, or null once it is gone.</summary>
+    public static HostRecord? Reload(HostRecord rec) => ReadRecord(Path.Combine(HostsDir, rec.Id + ".json"));
+
     /// <summary>Drop an exited host's record so its row goes away.</summary>
     public static void Forget(HostRecord rec)
     {

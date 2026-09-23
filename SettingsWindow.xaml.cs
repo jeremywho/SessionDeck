@@ -13,6 +13,7 @@ internal partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         ThemeToggle.IsChecked = !string.Equals(_app.Settings.Theme, "Light", StringComparison.OrdinalIgnoreCase);
         TaskbarToggle.IsChecked = _app.Settings.ShowInTaskbar;
         RunOnLoginToggle.IsChecked = _app.Settings.RunOnLogin;
+        AutoRestartToggle.IsChecked = _app.Settings.AutoRestartOnUpdate;
         ResumeFlagsBox.Text = _app.Settings.ResumeFlags;
         CodexFlagsBox.Text = _app.Settings.CodexFlags;
         FontBox.Text = _app.Settings.TerminalFont;
@@ -40,6 +41,7 @@ internal partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         _app.ApplyShowInTaskbar();
 
         _app.Settings.RunOnLogin = RunOnLoginToggle.IsChecked == true;
+        _app.Settings.AutoRestartOnUpdate = AutoRestartToggle.IsChecked == true;
         _app.ApplyRunOnLogin();
 
         _app.Settings.ResumeFlags = ResumeFlagsBox.Text?.Trim() ?? "";

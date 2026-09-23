@@ -28,8 +28,10 @@ $desk = $AE::RootElement
 $w = $desk.FindFirst([System.Windows.Automation.TreeScope]::Children, (New-Object System.Windows.Automation.PropertyCondition($nameProp, 'Session Deck')))
 if (-not $w) { throw "no main window" }
 
-$rows = $w.FindAll([System.Windows.Automation.TreeScope]::Descendants,
-    (New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty, [System.Windows.Automation.ControlType]::DataItem)))
+# Tab-strip items and usage meters are DataItems too; only the session list's rows are wanted.
+$rows = @($w.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+    (New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty, [System.Windows.Automation.ControlType]::DataItem))) |
+    Where-Object { $_.Current.Name -eq 'SessionDeck.SessionRow' })
 
 function RowText($r) {
     ($r.FindAll([System.Windows.Automation.TreeScope]::Descendants,

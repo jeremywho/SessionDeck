@@ -44,6 +44,15 @@
           <ui:ToggleSwitch x:Name="RunOnLoginToggle" Grid.Column="1" VerticalAlignment="Center"/>
         </Grid>
 
+        <Grid Margin="0,10,0,0">
+          <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+          <StackPanel Grid.Column="0">
+            <TextBlock Text="Restart sessions when their CLI updates" Foreground="{DynamicResource FgBrush}"/>
+            <TextBlock Text="A deck session running an older version than is installed is resumed on the new one once it has been idle a while and is not the tab in front." FontSize="11.5" TextWrapping="Wrap" Foreground="{DynamicResource Fg3Brush}"/>
+          </StackPanel>
+          <ui:ToggleSwitch x:Name="AutoRestartToggle" Grid.Column="1" VerticalAlignment="Center"/>
+        </Grid>
+
         <TextBlock Text="Terminal" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource FgBrush}" Margin="0,20,0,0"/>
         <Grid Margin="0,8,0,0">
           <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="110"/></Grid.ColumnDefinitions>

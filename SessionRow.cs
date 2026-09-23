@@ -215,6 +215,7 @@ internal sealed class SessionRow : INotifyPropertyChanged
                 $"Folder: {_s.Cwd}",
                 $"{ProviderName} · PID {_s.Pid} · {ShortId} · v{_s.Version}",
             });
+            if (UpdatePending) lines.Add($"Update installed: v{InstalledVersions.For(_s.Provider)} · restarts when idle, or right-click to restart now");
             if (OnOtherDesktop) lines.Add($"On {DesktopLabel}");
             if (_s.SubagentsActive > 0) lines.Add($"Subagents: {_s.SubagentsActive} working / {_s.SubagentsTotal} this session");
             if (_s.ApiError && _s.ErrorText.Length > 0) lines.Add(_s.ErrorText);
@@ -265,6 +266,15 @@ internal sealed class SessionRow : INotifyPropertyChanged
     public string LastTool => _s.LastTool;
     public string Cwd => _s.Cwd;
     public string Version => _s.Version;
+
+    /// <summary>The CLI on disk is newer than the one this session is running; a restart picks it up.</summary>
+    public bool UpdatePending => !Host.HasExited && InstalledVersions.IsBehind(_s.Provider, _s.Version);
+
+    /// <summary>Restart means end the child and start the same session again; both CLIs need the id for that.</summary>
+    public bool CanRestart => Host.SessionId.Length > 0;
+
+    /// <summary>Where the CLI keeps this session's conversation, from the hook if the scanner has not said.</summary>
+    public string TranscriptPath => _s.TranscriptPath.Length > 0 ? _s.TranscriptPath : Host.TranscriptPath;
 
     static string HumanizeIdle(int sec)
     {

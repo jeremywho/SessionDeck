@@ -55,6 +55,9 @@ internal partial class DeckPane : UserControl
 
     public event Action? TabsChanged;
 
+    /// <summary>The tab's menu asked for a restart; the window owns the resume logic.</summary>
+    public event Action<DeckTab>? RestartRequested;
+
     public DeckPane()
     {
         InitializeComponent();
@@ -231,6 +234,7 @@ internal partial class DeckPane : UserControl
 
     void CloseTabMenu_Click(object sender, RoutedEventArgs e) { if (TabOf(sender) is { } tab) Close(tab); }
     void StopMenu_Click(object sender, RoutedEventArgs e) { if (TabOf(sender) is { } tab) { Stop(tab); Close(tab); } }
+    void RestartMenu_Click(object sender, RoutedEventArgs e) { if (TabOf(sender) is { } tab) RestartRequested?.Invoke(tab); }
     void CopyIdMenu_Click(object sender, RoutedEventArgs e) { if (TabOf(sender) is { } tab) TrySetClipboard(tab.View.Host.SessionId); }
     void CopyCwdMenu_Click(object sender, RoutedEventArgs e) { if (TabOf(sender) is { } tab) TrySetClipboard(tab.View.Host.Cwd); }
 

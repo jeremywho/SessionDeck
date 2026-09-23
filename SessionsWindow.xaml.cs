@@ -96,7 +96,14 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         // rewrites its registry files on heartbeats; using those events to trigger scans allowed a
         // continuously busy set of sessions to drive nearly eight full scans per second.
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
-        _timer.Tick += (_, _) => RequestRefresh();
+        _timer.Tick += (_, _) => { RequestRefresh(); if (DateTime.UtcNow - InstalledVersions.CheckedAt > TimeSpan.FromMinutes(10)) InstalledVersions.Refresh(); };
+        InstalledVersions.Changed += () => Dispatcher.BeginInvoke(RequestRefresh);
+        InstalledVersions.Refresh();
+        Deck.RestartRequested += tab =>
+        {
+            var row = Rows.FirstOrDefault(r => r.Host.Id == tab.View.Host.Id);
+            if (row != null) _ = RestartSession(row);
+        };
         if (!DwmDiagnosticOptions.DisableBackgroundWork)
         {
             _timer.Start();
@@ -727,6 +734,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             var apply = Stopwatch.StartNew();
             var changes = ApplyRefresh(scan.Sessions, scan.Hosts, scan.Parents);
             apply.Stop();
+            RestartUpdatedIdleSessions();
             if (ExperimentOptions.TelemetryActive)
             {
                 double applyMs = apply.Elapsed.TotalMilliseconds;
@@ -1061,12 +1069,22 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         if (row.Host.HasExited)
         {
             _rowMenu.Items.Add(Item("Remove", () => { if (tab != null) Deck.Close(tab); HostManager.Forget(row.Host); RequestRefresh(); }));
+            var again = Item("Restart session", () => _ = RestartSession(row));
+            again.IsEnabled = row.CanRestart && !_restarting.Contains(row.Host.Id);
+            _rowMenu.Items.Add(again);
         }
         else
         {
             _rowMenu.Items.Add(Item(tab != null ? "Show tab" : "Open tab", () => Deck.Open(row.Host)));
             if (tab != null) _rowMenu.Items.Add(Item("Close tab (keep running)", () => Deck.Close(tab)));
             _rowMenu.Items.Add(Item("End session", () => { HostManager.Kill(row.Host); if (tab != null) Deck.Close(tab); }));
+            var restart = Item(row.UpdatePending
+                    ? $"Restart to update (v{row.Version} → v{InstalledVersions.For(row.Provider)})"
+                    : "Restart session (resume on the installed CLI)",
+                () => _ = RestartSession(row));
+            restart.IsEnabled = row.CanRestart && !_restarting.Contains(row.Host.Id);
+            if (!row.CanRestart) restart.ToolTip = "The session has not reported an id to resume yet";
+            _rowMenu.Items.Add(restart);
         }
         _rowMenu.Items.Add(new Separator());
         _rowMenu.Items.Add(Item("Copy session id", () => TrySetClipboard(row.Host.SessionId)));
@@ -1074,6 +1092,79 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         _rowMenu.PlacementTarget = SessionsGrid;
         _rowMenu.Placement = PlacementMode.MousePoint;
         Dispatcher.BeginInvoke(() => _rowMenu.IsOpen = true, DispatcherPriority.Input);
+    }
+
+    readonly HashSet<string> _restarting = new();
+    static readonly TimeSpan IdleBeforeRestart = TimeSpan.FromMinutes(2);
+
+    /// <summary>
+    /// A session whose CLI has updated underneath it is restarted once it has sat idle for a while and
+    /// is not the tab in front of a focused window, so no turn is cut off and no half-typed prompt is
+    /// lost. The session itself survives: the restart resumes it from its transcript.
+    /// </summary>
+    void RestartUpdatedIdleSessions()
+    {
+        if (!_app.Settings.AutoRestartOnUpdate) return;
+        foreach (var row in Rows.ToList())
+        {
+            if (!row.UpdatePending || !row.CanRestart || _restarting.Contains(row.Host.Id)) continue;
+            if (row.Host.AgentStatus != "idle" || row.Host.StatusAt is not DateTime at) continue;
+            if (DateTime.UtcNow - at.ToUniversalTime() < IdleBeforeRestart) continue;
+            var tab = Deck.FindByHost(row.Host.Id);
+            if (tab != null && tab == Deck.Active && IsActive) continue;
+            PerformanceLog.Write($"auto-restart host={row.Host.Id} provider={row.Provider} from=v{row.Version} to=v{InstalledVersions.For(row.Provider)}");
+            _ = RestartSession(row);
+        }
+    }
+
+    /// <summary>
+    /// End the host's child and start the same session again in a new host, in the same tab slot.
+    /// Claude only writes a transcript once something has been said, and <c>--resume</c> refuses a
+    /// session without one, so an unused session is started fresh under its own id instead.
+    /// </summary>
+    async Task RestartSession(SessionRow row)
+    {
+        var host = row.Host;
+        if (!row.CanRestart || !_restarting.Add(host.Id)) return;
+        try
+        {
+            var tab = Deck.FindByHost(host.Id);
+            int slot = tab != null ? Deck.Tabs.IndexOf(tab) : -1;
+            bool wasActive = tab != null && Deck.Active == tab;
+            var provider = row.Provider;
+            string sessionId = host.SessionId;
+            bool hasTranscript = row.TranscriptPath.Length > 0 && File.Exists(row.TranscriptPath);
+            string cmd = provider == SessionProvider.Codex
+                ? HostManager.ResumeCodexCommand(sessionId, _app.Settings.CodexFlags)
+                : hasTranscript
+                    ? HostManager.ResumeClaudeCommand(sessionId, _app.Settings.ResumeFlags)
+                    : HostManager.NewClaudeCommand(sessionId, null, _app.Settings.ResumeFlags);
+
+            if (!host.HasExited)
+            {
+                HostManager.Kill(host);
+                var deadline = DateTime.UtcNow.AddSeconds(15);
+                while (DateTime.UtcNow < deadline)
+                {
+                    await Task.Delay(250);
+                    var fresh = HostManager.Reload(host);
+                    if (fresh == null || fresh.HasExited || !HostManager.IsAlive(fresh)) break;
+                }
+            }
+
+            var next = HostManager.Spawn(sessionId, provider, cmd, host.Cwd, host.Title);
+            HostManager.Forget(host);
+            if (tab != null) Deck.Close(tab);
+            var opened = Deck.Open(next, activate: wasActive);
+            if (slot >= 0) Deck.Move(opened, slot);
+            RequestRefresh();
+        }
+        catch (Exception ex)
+        {
+            App.LogError(ex);
+            LiveLabel.Text = "Restart failed: " + ex.Message;
+        }
+        finally { _restarting.Remove(host.Id); }
     }
 
     MenuItem Item(string header, Action run)

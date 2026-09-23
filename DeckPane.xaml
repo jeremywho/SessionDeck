@@ -27,6 +27,7 @@
                   <ContextMenu>
                     <MenuItem Header="Close tab (session keeps running)" Click="CloseTabMenu_Click" Tag="{Binding}"/>
                     <MenuItem Header="Close &amp; end session" Click="StopMenu_Click" Tag="{Binding}"/>
+                    <MenuItem Header="Restart session (resume on the installed CLI)" Click="RestartMenu_Click" Tag="{Binding}"/>
                     <Separator/>
                     <MenuItem Header="Copy session id" Click="CopyIdMenu_Click" Tag="{Binding}"/>
                     <MenuItem Header="Copy folder" Click="CopyCwdMenu_Click" Tag="{Binding}"/>
