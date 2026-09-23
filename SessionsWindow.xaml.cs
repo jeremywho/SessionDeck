@@ -471,15 +471,23 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
 
     // ---------------- theme / on-top ----------------
 
-    void NewSessionButton_Click(object sender, RoutedEventArgs e) => OpenNewClaudeInDeck(null);
+    void NewSessionButton_Click(object sender, RoutedEventArgs e) => NewSessionDialog(SessionProvider.Claude);
 
     // Codex has no --name, so there are no named counterparts to these two — see NewCodexCommand.
-    void NewCodexSessionButton_Click(object sender, RoutedEventArgs e) => OpenNewCodexInDeck();
+    void NewCodexSessionButton_Click(object sender, RoutedEventArgs e) => NewSessionDialog(SessionProvider.Codex);
 
-    void NewNamedSessionButton_Click(object sender, RoutedEventArgs e)
+    void NewSessionDialog(SessionProvider initial)
     {
-        var prompt = new NamePromptWindow(this);
-        if (prompt.ShowDialog() == true) OpenNewClaudeInDeck(prompt.SessionName);
+        var dlg = new NewSessionWindow(this, _app.Settings, initial);
+        if (dlg.ShowDialog() != true || dlg.Result is not { } r) return;
+        if (r.Provider == SessionProvider.Codex)
+            SpawnIntoDeck("", SessionProvider.Codex, HostManager.NewCodexCommand(_app.Settings.CodexFlags, r.Model, r.Effort), r.Cwd, null, r.Prompt);
+        else
+        {
+            string sessionId = Guid.NewGuid().ToString();
+            SpawnIntoDeck(sessionId, SessionProvider.Claude,
+                HostManager.NewClaudeCommand(sessionId, r.Name, _app.Settings.ResumeFlags, r.Model, r.Effort), r.Cwd, r.Name, r.Prompt);
+        }
     }
 
     void SettingsButton_Click(object sender, RoutedEventArgs e) => _app.ShowSettings();
@@ -522,16 +530,6 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
 
     // ---------------- deck: sessions hosted inside this window ----------------
 
-    void OpenNewClaudeInDeck(string? name)
-    {
-        string sessionId = Guid.NewGuid().ToString();
-        SpawnIntoDeck(sessionId, SessionProvider.Claude,
-            HostManager.NewClaudeCommand(sessionId, name, _app.Settings.ResumeFlags), HomeDir, name);
-    }
-
-    void OpenNewCodexInDeck() =>
-        SpawnIntoDeck("", SessionProvider.Codex, HostManager.NewCodexCommand(_app.Settings.CodexFlags), HomeDir, null);
-
     /// <summary>Resume a saved session inside a deck tab rather than an external terminal.</summary>
     public void ResumeInDeck(SavedSession s)
     {
@@ -542,11 +540,11 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         SpawnIntoDeck(s.Id, s.Provider, cmd, cwd, s.Name);
     }
 
-    void SpawnIntoDeck(string sessionId, SessionProvider provider, string cmd, string cwd, string? title)
+    void SpawnIntoDeck(string sessionId, SessionProvider provider, string cmd, string cwd, string? title, string initialPrompt = "")
     {
         try
         {
-            var host = HostManager.Spawn(sessionId, provider, cmd, cwd, title);
+            var host = HostManager.Spawn(sessionId, provider, cmd, cwd, title, initialPrompt);
             Deck.Open(host);
         }
         catch (Exception ex)

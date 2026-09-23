@@ -19,10 +19,12 @@ internal static class HostManager
 
     /// <summary>The claude launch for a brand-new session with a preassigned id, so the transcript
     /// is known before the first byte is written.</summary>
-    public static string NewClaudeCommand(string sessionId, string? name, string extraFlags)
+    public static string NewClaudeCommand(string sessionId, string? name, string extraFlags, string model = "", string effort = "")
     {
         string cmd = $"claude --session-id {sessionId}";
         if (!string.IsNullOrWhiteSpace(name)) cmd += $" --name \"{name.Replace("\"", "\\\"")}\"";
+        if (!string.IsNullOrWhiteSpace(model)) cmd += $" --model \"{model.Trim()}\"";
+        if (!string.IsNullOrWhiteSpace(effort)) cmd += $" --effort {effort.Trim()}";
         if (!string.IsNullOrWhiteSpace(extraFlags)) cmd += " " + extraFlags.Trim();
         return cmd + ClaudeHookArgs;
     }
@@ -34,9 +36,11 @@ internal static class HostManager
         return cmd + ClaudeHookArgs;
     }
 
-    public static string NewCodexCommand(string extraFlags)
+    public static string NewCodexCommand(string extraFlags, string model = "", string effort = "")
     {
         string cmd = "codex";
+        if (!string.IsNullOrWhiteSpace(model)) cmd += $" -m \"{model.Trim()}\"";
+        if (!string.IsNullOrWhiteSpace(effort)) cmd += $" -c model_reasoning_effort=\"{effort.Trim()}\"";
         if (!string.IsNullOrWhiteSpace(extraFlags)) cmd += " " + extraFlags.Trim();
         return cmd + CodexHookArgs;
     }
@@ -59,7 +63,7 @@ internal static class HostManager
     static string WrapInShell(string cmd) =>
         $"\"{SessionLauncher.ResolvePowerShell()}\" -NoLogo -NoExit -Command \"{cmd.Replace("\"", "\\\"")}\"";
 
-    public static HostRecord Spawn(string sessionId, SessionProvider provider, string command, string cwd, string? title)
+    public static HostRecord Spawn(string sessionId, SessionProvider provider, string command, string cwd, string? title, string initialPrompt = "")
     {
         Directory.CreateDirectory(HostsDir);
         string id = Guid.NewGuid().ToString("N")[..12];
@@ -71,6 +75,7 @@ internal static class HostManager
             CommandLine = WrapInShell(command),
             Cwd = string.IsNullOrWhiteSpace(cwd) ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) : cwd,
             HostsDir = HostsDir,
+            InitialPrompt = initialPrompt ?? "",
         };
 
         var psi = new ProcessStartInfo(HostExe())

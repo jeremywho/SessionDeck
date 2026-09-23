@@ -25,6 +25,8 @@ internal partial class DeckPane : UserControl
             t = t.Trim();
             foreach (var mark in new[] { "✳", "◆", "✻" })
                 if (t.StartsWith(mark, StringComparison.Ordinal)) return t[mark.Length..].TrimStart();
+            if (t.Contains('\\') && t.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+                return System.IO.Path.GetFileNameWithoutExtension(t);
             return t;
         }
         public Brush GlyphBrush =>

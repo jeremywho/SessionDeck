@@ -24,6 +24,10 @@ internal sealed class HostSpec
     public short Rows { get; set; } = 30;
     public string HostsDir { get; set; } = "";
     public int RingBytes { get; set; } = 4 * 1024 * 1024;
+    /// <summary>Typed into the session once it has drawn something and then stayed quiet for a
+    /// moment: the CLI's prompt is up by then. Text first, Enter as a separate write, because the
+    /// Codex TUI does not submit both when they arrive in one chunk.</summary>
+    public string InitialPrompt { get; set; } = "";
 }
 
 /// <summary>
@@ -167,6 +171,8 @@ internal static class HostProgram
 
         var reader = new Thread(ReadLoop) { IsBackground = true, Name = "pty-read" };
         reader.Start();
+        if (spec.InitialPrompt.Length > 0)
+            new Thread(() => TypeWhenQuiet(spec.InitialPrompt)) { IsBackground = true, Name = "initial-prompt" }.Start();
         var waiter = new Thread(() =>
         {
             _exitCode = _pty.WaitForExit();
@@ -191,6 +197,44 @@ internal static class HostProgram
         return 0;
     }
 
+    static long _lastOutputTicks;
+    static long _outputBytes;
+
+    /// <summary>
+    /// Ready means: the CLI has drawn something, has been quiet for two seconds, is not showing a
+    /// folder-trust question, and (Claude) has reported its first hook event — that event only fires
+    /// once the conversation exists, i.e. after any trust dialog. Codex has no start-of-session hook
+    /// in its TUI, so the trust check is what guards it. Waits up to five minutes, then gives up.
+    /// </summary>
+    static void TypeWhenQuiet(string prompt)
+    {
+        var deadline = DateTime.UtcNow.AddMinutes(5);
+        bool claude = string.Equals(_record.Provider, "Claude", StringComparison.OrdinalIgnoreCase);
+        while (DateTime.UtcNow < deadline && !_exited)
+        {
+            Thread.Sleep(250);
+            long bytes = Interlocked.Read(ref _outputBytes);
+            long last = Interlocked.Read(ref _lastOutputTicks);
+            if (bytes < 200 || last == 0) continue;
+            if (DateTime.UtcNow.Ticks - last < TimeSpan.TicksPerSecond * 2) continue;
+            if (claude && _record.HookEvents == 0) continue;
+            var (_, tail) = _ring.Since(Math.Max(0, _ring.End - 6000));
+            string recent = Encoding.UTF8.GetString(tail);
+            if (recent.Contains("trust this folder", StringComparison.OrdinalIgnoreCase)
+                || recent.Contains("trust", StringComparison.OrdinalIgnoreCase) && recent.Contains("Enter to confirm", StringComparison.OrdinalIgnoreCase))
+                continue;
+            try
+            {
+                var text = Encoding.UTF8.GetBytes(prompt.Replace("\r\n", "\n").Replace('\n', ' '));
+                lock (_pty) { _pty.Input.Write(text); _pty.Input.Flush(); }
+                Thread.Sleep(400);
+                lock (_pty) { _pty.Input.Write("\r"u8); _pty.Input.Flush(); }
+            }
+            catch (Exception ex) { Log($"initial prompt: {ex.Message}"); }
+            return;
+        }
+    }
+
     static void ReadLoop()
     {
         var buf = new byte[65536];
@@ -201,6 +245,8 @@ internal static class HostProgram
             catch { break; }
             if (n <= 0) break;
             var chunk = buf.AsSpan(0, n);
+            Interlocked.Add(ref _outputBytes, n);
+            Interlocked.Exchange(ref _lastOutputTicks, DateTime.UtcNow.Ticks);
             _ring.Append(chunk);
             ScanTitle(chunk);
             bool anyViewer;

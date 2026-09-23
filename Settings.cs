@@ -36,6 +36,18 @@ internal sealed class Settings
     public double TerminalFontSize { get; set; } = 12;
     public int TerminalOpacity { get; set; } = 96;                          // 0-100, like Windows Terminal's `opacity`
     public string TerminalScheme { get; set; } = "Campbell";                // Campbell | One Half Dark | Deck
+    public List<string> RecentFolders { get; set; } = new();                // most recent first, capped
+    public string LastClaudeModel { get; set; } = "";
+    public string LastClaudeEffort { get; set; } = "";
+    public string LastCodexModel { get; set; } = "";
+    public string LastCodexEffort { get; set; } = "";
+
+    public void RememberFolder(string cwd)
+    {
+        RecentFolders.RemoveAll(f => string.Equals(f, cwd, StringComparison.OrdinalIgnoreCase));
+        RecentFolders.Insert(0, cwd);
+        if (RecentFolders.Count > 12) RecentFolders.RemoveRange(12, RecentFolders.Count - 12);
+    }
     public bool RunOnLogin { get; set; } = true;                            // HKCU Run registration (installed instance only)
 
     static string Dir => Path.Combine(

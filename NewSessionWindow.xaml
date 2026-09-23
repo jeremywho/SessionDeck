@@ -1,0 +1,84 @@
+<ui:FluentWindow x:Class="SessionDeck.NewSessionWindow"
+                 x:ClassModifier="internal"
+                 xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                 xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+                 Title="New session"
+                 Width="560" Height="560"
+                 MinWidth="480" MinHeight="520"
+                 WindowStartupLocation="CenterOwner"
+                 ExtendsContentIntoTitleBar="True"
+                 WindowBackdropType="Mica"
+                 FontFamily="Segoe UI Variable, Segoe UI"
+                 FontSize="14">
+  <Grid>
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto"/>
+      <RowDefinition Height="*"/>
+    </Grid.RowDefinitions>
+
+    <ui:TitleBar Grid.Row="0" Title="New session" Height="36" ShowMinimize="False" ShowMaximize="False"/>
+
+    <Border Grid.Row="1" Background="{DynamicResource SurfaceBrush}">
+      <Grid Margin="18,14">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="*"/>
+          <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Orientation="Horizontal">
+          <RadioButton x:Name="ClaudeRadio" Content="✳ Claude" IsChecked="True" Margin="0,0,18,0" Checked="Provider_Changed"/>
+          <RadioButton x:Name="CodexRadio" Content="◆ Codex" Checked="Provider_Changed"/>
+        </StackPanel>
+
+        <StackPanel Grid.Row="1" Margin="0,14,0,0">
+          <TextBlock Text="Folder" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource Fg2Brush}"/>
+          <Grid Margin="0,6,0,0">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <ComboBox x:Name="FolderBox" Grid.Column="0" IsEditable="True" IsTextSearchEnabled="False"/>
+            <ui:Button x:Name="BrowseButton" Grid.Column="2" Content="Browse…" Appearance="Secondary" Click="Browse_Click"/>
+          </Grid>
+        </StackPanel>
+
+        <Grid Grid.Row="2" Margin="0,12,0,0">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*"/><ColumnDefinition Width="10"/>
+            <ColumnDefinition Width="*"/><ColumnDefinition Width="10"/>
+            <ColumnDefinition Width="120"/>
+          </Grid.ColumnDefinitions>
+          <StackPanel Grid.Column="0">
+            <TextBlock Text="Name" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource Fg2Brush}"/>
+            <ui:TextBox x:Name="NameBox" Margin="0,6,0,0" PlaceholderText="optional"/>
+          </StackPanel>
+          <StackPanel Grid.Column="2">
+            <TextBlock Text="Model" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource Fg2Brush}"/>
+            <ComboBox x:Name="ModelBox" Margin="0,6,0,0" IsEditable="True" IsTextSearchEnabled="False"/>
+          </StackPanel>
+          <StackPanel Grid.Column="4">
+            <TextBlock Text="Effort" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource Fg2Brush}"/>
+            <ComboBox x:Name="EffortBox" Margin="0,6,0,0"/>
+          </StackPanel>
+        </Grid>
+
+        <TextBlock Grid.Row="3" Margin="0,14,0,0" Text="First prompt" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource Fg2Brush}"/>
+        <ui:TextBox Grid.Row="4" x:Name="PromptBox" Margin="0,6,0,0" AcceptsReturn="True" TextWrapping="Wrap"
+                    VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top" MinHeight="90"
+                    PlaceholderText="optional — typed into the session once it is ready"/>
+
+        <Grid Grid.Row="5" Margin="0,14,0,0">
+          <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+          <TextBlock x:Name="FlagsNote" Grid.Column="0" FontSize="11.5" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                     Foreground="{DynamicResource Fg3Brush}"/>
+          <StackPanel Grid.Column="1" Orientation="Horizontal">
+            <ui:Button Content="Cancel" Appearance="Secondary" IsCancel="True" Margin="0,0,8,0"/>
+            <ui:Button x:Name="LaunchButton" Content="Launch" Appearance="Primary" IsDefault="True" Click="Launch_Click"/>
+          </StackPanel>
+        </Grid>
+      </Grid>
+    </Border>
+  </Grid>
+</ui:FluentWindow>
