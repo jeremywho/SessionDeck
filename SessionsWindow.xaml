@@ -171,7 +171,7 @@
             <DataGridTemplateColumn x:Name="ColSession" Width="*" CanUserResize="False" Header="SESSION" HeaderStyle="{StaticResource Hdr}">
               <DataGridTemplateColumn.CellTemplate>
                 <DataTemplate>
-                  <Grid Margin="0,0,10,0">
+                  <Grid Margin="0,0,4,0">
                     <Grid.ColumnDefinitions>
                       <ColumnDefinition Width="*"/>
                       <ColumnDefinition Width="Auto"/>
@@ -233,7 +233,7 @@
               </DataGridTemplateColumn.CellTemplate>
             </DataGridTemplateColumn>
 
-            <DataGridTemplateColumn x:Name="ColCtxPct" Width="80" Header="CONTEXT" HeaderStyle="{StaticResource HdrRight}">
+            <DataGridTemplateColumn x:Name="ColCtxPct" Width="48" Header="CONTEXT" HeaderStyle="{StaticResource HdrRight}">
               <DataGridTemplateColumn.CellTemplate>
                 <DataTemplate>
                   <TextBlock Text="{Binding ContextDisplay}" FontFamily="Cascadia Mono, Consolas" FontSize="13.5"
