@@ -59,7 +59,7 @@ internal partial class DeckPane : UserControl
     {
         InitializeComponent();
         DataContext = this;
-        _browser = new DeckBrowser(_dark) { Margin = new Thickness(0, 0, 6, 6) };
+        _browser = new DeckBrowser(_dark) { Margin = new Thickness(3, 0, 6, 6) };
         _browser.Message += Route;
         _browser.Ready += ReopenAll;
         Body.Children.Add(_browser);
@@ -154,8 +154,9 @@ internal partial class DeckPane : UserControl
 
     /// <summary>
     /// The browser stops 6 px short of the right and bottom edges so the window keeps a resize grip
-    /// there (a child window swallows the hit-test). That band is painted as terminal surface so it
-    /// reads as padding, not as a border.
+    /// there, and 3 px short of the left so the list splitter's handle has something to grab (a child
+    /// window swallows the hit-test). Those bands are painted as terminal surface so they read as
+    /// padding, not as a border.
     /// </summary>
     void PaintSurface() => Body.Background = DeckBrowser.SurfaceBrush(_dark);
 
