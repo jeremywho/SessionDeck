@@ -106,8 +106,8 @@ internal sealed class SessionRow : INotifyPropertyChanged
     public string Name =>
         IsBackgroundAgent ? CompanionName(_s.DisplayName)
         : _s.Name.Length > 0 ? _s.Name
-        : _s.Title.Length > 0 && !LooksLikeId(_s.Title) ? _s.Title
-        : Host.Title.Length > 0 && !LooksLikeId(Host.Title) ? Host.Title
+        : _s.Title.Length > 0 && !LooksLikeId(_s.Title) ? DeckPane.DeckTab.StripMark(_s.Title)
+        : Host.Title.Length > 0 && !LooksLikeId(Host.Title) ? DeckPane.DeckTab.StripMark(Host.Title)
         : _s.Provider == SessionProvider.Codex ? "Codex"
         : _s.SessionId.Length > 0 ? _s.ShortId
         : Host.Provider;
