@@ -56,14 +56,16 @@ internal sealed class App : Application
         _tray.MouseUp += OnTrayMouseUp;   // WPF menu (per-monitor DPI safe), not the WinForms one
         _tray.DoubleClick += (_, _) => ShowWindow();
 
-        // Orphaned = saved in the registry but not currently live. Capture BEFORE the window's scan
-        // loop starts overwriting the registry, then offer to restore them.
+        // Orphaned = saved in the registry but not currently live, i.e. lost to a reboot or a crash.
+        // Capture BEFORE the window's scan loop starts overwriting the registry, then bring every one
+        // of them back; the tray's "Restore sessions…" keeps the checklist for picking by hand.
         var orphaned = ComputeOrphaned();
 
         ShowWindow();
         DwmDiagnostics.Mark("main-window-shown");
 
-        if (orphaned.Count > 0) ShowRestore(orphaned);
+        foreach (var s in orphaned) _window!.ResumeInDeck(s);
+        if (orphaned.Count > 0) PerformanceLog.Write($"auto-resume after reboot/crash sessions={orphaned.Count} ids={string.Join(",", orphaned.Select(s => s.Id))}");
 
         StartUpdater();
     }

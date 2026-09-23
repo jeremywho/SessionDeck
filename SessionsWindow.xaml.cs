@@ -552,7 +552,9 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         string cwd = string.IsNullOrWhiteSpace(s.Cwd) ? HomeDir : s.Cwd;
         string cmd = s.Provider == SessionProvider.Codex
             ? HostManager.ResumeCodexCommand(s.Id, _app.Settings.CodexFlags)
-            : HostManager.ResumeClaudeCommand(s.Id, _app.Settings.ResumeFlags);
+            : SessionScanner.HasTranscript(s.Id, cwd)
+                ? HostManager.ResumeClaudeCommand(s.Id, _app.Settings.ResumeFlags)
+                : HostManager.NewClaudeCommand(s.Id, s.Name, _app.Settings.ResumeFlags);
         SpawnIntoDeck(s.Id, s.Provider, cmd, cwd, s.Name);
     }
 

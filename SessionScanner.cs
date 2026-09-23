@@ -182,6 +182,10 @@ internal static class SessionScanner
     static readonly Dictionary<string, FallbackProbe> _fallback = new();
     static readonly TimeSpan FallbackRetry = TimeSpan.FromSeconds(30);
 
+    /// <summary>Claude writes a transcript only once something has been said; without one, <c>--resume</c> refuses the id.</summary>
+    public static bool HasTranscript(string sessionId, string cwd) =>
+        TranscriptPath(new SessionInfo { SessionId = sessionId, Cwd = cwd }).Length > 0;
+
     static string TranscriptPath(SessionInfo s)
     {
         // cwd -> slug: every non-alphanumeric char becomes '-'  (C:\Users\Jeremy -> C--Users-Jeremy)
