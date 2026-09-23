@@ -1,5 +1,6 @@
 param(
-    [Parameter(Mandatory)][string]$TabText,
+    [string]$TabText = "",
+    [string]$HostId = "",
     [int]$Frames = 8,
     [int]$IntervalMs = 120,
     [string]$Prefix = "$env:TEMP\sd-frame",
@@ -49,8 +50,8 @@ try {
     AssertForeground
     # One browser hosts every tab; its page titles itself "terminal port=<port>" for the shown host,
     # and that title is the browser pane's UIA name. Cycle Ctrl+Tab until the wanted port shows.
-    $rec = Get-ChildItem "$env:APPDATA\SessionDeck\hosts\*.json" | ForEach-Object { Get-Content $_.FullName -Encoding UTF8 | ConvertFrom-Json } | Where-Object { $_.Title -match [regex]::Escape($TabText) } | Select-Object -First 1
-    if (-not $rec) { throw "no host whose title matches '$TabText'" }
+    $rec = Get-ChildItem "$env:APPDATA\SessionDeck\hosts\*.json" | ForEach-Object { Get-Content $_.FullName -Encoding UTF8 | ConvertFrom-Json } | Where-Object { if ($HostId) { $_.Id -eq $HostId } else { $TabText -and $_.Title -match [regex]::Escape($TabText) } } | Select-Object -First 1
+    if (-not $rec) { throw "no host matching id '$HostId' / title '$TabText'" }
     $want = "port=$($rec.Port)"
     for ($i = 0; $i -lt 8; $i++) {
         $panes = $w.FindAll([System.Windows.Automation.TreeScope]::Descendants, (New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty, [System.Windows.Automation.ControlType]::Pane)))

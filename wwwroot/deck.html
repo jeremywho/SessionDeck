@@ -123,6 +123,7 @@
     };
   }
 
+  const ESC = String.fromCharCode(27), CR = String.fromCharCode(13), DEL = String.fromCharCode(127);
   const panes = new Map();
   let shownId = null;
   const empty = document.getElementById('empty');
@@ -147,6 +148,18 @@
     const p = { id, port, token, el, term, fit, ws: null, seq: 0, ended: false, retries: 0, ro: null };
     panes.set(id, p);
     term.onData(data => send(p, { type: 'input', data }));
+    // Windows Terminal (via Claude Code's terminal setup) sends ESC CR for Shift+Enter, which both
+    // CLIs take as "newline, don't submit", and ESC DEL for Ctrl+Backspace (delete word); xterm
+    // would send a bare CR and a bare DEL. Ctrl+Enter gets the same as Shift+Enter.
+    term.attachCustomKeyEventHandler(ev => {
+      const chord = ev.key === 'Enter' && (ev.shiftKey || ev.ctrlKey) && !ev.altKey ? ESC + CR
+        : ev.key === 'Backspace' && ev.ctrlKey && !ev.altKey ? ESC + DEL
+        : null;
+      if (chord === null) return true;
+      if (ev.type === 'keydown') send(p, { type: 'input', data: chord });
+      ev.preventDefault();
+      return false;
+    });
     term.onResize(({ cols, rows }) => send(p, { type: 'resize', cols, rows }));
     term.onTitleChange(title => post({ type: 'title', id, title }));
     p.ro = new ResizeObserver(() => fit.fit());
