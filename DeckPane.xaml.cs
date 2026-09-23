@@ -59,7 +59,7 @@ internal partial class DeckPane : UserControl
     {
         InitializeComponent();
         DataContext = this;
-        _browser = new DeckBrowser(_dark);
+        _browser = new DeckBrowser(_dark) { Margin = new Thickness(0, 0, 6, 6) };
         _browser.Message += Route;
         _browser.Ready += ReopenAll;
         Body.Children.Add(_browser);
