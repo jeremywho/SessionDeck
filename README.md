@@ -1,13 +1,43 @@
 # SessionDeck
 
-A Windows tray app that lists every **live local Claude Code and Codex CLI session** at a glance, lets
-you jump to one, and restores them after a reboot. It reads each CLI's on-disk state — no configuration
-is required to *see* sessions (Claude's `~/.claude/sessions/<pid>.json` live registry, and `~/.codex`'s
-rollout logs).
+A Windows app for running **Claude Code and Codex CLI sessions side by side**: a session list on the
+left, the sessions themselves in tabs on the right. Each session runs in its own small host process
+with a real ConPTY, so the app can be closed, rebuilt or crash and every session keeps running; on
+relaunch the tabs reattach with their scrollback intact. After a reboot, the sessions the app last
+saw alive are resumed automatically.
 
-.NET 10 · WPF + [WPF-UI](https://github.com/lepoco/wpfui) (Fluent / Mica).
+.NET 10 · WPF + [WPF-UI](https://github.com/lepoco/wpfui) · xterm.js in one WebView2.
 
-<img src="docs/screenshot.png" alt="Claude Sessions window — live sessions with status glyphs, Context %, and idle times" width="440">
+Grew out of [ClaudeSessionMonitor](https://github.com/jeremywho/ClaudeSessionMonitor), whose
+session list this keeps; the terminal side borrows the pty-host idea from Vibeflow-Commodore.
+
+## What it does
+
+- **Start** a Claude or Codex session in a tab (buttons under the list), or open a dialog for
+  folder, model, effort and a first prompt. **Adopt** a session already running elsewhere.
+- **Tabs are just views.** Closing a tab leaves the session running; the row keeps it. The row's
+  hover X, or "Close & end session" on a tab, ends it.
+- **Status without touching your config.** Each launch passes per-session hook settings on the
+  command line (`--settings` for Claude, `-c hooks.*` for Codex), so rows show idle / busy /
+  waiting the moment it changes. `~/.claude/settings.json` and `~/.codex/config.toml` are never edited.
+- **Restart on update.** When a CLI has updated itself underneath a session, the session is
+  resumed on the new version once it has sat idle a while and is not the tab in front. Any session
+  can be restarted from its row or tab menu.
+- **Terminal look** follows Windows Terminal: CaskaydiaCove NF, 12 pt, Campbell, opacity over an
+  acrylic backdrop; Shift+Enter / Ctrl+Enter insert a newline, Ctrl+Backspace deletes a word.
+- **Auto-update.** The app checks its GitHub releases on launch and every 30 minutes (through the
+  `gh` CLI) and offers a one-click swap when a newer release exists.
+
+## Building and releasing
+
+```
+dotnet build SessionDeck.csproj -c Release
+dotnet test Tests/SessionDeck.Tests.csproj
+```
+
+Releases are cut from the Actions tab: **Release → Run workflow → tag** (e.g. `v0.3.0`). The
+workflow publishes a self-contained single-file `SessionDeck-<tag>.exe` and creates the release the
+updater looks for. `tools/` holds the scripts used to drive and capture the app during development.
 
 ## The window
 A compact ~500px card, **sorted attention-first** (Error → Awaiting → Working → Completed → Idle),
