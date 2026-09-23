@@ -113,14 +113,13 @@
       <Grid>
         <Grid.ColumnDefinitions>
           <ColumnDefinition x:Name="ListColumn" Width="400" MinWidth="320"/>
-          <ColumnDefinition Width="Auto"/>
+          <ColumnDefinition Width="1"/>
           <ColumnDefinition Width="*" MinWidth="300"/>
         </Grid.ColumnDefinitions>
         <local:DeckPane x:Name="Deck" Grid.Column="2"/>
-        <Border Grid.Column="1" Width="1" HorizontalAlignment="Center" VerticalAlignment="Stretch"
-                Background="{DynamicResource Border2Brush}" IsHitTestVisible="False"/>
-        <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Center" VerticalAlignment="Stretch"
-                      Background="Transparent" ShowsPreview="False"/>
+        <Border Grid.Column="1" Background="{DynamicResource Border2Brush}" IsHitTestVisible="False"/>
+        <GridSplitter Grid.Column="1" Width="7" Margin="-3,0,-3,0" Panel.ZIndex="10" HorizontalAlignment="Center"
+                      VerticalAlignment="Stretch" Background="Transparent" ShowsPreview="False"/>
       <Grid Grid.Column="0" Background="{DynamicResource SurfaceBrush}">
         <Grid.LayoutTransform>
           <ScaleTransform x:Name="ZoomTransform" ScaleX="1" ScaleY="1"/>
