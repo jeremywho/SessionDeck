@@ -171,15 +171,11 @@
             <DataGridTemplateColumn x:Name="ColSession" Width="*" CanUserResize="False" Header="SESSION" HeaderStyle="{StaticResource Hdr}">
               <DataGridTemplateColumn.CellTemplate>
                 <DataTemplate>
-                  <Grid Margin="0,0,18,0">
+                  <Grid Margin="0,0,10,0">
                     <Grid.ColumnDefinitions>
                       <ColumnDefinition Width="*"/>
                       <ColumnDefinition Width="Auto"/>
-                      <!-- The subagent badge's slot is reserved whether or not a badge is showing:
-                           as a plain Auto column it collapsed to nothing on most rows, which shoved
-                           the model pill right and left again as agents came and went. MinWidth (not
-                           a fixed Width) so a two-digit count still fits. -->
-                      <ColumnDefinition Width="Auto" MinWidth="42"/>
+                      <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     <DockPanel Grid.Column="0">
                       <!-- background-agent badge: a companion thread another app is driving (the
@@ -201,8 +197,9 @@
                     </DockPanel>
                     <!-- model pill: provider mark + model, plus reasoning effort where the CLI reports
                          one (Codex does; Claude Code doesn't put it in the transcript). The provider
-                         mark lives IN the pill rather than beside it — one element to read, not two. -->
-                    <Border Grid.Column="1" VerticalAlignment="Center" Margin="8,0,0,0" Padding="6,1"
+                         mark lives IN the pill rather than beside it — one element to read, not two.
+                         It sits in the last column, flush against the context column. -->
+                    <Border Grid.Column="2" VerticalAlignment="Center" Margin="8,0,0,0" Padding="6,1"
                             CornerRadius="4" Background="{DynamicResource TrackBrush}"
                             BorderBrush="{DynamicResource Border2Brush}" BorderThickness="1"
                             Visibility="{Binding HasModel, Converter={StaticResource BoolToVis}}"
@@ -219,7 +216,7 @@
                       </StackPanel>
                     </Border>
                     <!-- live-subagent count: shown only while the session has agents working -->
-                    <Border Grid.Column="2" VerticalAlignment="Center" HorizontalAlignment="Left"
+                    <Border Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Left"
                             Margin="8,0,0,0" Padding="6,1"
                             CornerRadius="8" Background="{DynamicResource BlueBrush}"
                             Visibility="{Binding HasActiveSubagents, Converter={StaticResource BoolToVis}}"
