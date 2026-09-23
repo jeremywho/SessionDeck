@@ -117,8 +117,10 @@
           <ColumnDefinition Width="*" MinWidth="300"/>
         </Grid.ColumnDefinitions>
         <local:DeckPane x:Name="Deck" Grid.Column="2"/>
-        <GridSplitter Grid.Column="1" Width="4" HorizontalAlignment="Center" VerticalAlignment="Stretch"
-                      Background="{DynamicResource Border2Brush}" ShowsPreview="False"/>
+        <Border Grid.Column="1" Width="1" HorizontalAlignment="Center" VerticalAlignment="Stretch"
+                Background="{DynamicResource Border2Brush}" IsHitTestVisible="False"/>
+        <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Center" VerticalAlignment="Stretch"
+                      Background="Transparent" ShowsPreview="False"/>
       <Grid Grid.Column="0" Background="{DynamicResource SurfaceBrush}">
         <Grid.LayoutTransform>
           <ScaleTransform x:Name="ZoomTransform" ScaleX="1" ScaleY="1"/>
