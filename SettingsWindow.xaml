@@ -49,7 +49,7 @@
           <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="8"/><ColumnDefinition Width="110"/></Grid.ColumnDefinitions>
           <ui:TextBox x:Name="FontBox" Grid.Column="0" PlaceholderText="e.g. CaskaydiaCove NF"/>
           <ui:NumberBox x:Name="FontSizeBox" Grid.Column="2" Minimum="8" Maximum="28" SmallChange="1" ClearButtonEnabled="False"
-                        SpinButtonPlacementMode="Inline" ToolTip="Font size (px)"/>
+                        SpinButtonPlacementMode="Inline" ToolTip="Font size in points, as in Windows Terminal"/>
         </Grid>
         <Grid Margin="0,8,0,0">
           <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -66,7 +66,7 @@
             <ComboBoxItem Content="Deck"/>
           </ComboBox>
         </Grid>
-        <TextBlock Text="Font, opacity and colors follow Windows Terminal's defaults; applied to open tabs on save." FontSize="11.5"
+        <TextBlock Text="Font (size in points), opacity and colors follow Windows Terminal; applied to open tabs on save." FontSize="11.5"
                    Foreground="{DynamicResource Fg3Brush}" Margin="0,4,0,0"/>
 
         <TextBlock Text="Claude flags" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource FgBrush}" Margin="0,20,0,0"/>

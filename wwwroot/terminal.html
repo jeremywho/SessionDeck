@@ -63,6 +63,7 @@
     return {
       font: src.font || 'CaskaydiaCove NF',
       size: Number(src.size) || 12,
+      lineHeight: 1.2,
       opacity: Math.max(0, Math.min(100, Number(src.opacity ?? 96))),
       scheme: src.scheme || 'Campbell',
     };
@@ -78,7 +79,8 @@
     // tinted, translucent surface so the window behind shows through at the chosen opacity.
     term.options.theme = Object.assign({}, base, { background: '#00000000' });
     term.options.fontFamily = `"${look.font}", "Cascadia Code", "Cascadia Mono", Consolas, monospace`;
-    term.options.fontSize = look.size;
+    term.options.fontSize = Math.round(look.size * 96 / 72);
+    term.options.lineHeight = look.lineHeight;
     document.documentElement.style.setProperty('--bg', hexToRgba(base.background, look.opacity / 100));
     fit.fit();
   }
@@ -90,7 +92,8 @@
   const term = new Terminal({
     theme: Object.assign({}, initialBase, { background: '#00000000' }),
     fontFamily: `"${initialLook.font}", "Cascadia Code", "Cascadia Mono", Consolas, monospace`,
-    fontSize: initialLook.size,
+    fontSize: Math.round(initialLook.size * 96 / 72),
+    lineHeight: initialLook.lineHeight,
     scrollback: 20000,
     cursorBlink: false,
     cursorStyle: 'bar',
