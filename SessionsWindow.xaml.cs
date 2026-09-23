@@ -85,7 +85,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
 
         InitColumns();
         SetupSort();
-        TerminalView.UseSettings(_app.Settings);
+        DeckBrowser.UseSettings(_app.Settings);
         Deck.ApplyTheme(!string.Equals(_app.Settings.Theme, "Light", StringComparison.OrdinalIgnoreCase));
         Loaded += (_, _) => ReattachHosts();
 

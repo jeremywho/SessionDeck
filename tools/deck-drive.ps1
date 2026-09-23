@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('click', 'shot', 'hosts', 'kill-app', 'launch', 'dismiss-restore')]
+    [ValidateSet('click', 'shot', 'hosts', 'kill-app', 'build', 'launch', 'dismiss-restore')]
     [string]$Action,
     [string]$Button,
     [string]$Out = "$env:TEMP\sd-shot.png"
@@ -27,12 +27,17 @@ function MainWindow {
 }
 
 switch ($Action) {
+    'build' {
+        # The launcher runs the Release binary; a Debug build leaves it stale and every check that follows measures the old app.
+        dotnet build 'C:\Data\Repos\.worktrees\SessionDeck\spike\SessionDeck.csproj' -c Release -v m 2>&1 | Select-String -Pattern ' error |Build succeeded|Build FAILED'
+        "release exe built $((Get-Item $exe).LastWriteTime.ToString('HH:mm:ss'))"
+    }
     'launch' {
         $env:SD_NO_INSTALL = "1"
         Start-Process -FilePath $exe | Out-Null
         Start-Sleep -Seconds 5
         $w = MainWindow
-        "launched; main window: $($w -ne $null)"
+        "launched exe built $((Get-Item $exe).LastWriteTime.ToString('HH:mm:ss')); main window: $($w -ne $null)"
     }
     'dismiss-restore' {
         $r = $desk.FindFirst([System.Windows.Automation.TreeScope]::Children, (New-Object System.Windows.Automation.PropertyCondition($nameProp, 'Restore sessions')))

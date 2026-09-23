@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -8,7 +9,7 @@ using SessionDeck.Host;
 
 namespace SessionDeck;
 
-/// <summary>A tab strip over a stack of <see cref="TerminalView"/>s, one per attached host.</summary>
+/// <summary>A tab strip over one <see cref="DeckBrowser"/>, which shows one attached host at a time.</summary>
 internal partial class DeckPane : UserControl
 {
     internal sealed class DeckTab : INotifyPropertyChanged
@@ -34,8 +35,6 @@ internal partial class DeckPane : UserControl
         public Visibility ExitedVisibility => View.Exited ? Visibility.Visible : Visibility.Collapsed;
         public string Tooltip => $"{StripMark(View.Title)}\n{View.Host.Cwd}\n{View.Host.Provider} · session {View.Host.SessionId}\nhost pid {View.Host.HostPid} · child pid {View.Host.ChildPid}";
 
-        public DateTime? HiddenSince { get; set; }
-
         bool _active;
         public bool IsActive
         {
@@ -48,6 +47,7 @@ internal partial class DeckPane : UserControl
     }
 
     public ObservableCollection<DeckTab> Tabs { get; } = new();
+    readonly DeckBrowser _browser;
     DeckTab? _active;
     bool _dark = true;
     Point _dragStart;
@@ -59,9 +59,11 @@ internal partial class DeckPane : UserControl
     {
         InitializeComponent();
         DataContext = this;
-        var sweep = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMinutes(1) };
-        sweep.Tick += (_, _) => SuspendStale();
-        sweep.Start();
+        _browser = new DeckBrowser(_dark);
+        _browser.Message += Route;
+        _browser.Ready += ReopenAll;
+        Body.Children.Add(_browser);
+        Loaded += (_, _) => _browser.Start();
     }
 
     public bool HasTabs => Tabs.Count > 0;
@@ -75,52 +77,39 @@ internal partial class DeckPane : UserControl
     public DeckTab? FindByHost(string hostId) =>
         Tabs.FirstOrDefault(t => t.View.Host.Id == hostId);
 
+    void Route(string hostId, string type, JsonElement root) => FindByHost(hostId)?.View.OnMessage(type, root);
+
+    /// <summary>The page has (re)loaded: hand it every open tab again and put the active one back.</summary>
+    void ReopenAll()
+    {
+        foreach (var t in Tabs) t.View.Open();
+        _active?.View.Show();
+    }
+
     /// <summary>Open (or focus) a tab attached to <paramref name="host"/>.</summary>
     public DeckTab Open(HostRecord host, bool activate = true)
     {
         var existing = FindByHost(host.Id);
         if (existing != null) { if (activate) Activate(existing); return existing; }
 
-        var view = new TerminalView(host, _dark) { Visibility = Visibility.Collapsed };
+        var view = new TerminalView(_browser, host);
         var tab = new DeckTab(view);
         view.TitleChanged += _ => { tab.Raise(nameof(DeckTab.Title)); tab.Raise(nameof(DeckTab.Tooltip)); };
         view.ExitedChanged += _ => tab.Raise(nameof(DeckTab.ExitedVisibility));
-        Body.Children.Add(view);
         Tabs.Add(tab);
+        view.Open();
         if (activate || _active == null) Activate(tab);
         TabsChanged?.Invoke();
         return tab;
     }
 
-    /// <summary>
-    /// Switching tabs only flips visibility: a hidden tab keeps its browser so coming back is
-    /// instant. Browsers are dropped by <see cref="SuspendStale"/> once a tab has been hidden for
-    /// a while, which is what bounds memory rather than the switch itself.
-    /// </summary>
     public void Activate(DeckTab tab)
     {
         if (_active == tab) { tab.View.FocusTerminal(); return; }
-        foreach (var t in Tabs)
-        {
-            bool on = t == tab;
-            t.IsActive = on;
-            t.View.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
-            t.HiddenSince = on ? null : (t.HiddenSince ?? DateTime.UtcNow);
-        }
         _active = tab;
-        tab.View.Resume();
-        Placeholder.Visibility = Visibility.Collapsed;
-        tab.View.Fit();
+        foreach (var t in Tabs) t.IsActive = t == tab;
+        tab.View.Show();
         tab.View.FocusTerminal();
-    }
-
-    static readonly TimeSpan SuspendAfter = TimeSpan.FromMinutes(10);
-
-    void SuspendStale()
-    {
-        foreach (var t in Tabs)
-            if (t != _active && t.HiddenSince is DateTime since && DateTime.UtcNow - since > SuspendAfter && !t.View.IsSuspended)
-                t.View.Suspend();
     }
 
     public void CycleActive(int delta)
@@ -136,13 +125,11 @@ internal partial class DeckPane : UserControl
         int idx = Tabs.IndexOf(tab);
         if (idx < 0) return;
         Tabs.RemoveAt(idx);
-        Body.Children.Remove(tab.View);
-        tab.View.Shutdown();
+        tab.View.Close();
         if (_active == tab)
         {
             _active = null;
             if (Tabs.Count > 0) Activate(Tabs[Math.Min(idx, Tabs.Count - 1)]);
-            else Placeholder.Visibility = Visibility.Visible;
         }
         TabsChanged?.Invoke();
     }
@@ -168,15 +155,12 @@ internal partial class DeckPane : UserControl
     public void ApplyTheme(bool dark)
     {
         _dark = dark;
-        foreach (var t in Tabs) t.View.ApplyTheme(dark);
+        _browser.ApplyTheme(dark);
     }
 
-    public void ApplyLook()
-    {
-        foreach (var t in Tabs) t.View.ApplyLook();
-    }
+    public void ApplyLook() => _browser.ApplyLook();
 
-    public void FocusActive() => _active?.View.FocusTerminal();
+    public void FocusActive() => _browser.FocusPage();
 
     static DeckTab? TabOf(object sender) => sender is FrameworkElement { Tag: DeckTab tab } ? tab : null;
 

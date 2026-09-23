@@ -21,7 +21,7 @@ $w = $AE::RootElement.FindFirst([System.Windows.Automation.TreeScope]::Children,
 if (-not $w) { throw "no main window" }
 $r = $w.Current.BoundingRectangle
 $panes = $w.FindAll([System.Windows.Automation.TreeScope]::Descendants, (New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty, [System.Windows.Automation.ControlType]::Pane)))
-$shown = $panes | Where-Object { $_.Current.Name -match 'terminal\.html\?port=(\d+)' } | Select-Object -First 1
+$shown = $panes | Where-Object { $_.Current.Name -match 'terminal port=(\d+)' } | Select-Object -First 1
 $port = if ($shown -and $shown.Current.Name -match 'port=(\d+)') { $Matches[1] } else { '' }
 $host_ = Get-ChildItem "$env:APPDATA\SessionDeck\hosts\*.json" | ForEach-Object { Get-Content $_.FullName -Encoding UTF8 | ConvertFrom-Json } | Where-Object { "$($_.Port)" -eq $port } | Select-Object -First 1
 "visible pane: port=$port provider=$($host_.Provider) title='$($host_.Title)'"

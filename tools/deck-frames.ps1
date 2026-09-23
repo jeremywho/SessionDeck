@@ -3,8 +3,13 @@ param(
     [int]$Frames = 8,
     [int]$IntervalMs = 120,
     [string]$Prefix = "$env:TEMP\sd-frame",
-    [string]$Type = ""
+    [string]$Type = "",
+    [switch]$Burst
 )
+
+# -Burst: once on the wanted tab, leave it with Ctrl+Tab, come back with Ctrl+Shift+Tab, and start
+# capturing the instant that keystroke is sent, so the frames show the switch itself (the flash, if
+# any) rather than the settled pane.
 
 # Activate a deck tab by its title text WITHOUT synthetic mouse clicks (a full-screen overlay on this
 # machine wins every hit-test): the tab is invoked through UI Automation, the deck is foregrounded,
@@ -42,14 +47,14 @@ function AssertForeground {
 Start-Sleep -Milliseconds 400
 try {
     AssertForeground
-    # Only the ACTIVE tab has a WebView2 (hidden tabs are suspended), and its pane is named by the
-    # page URL, which carries the host's port. Cycle Ctrl+Tab until the wanted host's port shows.
+    # One browser hosts every tab; its page titles itself "terminal port=<port>" for the shown host,
+    # and that title is the browser pane's UIA name. Cycle Ctrl+Tab until the wanted port shows.
     $rec = Get-ChildItem "$env:APPDATA\SessionDeck\hosts\*.json" | ForEach-Object { Get-Content $_.FullName -Encoding UTF8 | ConvertFrom-Json } | Where-Object { $_.Title -match [regex]::Escape($TabText) } | Select-Object -First 1
     if (-not $rec) { throw "no host whose title matches '$TabText'" }
     $want = "port=$($rec.Port)"
     for ($i = 0; $i -lt 8; $i++) {
         $panes = $w.FindAll([System.Windows.Automation.TreeScope]::Descendants, (New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty, [System.Windows.Automation.ControlType]::Pane)))
-        $shown = $panes | Where-Object { $_.Current.Name -match [regex]::Escape($want) } | Select-Object -First 1
+        $shown = $panes | Where-Object { $_.Current.Name -match ('terminal ' + [regex]::Escape($want) + '$') } | Select-Object -First 1
         if ($shown) { break }
         AssertForeground
         [System.Windows.Forms.SendKeys]::SendWait('^{TAB}')
@@ -60,6 +65,10 @@ try {
     try { $shown.SetFocus() } catch { }
     Start-Sleep -Milliseconds 500
     if ($Type) { AssertForeground; [System.Windows.Forms.SendKeys]::SendWait($Type); Start-Sleep -Milliseconds 400 }
+    if ($Burst) {
+        AssertForeground; [System.Windows.Forms.SendKeys]::SendWait('^{TAB}'); Start-Sleep -Milliseconds 900
+        AssertForeground; [System.Windows.Forms.SendKeys]::SendWait('^+{TAB}')
+    }
 
     $left = [int]($wr.Left + 410); $top = [int]($wr.Top + 70)
     $width = [int]($wr.Width - 420); $height = [int]($wr.Height - 80)

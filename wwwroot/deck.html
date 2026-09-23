@@ -1,0 +1,252 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>terminal</title>
+<link rel="stylesheet" href="xterm.css">
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: transparent; }
+  .pane { position: absolute; inset: 0; padding: 6px 0 0 8px; background: var(--bg, rgba(12,12,12,0.96)); visibility: hidden; }
+  .pane.shown { visibility: visible; }
+  #empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center;
+           font: 13px "Segoe UI Variable", "Segoe UI", sans-serif; color: var(--fg3, #8a8d93); opacity: 0.7; line-height: 1.6;
+           user-select: none; }
+  #empty.hidden { display: none; }
+  .xterm .xterm-viewport { background: transparent !important; }
+  .xterm .xterm-screen canvas { background: transparent !important; }
+</style>
+</head>
+<body>
+<div id="empty">No session open.<br>Click a hosted row on the left, or start one with the buttons.<br><br>Ctrl+Tab cycles tabs · Ctrl+W closes · drag tabs to reorder</div>
+<script src="xterm.js"></script>
+<script src="addon-fit.js"></script>
+<script src="addon-unicode11.js"></script>
+<script src="addon-web-links.js"></script>
+<script>
+(() => {
+  const q = new URLSearchParams(location.search);
+  let dark = q.get('theme') !== 'light';
+
+  const schemes = {
+    Campbell: {
+      background: '#0c0c0c', foreground: '#cccccc', cursor: '#ffffff', selectionBackground: '#ffffff40',
+      black: '#0c0c0c', red: '#c50f1f', green: '#13a10e', yellow: '#c19c00', blue: '#0037da',
+      magenta: '#881798', cyan: '#3a96dd', white: '#cccccc', brightBlack: '#767676', brightRed: '#e74856',
+      brightGreen: '#16c60c', brightYellow: '#f9f1a5', brightBlue: '#3b78ff', brightMagenta: '#b4009e',
+      brightCyan: '#61d6d6', brightWhite: '#f2f2f2',
+    },
+    'One Half Dark': {
+      background: '#282c34', foreground: '#dcdfe4', cursor: '#dcdfe4', selectionBackground: '#ffffff40',
+      black: '#282c34', red: '#e06c75', green: '#98c379', yellow: '#e5c07b', blue: '#61afef',
+      magenta: '#c678dd', cyan: '#56b6c2', white: '#dcdfe4', brightBlack: '#5a6374', brightRed: '#e06c75',
+      brightGreen: '#98c379', brightYellow: '#e5c07b', brightBlue: '#61afef', brightMagenta: '#c678dd',
+      brightCyan: '#56b6c2', brightWhite: '#dcdfe4',
+    },
+  };
+
+  const themes = {
+    dark: {
+      background: '#1d1e21', foreground: '#e8e9eb', cursor: '#e8e9eb', selectionBackground: '#3a3d45',
+      black: '#1d1e21', red: '#f2555a', green: '#5bc46b', yellow: '#e5b84f', blue: '#5c9cf5',
+      magenta: '#c678dd', cyan: '#56b6c2', white: '#d0d2d6', brightBlack: '#6b6f78', brightRed: '#ff7b80',
+      brightGreen: '#7ed88b', brightYellow: '#f0cd6f', brightBlue: '#7fb3ff', brightMagenta: '#d89bf0',
+      brightCyan: '#79d0db', brightWhite: '#ffffff',
+    },
+    light: {
+      background: '#ffffff', foreground: '#1a1c1f', cursor: '#1a1c1f', selectionBackground: '#cfd6e2',
+      black: '#1a1c1f', red: '#c62828', green: '#2e7d32', yellow: '#9a6b00', blue: '#1e5bc6',
+      magenta: '#8e24aa', cyan: '#00838f', white: '#5f6368', brightBlack: '#80868b', brightRed: '#e53935',
+      brightGreen: '#43a047', brightYellow: '#c28a00', brightBlue: '#3b7be0', brightMagenta: '#ab47bc',
+      brightCyan: '#00acc1', brightWhite: '#1a1c1f',
+    },
+  };
+  schemes.Deck = themes.dark;
+  schemes['Deck Light'] = themes.light;
+
+  function lookFrom(src) {
+    return {
+      font: src.font || 'CaskaydiaCove NF',
+      size: Number(src.size) || 12,
+      lineHeight: 1.0,
+      opacity: Math.max(0, Math.min(100, Number(src.opacity ?? 96))),
+      scheme: src.scheme || 'Campbell',
+    };
+  }
+  function hexToRgba(hex, alpha) {
+    const h = hex.replace('#', '');
+    const n = parseInt(h.length === 3 ? h.split('').map(c => c + c).join('') : h.slice(0, 6), 16);
+    return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+  }
+
+  let look = lookFrom({ font: q.get('font'), size: q.get('size'), opacity: q.get('opacity'), scheme: q.get('scheme') });
+  const baseOf = () => schemes[look.scheme] || (dark ? themes.dark : themes.light);
+  function setSurface() {
+    document.documentElement.style.setProperty('--bg', hexToRgba(baseOf().background, look.opacity / 100));
+    document.documentElement.style.setProperty('--fg3', dark ? '#8a8d93' : '#6b6f78');
+  }
+  setSurface();
+
+  function post(msg) {
+    if (window.chrome && window.chrome.webview) window.chrome.webview.postMessage(msg);
+  }
+
+  // xterm paints its own background per cell; keep it fully transparent and let the pane carry the
+  // tinted, translucent surface so the window behind shows through at the chosen opacity.
+  function termOptions() {
+    return {
+      theme: Object.assign({}, baseOf(), { background: '#00000000' }),
+      fontFamily: `"${look.font}", "Cascadia Code", "Cascadia Mono", Consolas, monospace`,
+      fontSize: Math.round(look.size * 96 / 72),
+      lineHeight: look.lineHeight,
+      scrollback: 20000,
+      cursorBlink: false,
+      cursorStyle: 'bar',
+      cursorInactiveStyle: 'none',
+      allowProposedApi: true,
+      allowTransparency: true,
+      linkHandler: { activate: (_e, uri) => post({ type: 'open', uri }) },
+    };
+  }
+
+  const panes = new Map();
+  let shownId = null;
+  const empty = document.getElementById('empty');
+
+  function send(p, obj) {
+    if (p.ws && p.ws.readyState === WebSocket.OPEN) p.ws.send(JSON.stringify(obj));
+  }
+
+  function open(id, port, token) {
+    if (panes.has(id)) return;
+    const el = document.createElement('div');
+    el.className = 'pane';
+    document.body.appendChild(el);
+    const term = new Terminal(termOptions());
+    const fit = new FitAddon.FitAddon();
+    term.loadAddon(fit);
+    term.loadAddon(new Unicode11Addon.Unicode11Addon());
+    term.unicode.activeVersion = '11';
+    term.loadAddon(new WebLinksAddon.WebLinksAddon((_e, uri) => post({ type: 'open', uri })));
+    term.open(el);
+    fit.fit();
+    const p = { id, port, token, el, term, fit, ws: null, seq: 0, ended: false, retries: 0, ro: null };
+    panes.set(id, p);
+    term.onData(data => send(p, { type: 'input', data }));
+    term.onResize(({ cols, rows }) => send(p, { type: 'resize', cols, rows }));
+    term.onTitleChange(title => post({ type: 'title', id, title }));
+    p.ro = new ResizeObserver(() => fit.fit());
+    p.ro.observe(el);
+    connect(p);
+  }
+
+  function connect(p) {
+    if (p.ended) return;
+    const sock = new WebSocket(`ws://127.0.0.1:${p.port}/attach?token=${encodeURIComponent(p.token)}&after=${p.seq}`);
+    sock.binaryType = 'arraybuffer';
+    p.ws = sock;
+    let expectSnapshot = false;
+    let snapStart = 0;
+    let openedAt = 0;
+    sock.onopen = () => {
+      openedAt = Date.now();
+      const { cols, rows } = p.term;
+      sock.send(JSON.stringify({ type: 'resize', cols, rows }));
+      post({ type: 'connected', id: p.id });
+    };
+    sock.onmessage = ev => {
+      if (typeof ev.data === 'string') {
+        let msg;
+        try { msg = JSON.parse(ev.data); } catch { return; }
+        if (msg.type === 'snapshot') {
+          expectSnapshot = msg.end > msg.start;
+          snapStart = msg.start;
+          if (p.seq === 0 || msg.start !== p.seq) p.term.reset();
+          p.seq = expectSnapshot ? msg.start : msg.end;
+          if (msg.title) post({ type: 'title', id: p.id, title: msg.title });
+        } else if (msg.type === 'exit') {
+          p.ended = true;
+          p.term.write(`\r\n\x1b[90m[process exited with code ${msg.code}]\x1b[0m\r\n`);
+          post({ type: 'exit', id: p.id, code: msg.code });
+        } else if (msg.type === 'title') {
+          post({ type: 'title', id: p.id, title: msg.title });
+        }
+        return;
+      }
+      const bytes = new Uint8Array(ev.data);
+      if (expectSnapshot) { expectSnapshot = false; p.seq = snapStart; }
+      p.seq += bytes.length;
+      p.term.write(bytes);
+    };
+    sock.onclose = () => {
+      if (p.ws !== sock) return;
+      p.ws = null;
+      if (p.ended) return;
+      if (openedAt && Date.now() - openedAt > 15000) p.retries = 0;
+      const delay = Math.min(30000, 500 * Math.pow(2, Math.min(p.retries++, 6)));
+      post({ type: 'disconnected', id: p.id, retryMs: delay });
+      setTimeout(() => connect(p), delay);
+    };
+    sock.onerror = () => {};
+  }
+
+  function show(id) {
+    const p = id ? panes.get(id) : null;
+    for (const [k, v] of panes) v.el.classList.toggle('shown', p !== null && k === id);
+    shownId = p ? id : null;
+    empty.classList.toggle('hidden', !!p);
+    document.title = p ? `terminal port=${p.port}` : 'terminal';
+    if (p) { p.fit.fit(); p.term.focus(); }
+  }
+
+  function close(id) {
+    const p = panes.get(id);
+    if (!p) return;
+    p.ended = true;
+    try { if (p.ws) p.ws.close(); } catch {}
+    p.ro.disconnect();
+    p.term.dispose();
+    p.el.remove();
+    panes.delete(id);
+    if (shownId === id) show(null);
+  }
+
+  function applyLook() {
+    setSurface();
+    const o = termOptions();
+    for (const p of panes.values()) {
+      p.term.options.theme = o.theme;
+      p.term.options.fontFamily = o.fontFamily;
+      p.term.options.fontSize = o.fontSize;
+      p.term.options.lineHeight = o.lineHeight;
+      p.fit.fit();
+    }
+  }
+
+  function focusShown() {
+    const p = panes.get(shownId);
+    if (p) p.term.focus();
+  }
+
+  window.addEventListener('focus', focusShown);
+
+  if (window.chrome && window.chrome.webview) {
+    window.chrome.webview.addEventListener('message', ev => {
+      const m = ev.data;
+      if (!m || !m.type) return;
+      switch (m.type) {
+        case 'open': open(m.id, m.port, m.token); break;
+        case 'show': show(m.id); break;
+        case 'close': close(m.id); break;
+        case 'focus': focusShown(); break;
+        case 'fit': for (const p of panes.values()) p.fit.fit(); break;
+        case 'kill': { const p = panes.get(m.id); if (p) send(p, { type: 'kill' }); break; }
+        case 'theme': dark = !!m.dark; look = lookFrom(m.look || {}); applyLook(); break;
+      }
+    });
+  }
+
+  post({ type: 'ready' });
+})();
+</script>
+</body>
+</html>

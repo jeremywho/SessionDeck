@@ -59,10 +59,6 @@
       </ScrollViewer>
     </Border>
 
-    <Grid x:Name="Body" Grid.Row="1" Background="Transparent" Margin="0,0,6,6">
-      <TextBlock x:Name="Placeholder" HorizontalAlignment="Center" VerticalAlignment="Center" Opacity="0.55"
-                 FontSize="13" Foreground="{DynamicResource Fg3Brush}" TextAlignment="Center"
-                 Text="No session open.&#10;Click a hosted row on the left, or start one with the buttons.&#10;&#10;Ctrl+Tab cycles tabs · Ctrl+W closes · drag tabs to reorder"/>
-    </Grid>
+    <Grid x:Name="Body" Grid.Row="1" Background="Transparent" Margin="0,0,6,6"/>
   </Grid>
 </UserControl>
