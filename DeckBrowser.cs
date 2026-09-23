@@ -165,6 +165,25 @@ internal sealed class DeckBrowser : Grid
 
     public void ApplyLook() => Post(new { type = "theme", dark = _dark, look = Look() });
 
+    /// <summary>The terminal surface as a WPF brush: the scheme background at the configured opacity.</summary>
+    public static System.Windows.Media.Brush SurfaceBrush(bool dark)
+    {
+        var s = _settings ?? new Settings();
+        string hex = s.TerminalScheme switch
+        {
+            "One Half Dark" => "#282c34",
+            "Deck" => "#1d1e21",
+            "Deck Light" => "#ffffff",
+            "Campbell" => "#0c0c0c",
+            _ => dark ? "#1d1e21" : "#ffffff",
+        };
+        var c = (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(hex);
+        c.A = (byte)Math.Round(Math.Clamp(s.TerminalOpacity, 0, 100) * 2.55);
+        var b = new System.Windows.Media.SolidColorBrush(c);
+        b.Freeze();
+        return b;
+    }
+
     static object Look()
     {
         var s = _settings ?? new Settings();

@@ -152,13 +152,25 @@ internal partial class DeckPane : UserControl
         TabsChanged?.Invoke();
     }
 
+    /// <summary>
+    /// The browser stops 6 px short of the right and bottom edges so the window keeps a resize grip
+    /// there (a child window swallows the hit-test). That band is painted as terminal surface so it
+    /// reads as padding, not as a border.
+    /// </summary>
+    void PaintSurface() => Body.Background = DeckBrowser.SurfaceBrush(_dark);
+
     public void ApplyTheme(bool dark)
     {
         _dark = dark;
         _browser.ApplyTheme(dark);
+        PaintSurface();
     }
 
-    public void ApplyLook() => _browser.ApplyLook();
+    public void ApplyLook()
+    {
+        _browser.ApplyLook();
+        PaintSurface();
+    }
 
     public void FocusActive() => _browser.FocusPage();
 
