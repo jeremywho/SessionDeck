@@ -11,7 +11,7 @@
     </Grid.RowDefinitions>
 
     <Border Grid.Row="0" Background="{DynamicResource TitlebarBrush}" BorderBrush="{DynamicResource Border2Brush}"
-            BorderThickness="0,0,0,1" Padding="6,4" AllowDrop="True" DragOver="Strip_DragOver" Drop="Strip_Drop">
+            BorderThickness="0,0,0,1" Padding="6,5,6,6" AllowDrop="True" DragOver="Strip_DragOver" Drop="Strip_Drop">
       <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
         <ItemsControl x:Name="TabStrip" ItemsSource="{Binding Tabs}">
           <ItemsControl.ItemsPanel>
