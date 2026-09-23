@@ -42,7 +42,7 @@ internal static class Hooks
     {
         var sb = new StringBuilder("--dangerously-bypass-hook-trust");
         foreach (var ev in CodexEvents)
-            sb.Append($" -c 'hooks.{ev}=[{{hooks=[{{type=\"command\",command=\"{hookCommand}\",timeout=10}}]}}]'");
+            sb.Append($" -c 'hooks.{ev}=[{{hooks=[{{type=\"command\",command=\"{hookCommand}\",timeout={(ev is "Interrupt" or "SessionEnd" ? 3 : 10)}}}]}}]'");
         return sb.ToString();
     }
 
