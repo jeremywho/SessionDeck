@@ -10,6 +10,9 @@
   /* xterm keeps a native scrollbar on the viewport under its own fading overlay slider; only the overlay should show. */
   .xterm .xterm-viewport { scrollbar-width: none; }
   .xterm .xterm-viewport::-webkit-scrollbar { display: none; }
+  /* xterm sizes the overlay slider inline at 10 px; Windows Terminal's is a 6 px rounded thumb on a bare track. */
+  .xterm .xterm-scrollable-element > .scrollbar.vertical { width: 10px !important; }
+  .xterm .xterm-scrollable-element > .scrollbar.vertical > .slider { width: 6px !important; left: 2px !important; border-radius: 3px; }
   .pane { position: absolute; inset: 0; padding: 6px 0 0 8px; background: var(--bg, rgba(12,12,12,0.96)); visibility: hidden; }
   .pane.shown { visibility: visible; }
   #empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center;
