@@ -201,6 +201,35 @@ internal partial class DeckPane : UserControl
         BuildStrips();
         SendLayout();
         TabsChanged?.Invoke();
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, ScrollActiveIntoView);
+    }
+
+    /// <summary>Each column's strip scrolls so its active tab is visible, as VS Code does on switch.</summary>
+    void ScrollActiveIntoView()
+    {
+        foreach (var border in Descendants<Border>(StripGrid))
+            if (border.Name == "Tab" && border.Tag is DeckTab tab && tab.IsActive) border.BringIntoView();
+    }
+
+    static IEnumerable<T> Descendants<T>(DependencyObject root) where T : DependencyObject
+    {
+        int n = VisualTreeHelper.GetChildrenCount(root);
+        for (int i = 0; i < n; i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is T hit) yield return hit;
+            foreach (var deeper in Descendants<T>(child)) yield return deeper;
+        }
+    }
+
+    /// <summary>The wheel scrolls the strip sideways; there is nothing vertical to scroll.</summary>
+    void Strip_MouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (sender is not DependencyObject d) return;
+        var sv = Descendants<ScrollViewer>(d).FirstOrDefault();
+        if (sv == null || sv.ScrollableWidth <= 0) return;
+        sv.ScrollToHorizontalOffset(sv.HorizontalOffset - e.Delta * 0.5);
+        e.Handled = true;
     }
 
     // ---------------- model edits ----------------

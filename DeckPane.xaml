@@ -5,17 +5,62 @@
              xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
              AllowDrop="True">
   <UserControl.Resources>
+    <!-- A 3 px thumb on a bare track, as under VS Code's tab bar. -->
+    <Style x:Key="SlimHScrollBar" TargetType="ScrollBar">
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ScrollBar">
+            <Grid Background="Transparent">
+              <Track x:Name="PART_Track" IsDirectionReversed="False">
+                <Track.DecreaseRepeatButton><RepeatButton Command="ScrollBar.PageLeftCommand" Opacity="0" Focusable="False"/></Track.DecreaseRepeatButton>
+                <Track.IncreaseRepeatButton><RepeatButton Command="ScrollBar.PageRightCommand" Opacity="0" Focusable="False"/></Track.IncreaseRepeatButton>
+                <Track.Thumb>
+                  <Thumb>
+                    <Thumb.Template>
+                      <ControlTemplate TargetType="Thumb">
+                        <Border CornerRadius="1.5" Background="{DynamicResource Fg3Brush}" Opacity="0.55"/>
+                      </ControlTemplate>
+                    </Thumb.Template>
+                  </Thumb>
+                </Track.Thumb>
+              </Track>
+            </Grid>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <!-- Horizontal-only scroller whose bar overlays the strip's bottom padding, so nothing moves when it appears. -->
+    <Style x:Key="TabScroller" TargetType="ScrollViewer">
+      <Setter Property="HorizontalScrollBarVisibility" Value="Auto"/>
+      <Setter Property="VerticalScrollBarVisibility" Value="Disabled"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ScrollViewer">
+            <Grid>
+              <ScrollContentPresenter x:Name="PART_ScrollContentPresenter" CanContentScroll="{TemplateBinding CanContentScroll}"/>
+              <ScrollBar x:Name="PART_HorizontalScrollBar" Orientation="Horizontal" VerticalAlignment="Bottom" Height="3" Margin="0,0,0,-5"
+                         Style="{StaticResource SlimHScrollBar}"
+                         Visibility="{TemplateBinding ComputedHorizontalScrollBarVisibility}"
+                         Value="{TemplateBinding HorizontalOffset}" Maximum="{TemplateBinding ScrollableWidth}" ViewportSize="{TemplateBinding ViewportWidth}"/>
+            </Grid>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
     <!-- One column's tab strip. The column's DataContext is its DeckGroup. -->
     <DataTemplate x:Key="GroupStripTemplate">
-      <Border Background="Transparent" Padding="6,5,6,6" AllowDrop="True" DragOver="Strip_DragOver" Drop="Strip_Drop">
-        <!-- Tabs wrap onto further rows rather than scrolling; the strip grows to fit. -->
-        <ItemsControl ItemsSource="{Binding Tabs}">
+      <Border Background="Transparent" Padding="6,5,6,6" AllowDrop="True" DragOver="Strip_DragOver" Drop="Strip_Drop"
+              PreviewMouseWheel="Strip_MouseWheel">
+        <ScrollViewer Style="{StaticResource TabScroller}">
+          <ItemsControl ItemsSource="{Binding Tabs}">
             <ItemsControl.ItemsPanel>
-              <ItemsPanelTemplate><WrapPanel Orientation="Horizontal"/></ItemsPanelTemplate>
+              <ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate>
             </ItemsControl.ItemsPanel>
             <ItemsControl.ItemTemplate>
               <DataTemplate>
-                <Border x:Name="Tab" CornerRadius="6" Margin="0,0,4,2" Padding="10,4,4,4" Cursor="Hand"
+                <Border x:Name="Tab" CornerRadius="6" Margin="0,0,4,0" Padding="10,4,4,4" Cursor="Hand"
                         Background="Transparent" BorderThickness="1" BorderBrush="Transparent"
                         MouseLeftButtonDown="Tab_MouseLeftButtonDown" MouseMove="Tab_MouseMove"
                         MouseDown="Tab_MouseDown" AllowDrop="True" Drop="Tab_Drop" Tag="{Binding}">
@@ -58,6 +103,7 @@
               </DataTemplate>
             </ItemsControl.ItemTemplate>
           </ItemsControl>
+        </ScrollViewer>
       </Border>
     </DataTemplate>
   </UserControl.Resources>
