@@ -14,7 +14,7 @@ internal sealed class Settings
     public Dictionary<string, int> ColumnOrder { get; set; } = new();       // column key -> display index
     public Dictionary<string, double> ColumnWidth { get; set; } = new();    // column key -> pixel width
     public int LayoutVersion { get; set; }                                  // bumped when the window layout changes (resets stale window size)
-    public string ResumeFlags { get; set; } = "";                           // "Claude flags": appended to every launched/resumed claude (JSON key kept for compat)
+    public string ResumeFlags { get; set; } = DefaultClaudeFlags;           // "Claude flags": appended to every launched/resumed claude (JSON key kept for compat)
     public string CodexFlags { get; set; } = DefaultCodexFlags;             // appended to every launched/resumed codex — separate because the two CLIs share no flag spelling
 
     /// <summary>
@@ -23,6 +23,7 @@ internal sealed class Settings
     /// <see cref="FlagsVersion"/>); clearing the box afterwards sticks.
     /// </summary>
     public const string DefaultCodexFlags = "--dangerously-bypass-approvals-and-sandbox";
+    public const string DefaultClaudeFlags = "--dangerously-skip-permissions";
 
     /// <summary>Bumped when a flags default is introduced, so it's filled in exactly once on files
     /// written before it existed — and never re-added if you then clear the box on purpose.</summary>
@@ -80,10 +81,10 @@ internal sealed class Settings
     /// </summary>
     internal bool ApplyNewDefaults()
     {
-        if (FlagsVersion >= 1) return false;
-        FlagsVersion = 1;
-        if (!string.IsNullOrWhiteSpace(CodexFlags)) return true;
-        CodexFlags = DefaultCodexFlags;
+        if (FlagsVersion >= 2) return false;
+        if (FlagsVersion < 1 && string.IsNullOrWhiteSpace(CodexFlags)) CodexFlags = DefaultCodexFlags;
+        if (FlagsVersion < 2 && string.IsNullOrWhiteSpace(ResumeFlags)) ResumeFlags = DefaultClaudeFlags;
+        FlagsVersion = 2;
         return true;
     }
 

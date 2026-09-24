@@ -246,9 +246,27 @@ public class CodexFlagDefaultTests
     }
 
     [Fact]
+    public void A_file_from_before_the_claude_default_gets_it_filled_in_once()
+    {
+        var s = new Settings { ResumeFlags = "", CodexFlags = Settings.DefaultCodexFlags, FlagsVersion = 1 };
+        Assert.True(s.ApplyNewDefaults());
+        Assert.Equal(Settings.DefaultClaudeFlags, s.ResumeFlags);
+        Assert.Equal(Settings.DefaultCodexFlags, s.CodexFlags);
+        Assert.False(s.ApplyNewDefaults());
+    }
+
+    [Fact]
+    public void Claude_flags_someone_chose_are_left_alone()
+    {
+        var s = new Settings { ResumeFlags = "--model opus", FlagsVersion = 1 };
+        s.ApplyNewDefaults();
+        Assert.Equal("--model opus", s.ResumeFlags);
+    }
+
+    [Fact]
     public void Clearing_the_box_on_purpose_is_not_undone()
     {
-        var s = new Settings { CodexFlags = "", FlagsVersion = 1 };   // already migrated, then cleared
+        var s = new Settings { CodexFlags = "", FlagsVersion = 2 };   // already migrated, then cleared
         Assert.False(s.ApplyNewDefaults());
         Assert.Equal("", s.CodexFlags);
     }
