@@ -147,14 +147,14 @@ internal sealed class SessionRow : INotifyPropertyChanged
     public SessionState State => Host.HasExited ? SessionState.Idle : _s.ApiError ? SessionState.Error : SessionStateMap.FromStatus(_s.Status);
 
     /// <summary>What the status glyph means, for its tooltip; the legend used to live at the bottom of the window.</summary>
-    public string StateTooltip => Host.HasExited ? "Ended — the session has exited; click the X to remove the row" : State switch
+    public string StateTooltip => Host.HasExited ? "Ended" : State switch
     {
-        SessionState.Working => "Working — the agent is running (a tool call, thinking, or background work)",
-        SessionState.Awaiting => "Awaiting you — a permission prompt, a question, or an elicitation needs an answer",
-        SessionState.Scheduled => "Scheduled — the turn ended, but a wake-up, monitor or background command it armed will bring it back; nothing needed from you",
-        SessionState.Completed => "Completed — the turn ended; the session is idle and ready for input",
-        SessionState.Error => "Error — the last turn hit an API error; hover the row for the message",
-        _ => "Idle — no activity reported yet",
+        SessionState.Working => "Working",
+        SessionState.Awaiting => "Awaiting you",
+        SessionState.Scheduled => "Scheduled",
+        SessionState.Completed => "Completed",
+        SessionState.Error => "Error",
+        _ => "Idle",
     };
     public bool ApiError => _s.ApiError;
 
