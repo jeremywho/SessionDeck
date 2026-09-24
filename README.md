@@ -48,6 +48,7 @@ then **most-recently-changed first within each group**, re-sorting live as state
 | 🔴 red disc + ! | **Error** | *(transcript)* | last turn hit an API error (rate-limit, etc.) — hover the row for the message |
 | 🟠 amber ring | **Awaiting** | `waiting` | blocked on you (permission / input) |
 | 🔵 blue play badge | **Working** | `busy` / `shell` | actively running — including background shell/lane work while the agent "holds" |
+| 🔵 blue ring + pip | **Scheduled** | `scheduled` | the turn ended, but a wake-up, cron entry, monitor or background command it armed will bring it back — not waiting on you |
 | 🟢 green disc + ✓ | **Completed** | `idle` | finished its turn, ready for you |
 | ⚪ slate ring | **Idle** | *(other)* | fallback for any unrecognized status |
 

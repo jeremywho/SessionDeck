@@ -47,32 +47,59 @@ internal static class Hooks
     }
 
     /// <summary>Map a hook event to the status the deck shows.</summary>
-    public static string? StatusFor(string eventName, JsonElement root) => eventName switch
+    /// <summary>
+    /// The status an event implies. <paramref name="pending"/> says the turn armed something that will
+    /// wake the session by itself (see <see cref="Defers"/>): its end is then "scheduled", not idle.
+    /// A "waiting" status means the session needs a person: a permission prompt, an elicitation, or
+    /// a question put to the user. Claude's idle notification, sent a minute after any turn ends,
+    /// carries no such meaning and changes nothing.
+    /// </summary>
+    public static string? StatusFor(string eventName, JsonElement root, bool pending) => eventName switch
     {
         "SessionStart" => "idle",
         "UserPromptSubmit" => "busy",
-        "PreToolUse" => "busy",
+        "PreToolUse" => AsksUser(ToolName(root)) ? "waiting" : "busy",
         "PostToolUse" => "busy",
         "PermissionRequest" => "waiting",
-        "Notification" => NotificationIsPrompt(root) ? "waiting" : null,
-        "Stop" => "idle",
+        "Notification" => NotificationStatus(root),
+        "Stop" => pending ? "scheduled" : "idle",
         "Interrupt" => "idle",
         "SessionEnd" => "ended",
         _ => null,
     };
 
-    static bool NotificationIsPrompt(JsonElement root)
+    public static string ToolName(JsonElement root) =>
+        root.TryGetProperty("tool_name", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString() ?? "" : "";
+
+    /// <summary>A tool that puts a question to the person; the session is waiting the moment it runs.</summary>
+    public static bool AsksUser(string tool) => tool == "AskUserQuestion";
+
+    /// <summary>
+    /// A tool whose effect outlives the turn and wakes the session later: a scheduled wake-up, a cron
+    /// entry, a monitor, or a shell command run in the background.
+    /// </summary>
+    public static bool Defers(JsonElement root)
+    {
+        string tool = ToolName(root);
+        if (tool is "ScheduleWakeup" or "CronCreate" or "Monitor") return true;
+        return tool == "Bash"
+            && root.TryGetProperty("tool_input", out var input) && input.ValueKind == JsonValueKind.Object
+            && input.TryGetProperty("run_in_background", out var bg) && bg.ValueKind == JsonValueKind.True;
+    }
+
+    static string? NotificationStatus(JsonElement root)
     {
         if (root.TryGetProperty("notification_type", out var t) && t.ValueKind == JsonValueKind.String)
         {
             string s = t.GetString() ?? "";
-            return s.Contains("permission", StringComparison.OrdinalIgnoreCase) || s.Contains("idle", StringComparison.OrdinalIgnoreCase) || s.Contains("elicit", StringComparison.OrdinalIgnoreCase);
+            if (s.Contains("permission", StringComparison.OrdinalIgnoreCase) || s.Contains("elicit", StringComparison.OrdinalIgnoreCase)) return "waiting";
+            return null;
         }
         if (root.TryGetProperty("message", out var m) && m.ValueKind == JsonValueKind.String)
         {
             string s = m.GetString() ?? "";
-            return s.Contains("permission", StringComparison.OrdinalIgnoreCase) || s.Contains("waiting", StringComparison.OrdinalIgnoreCase);
+            if (s.Contains("permission", StringComparison.OrdinalIgnoreCase)) return "waiting";
         }
-        return true;
+        return null;
     }
 }

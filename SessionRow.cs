@@ -244,8 +244,9 @@ internal sealed class SessionRow : INotifyPropertyChanged
         SessionState.Error => 0,      // API error / stuck — top
         SessionState.Awaiting => 1,   // needs your feedback
         SessionState.Working => 2,    // actively running
-        SessionState.Completed => 3,  // done / idle — bottom
-        SessionState.Idle => 4,
+        SessionState.Scheduled => 3,  // waiting on a timer / background work, not on you
+        SessionState.Completed => 4,  // done / idle — bottom
+        SessionState.Idle => 5,
         _ => 9,
     };
 

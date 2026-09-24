@@ -843,9 +843,11 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         if (h.StatusAt is not DateTime at) return;
         if (h.AgentStatus == "ended" || h.HasExited) return;
         bool newer = at > info.StatusUpdatedAt.ToUniversalTime();
-        if (h.AgentStatus.Length > 0 && (newer || info.Status.Length == 0))
+        // Hosts from before protocol 2 called Claude's idle notification "waiting"; read it as idle.
+        string agentStatus = h.Protocol < 2 && h.AgentStatus == "waiting" && h.LastEvent == "Notification" ? "idle" : h.AgentStatus;
+        if (agentStatus.Length > 0 && (newer || info.Status.Length == 0))
         {
-            info.Status = h.AgentStatus;
+            info.Status = agentStatus;
             info.StatusUpdatedAt = at.ToLocalTime();
         }
         if (h.LastTool.Length > 0 && (newer || info.LastTool.Length == 0)) info.LastTool = h.LastTool;

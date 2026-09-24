@@ -40,6 +40,7 @@
           <!-- Vector play mark, optically centered: its centroid is (9,9), the circle's exact center. -->
           <Path x:Name="Run" Width="18" Height="18" Stretch="None" Fill="White"
                 Data="M 7,5 L 13,9 L 7,13 Z" Visibility="Collapsed"/>
+          <Ellipse x:Name="Pip" Width="6" Height="6" Fill="{DynamicResource BlueBrush}" Visibility="Collapsed"/>
         </Grid>
       </Grid>
       <DataTemplate.Triggers>
@@ -60,6 +61,13 @@
         <DataTrigger Binding="{Binding State}" Value="Working">
           <Setter TargetName="Dot" Property="Fill" Value="{DynamicResource BlueBrush}"/>
           <Setter TargetName="Run" Property="Visibility" Value="Visible"/>
+        </DataTrigger>
+        <!-- Scheduled: a blue ring with a pip — waiting on something of its own, not on you. -->
+        <DataTrigger Binding="{Binding State}" Value="Scheduled">
+          <Setter TargetName="Dot" Property="Fill" Value="Transparent"/>
+          <Setter TargetName="Dot" Property="Stroke" Value="{DynamicResource BlueBrush}"/>
+          <Setter TargetName="Dot" Property="StrokeThickness" Value="2"/>
+          <Setter TargetName="Pip" Property="Visibility" Value="Visible"/>
         </DataTrigger>
         <DataTrigger Binding="{Binding State}" Value="Error">
           <Setter TargetName="Dot" Property="Fill" Value="{DynamicResource RedBrush}"/>

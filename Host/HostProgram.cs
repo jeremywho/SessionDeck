@@ -60,6 +60,12 @@ internal sealed class HostRecord
     /// <summary>The stamped copy this host (and its hook forwarders) run from; the app must not prune it while the host lives.</summary>
     public string HostBin { get; set; } = "";
 
+    /// <summary>The current turn armed something that will wake the session by itself.</summary>
+    public bool Pending { get; set; }
+
+    /// <summary>How this host derives status. 2: idle notifications no longer mean waiting; turns can end scheduled.</summary>
+    public int Protocol { get; set; }
+
     [JsonIgnore] public bool HasExited => ExitCode.HasValue;
 }
 
@@ -164,6 +170,7 @@ internal static class HostProgram
             HostPid = self.Id,
             HostStartTicks = self.StartTime.ToUniversalTime().Ticks,
             HostBin = Path.GetDirectoryName(Environment.ProcessPath ?? "") ?? "",
+            Protocol = 2,
             ChildPid = _pty.Pid,
             Port = port,
             Token = token,
@@ -479,7 +486,10 @@ internal static class HostProgram
             _record.HookEvents++;
             _record.LastEvent = ev;
             _record.StatusAt = DateTime.UtcNow;
-            string? status = Hooks.StatusFor(ev, root);
+            bool turnStarts = ev is "UserPromptSubmit" or "PreToolUse" && _record.AgentStatus is "idle" or "scheduled" or "waiting" or "";
+            if (ev == "SessionStart" || turnStarts) _record.Pending = false;
+            if (ev == "PreToolUse" && Hooks.Defers(root)) _record.Pending = true;
+            string? status = Hooks.StatusFor(ev, root, _record.Pending);
             if (status != null) _record.AgentStatus = status;
             if (root.TryGetProperty("tool_name", out var t) && t.ValueKind == JsonValueKind.String && ev == "PreToolUse")
                 _record.LastTool = t.GetString() ?? "";
