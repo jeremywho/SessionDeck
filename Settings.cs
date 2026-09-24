@@ -44,7 +44,14 @@ internal sealed class Settings
     public string LastCodexModel { get; set; } = "";
     public string LastCodexEffort { get; set; } = "";
     public bool AutoRestartOnUpdate { get; set; } = true;
-    public List<SessionGroup> SessionGroups { get; set; } = new();          // named, collapsible sets of sessions in the list; members are session ids                    // restart idle deck sessions when their CLI has updated underneath them
+    public List<SessionGroup> SessionGroups { get; set; } = new();          // named, collapsible sets of sessions in the list; members are session ids
+
+    /// <summary>
+    /// Settings this build does not know, kept as written. An older build saving the file (it does so
+    /// on every launch) would otherwise drop everything a newer build had added.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonExtensionData]
+    public Dictionary<string, System.Text.Json.JsonElement>? Unknown { get; set; }                    // restart idle deck sessions when their CLI has updated underneath them
 
     public void RememberFolder(string cwd)
     {
