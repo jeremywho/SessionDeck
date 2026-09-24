@@ -31,7 +31,8 @@
                  Fill="{Binding DesktopIndex, Converter={StaticResource DesktopColor}}"
                  Visibility="{Binding OnOtherDesktop, Converter={StaticResource BoolToVis}}"
                  ToolTip="{Binding DesktopLabel}"/>
-        <Grid Width="18" Height="18" HorizontalAlignment="Center" VerticalAlignment="Center">
+        <Grid Width="18" Height="18" HorizontalAlignment="Center" VerticalAlignment="Center"
+              Background="Transparent" ToolTip="{Binding StateTooltip}" ToolTipService.InitialShowDelay="250">
           <Ellipse x:Name="Dot" Width="18" Height="18"/>
           <TextBlock x:Name="Check" Text="&#x2713;" FontSize="10" FontWeight="Bold" Foreground="White"
                      HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
