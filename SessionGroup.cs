@@ -16,6 +16,20 @@ internal sealed class SessionGroup
     public List<string> Members { get; set; } = new();
 }
 
+/// <summary>The deck's columns as last laid out: which hosts each held, which was showing, its share of the width.</summary>
+internal sealed class DeckLayout
+{
+    public List<DeckColumn> Columns { get; set; } = new();
+    public int Focused { get; set; }
+}
+
+internal sealed class DeckColumn
+{
+    public List<string> Hosts { get; set; } = new();
+    public string Active { get; set; } = "";
+    public double Fraction { get; set; } = 1;
+}
+
 /// <summary>Group name → whether its rows are hidden, read from the live settings.</summary>
 internal sealed class GroupCollapsedConverter : IValueConverter
 {

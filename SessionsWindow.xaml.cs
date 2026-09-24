@@ -105,6 +105,9 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         _timer.Tick += (_, _) => { RequestRefresh(); if (DateTime.UtcNow - InstalledVersions.CheckedAt > TimeSpan.FromMinutes(10)) InstalledVersions.Refresh(); };
         InstalledVersions.Changed += () => Dispatcher.BeginInvoke(RequestRefresh);
         InstalledVersions.Refresh();
+        var layoutSave = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+        layoutSave.Tick += (_, _) => { layoutSave.Stop(); _app.Settings.Deck = Deck.Layout; _app.Settings.Save(); };
+        Deck.LayoutChanged += () => { layoutSave.Stop(); layoutSave.Start(); };
         Deck.RestartRequested += tab =>
         {
             var row = Rows.FirstOrDefault(r => r.Host.Id == tab.View.Host.Id);
@@ -587,10 +590,8 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     void ReattachHosts()
     {
         var hosts = HostManager.Discover().OrderBy(h => h.StartedAt).ToList();
-        PerformanceLog.Write($"reattach hosts={hosts.Count} ids={string.Join(",", hosts.Select(h => h.Id))}");
-        foreach (var host in hosts)
-            Deck.Open(host, activate: false);
-        if (Deck.Tabs.Count > 0) Deck.Activate(Deck.Tabs[^1]);
+        PerformanceLog.Write($"reattach hosts={hosts.Count} ids={string.Join(",", hosts.Select(h => h.Id))} columns={_app.Settings.Deck.Columns.Count}");
+        Deck.Restore(_app.Settings.Deck, hosts);
     }
 
     static string HomeDir => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);

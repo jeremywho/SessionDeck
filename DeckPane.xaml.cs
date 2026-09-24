@@ -78,6 +78,9 @@ internal partial class DeckPane : UserControl
 
     public event Action? TabsChanged;
 
+    /// <summary>Columns, tabs, active tabs or widths changed; the window persists <see cref="Layout"/>.</summary>
+    public event Action? LayoutChanged;
+
     /// <summary>The tab's menu asked for a restart; the window owns the resume logic.</summary>
     public event Action<DeckTab>? RestartRequested;
 
@@ -113,6 +116,7 @@ internal partial class DeckPane : UserControl
             var fracs = root.GetProperty("fracs").EnumerateArray().Select(f => f.GetDouble()).ToList();
             for (int i = 0; i < Groups.Count && i < fracs.Count; i++) Groups[i].Fraction = fracs[i];
             BuildStrips();
+            LayoutChanged?.Invoke();
             return;
         }
         var tab = FindByHost(hostId);
@@ -194,6 +198,59 @@ internal partial class DeckPane : UserControl
         }
     }
 
+    /// <summary>The current columns, for saving.</summary>
+    public DeckLayout Layout => new()
+    {
+        Focused = _focused,
+        Columns = Groups.Select(g => new DeckColumn
+        {
+            Hosts = g.Tabs.Select(t => t.View.Host.Id).ToList(),
+            Active = g.Active?.View.Host.Id ?? "",
+            Fraction = g.Fraction,
+        }).ToList(),
+    };
+
+    /// <summary>
+    /// Rebuild the columns from a saved layout for the hosts still alive. Hosts the layout does not
+    /// mention go into the last column; columns left with no live host are dropped.
+    /// </summary>
+    public void Restore(DeckLayout layout, IEnumerable<HostRecord> hosts)
+    {
+        var byId = hosts.ToDictionary(h => h.Id);
+        var placed = new HashSet<string>();
+        Groups.Clear();
+        foreach (var col in layout.Columns)
+        {
+            var g = new DeckGroup { Fraction = col.Fraction > 0 ? col.Fraction : 1 };
+            foreach (var id in col.Hosts)
+                if (byId.TryGetValue(id, out var host) && placed.Add(id)) g.Tabs.Add(NewTab(host));
+            if (g.Tabs.Count == 0) continue;
+            g.Active = g.Tabs.FirstOrDefault(t => t.View.Host.Id == col.Active) ?? g.Tabs[^1];
+            Groups.Add(g);
+        }
+        var rest = hosts.Where(h => !placed.Contains(h.Id)).ToList();
+        if (rest.Count > 0)
+        {
+            if (Groups.Count == 0) Groups.Add(new DeckGroup());
+            var last = Groups[^1];
+            foreach (var host in rest) last.Tabs.Add(NewTab(host));
+            last.Active ??= last.Tabs[^1];
+        }
+        _focused = Math.Clamp(layout.Focused, 0, Math.Max(0, Groups.Count - 1));
+        foreach (var g in Groups) foreach (var t in g.Tabs) t.View.Open();
+        Changed();
+        FocusedGroup?.Active?.View.FocusTerminal();
+    }
+
+    DeckTab NewTab(HostRecord host)
+    {
+        var view = new TerminalView(_browser, host);
+        var tab = new DeckTab(view);
+        view.TitleChanged += _ => { tab.Raise(nameof(DeckTab.Title)); tab.Raise(nameof(DeckTab.Tooltip)); };
+        view.ExitedChanged += _ => tab.Raise(nameof(DeckTab.ExitedVisibility));
+        return tab;
+    }
+
     void Changed()
     {
         RebuildFlat();
@@ -201,6 +258,7 @@ internal partial class DeckPane : UserControl
         BuildStrips();
         SendLayout();
         TabsChanged?.Invoke();
+        LayoutChanged?.Invoke();
         Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, ScrollActiveIntoView);
     }
 
@@ -240,14 +298,11 @@ internal partial class DeckPane : UserControl
         var existing = FindByHost(host.Id);
         if (existing != null) { if (activate) Activate(existing); return existing; }
 
-        var view = new TerminalView(_browser, host);
-        var tab = new DeckTab(view);
-        view.TitleChanged += _ => { tab.Raise(nameof(DeckTab.Title)); tab.Raise(nameof(DeckTab.Tooltip)); };
-        view.ExitedChanged += _ => tab.Raise(nameof(DeckTab.ExitedVisibility));
+        var tab = NewTab(host);
         if (Groups.Count == 0) Groups.Add(new DeckGroup());
         var group = FocusedGroup!;
         group.Tabs.Add(tab);
-        view.Open();
+        tab.View.Open();
         if (activate || group.Active == null) { group.Active = tab; _focused = Groups.IndexOf(group); }
         Changed();
         if (activate) tab.View.FocusTerminal();
