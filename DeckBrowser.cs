@@ -123,6 +123,9 @@ internal sealed class DeckBrowser : Grid
                 case "open":
                     OpenOutside(root.GetProperty("uri").GetString());
                     return;
+                case "metrics":
+                    PerformanceLog.Write("term-metrics " + root.GetRawText());
+                    return;
                 case "copy":
                     try { Clipboard.SetText(root.GetProperty("text").GetString() ?? ""); } catch (Exception ex) { App.LogError(ex); }
                     return;

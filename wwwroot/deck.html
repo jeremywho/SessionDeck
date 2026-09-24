@@ -13,7 +13,10 @@
   /* xterm sizes the overlay slider inline at 10 px; Windows Terminal's is a 6 px rounded thumb on a bare track. */
   .xterm .xterm-scrollable-element > .scrollbar.vertical { width: 10px !important; }
   .xterm .xterm-scrollable-element > .scrollbar.vertical > .slider { width: 6px !important; left: 2px !important; border-radius: 3px; }
-  .pane { position: absolute; top: 0; bottom: 0; left: 0; width: 100%; box-sizing: border-box; padding: 6px 0 0 8px; background: var(--bg, rgba(12,12,12,0.96)); visibility: hidden; }
+  .pane { position: absolute; top: 0; bottom: 0; left: 0; width: 100%; box-sizing: border-box; background: var(--bg, rgba(12,12,12,0.96)); visibility: hidden; }
+  /* The inset lives on xterm's own element: the fit addon subtracts that element's padding when it
+     counts rows, but not the parent's, so padding on .pane gave one row too many and clipped the last. */
+  .pane .xterm { padding: 6px 0 0 8px; }
   .pane.shown { visibility: visible; }
   .divider { position: absolute; top: 0; bottom: 0; width: 7px; margin-left: -3px; cursor: col-resize; z-index: 5; }
     .divider::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px; background: var(--fg3, #8a8d93); opacity: 0.45; }
@@ -208,7 +211,7 @@
     });
     term.onResize(({ cols, rows }) => send(p, { type: 'resize', cols, rows }));
     term.onTitleChange(title => post({ type: 'title', id, title }));
-    p.ro = new ResizeObserver(() => fit.fit());
+    p.ro = new ResizeObserver(() => { fit.fit(); reportMetrics(p); });
     p.ro.observe(el);
     connect(p);
   }
@@ -400,6 +403,23 @@
     const t = dropTarget(ev.clientX);
     post({ type: 'dropTab', id: text.slice(TAB_PREFIX.length), group: t.group, side: t.side });
   });
+
+  // After a resize settles, tell the app what the terminal thinks its geometry is, so a mismatch
+  // between rows and the space they get can be read from the performance log.
+  let metricsTimer = null;
+  function reportMetrics(p) {
+    clearTimeout(metricsTimer);
+    metricsTimer = setTimeout(() => {
+      const core = p.term._core;
+      const cell = core && core._renderService ? core._renderService.dimensions.css.cell : { width: 0, height: 0 };
+      const screen = p.el.querySelector('.xterm-screen');
+      post({ type: 'metrics', id: p.id, cols: p.term.cols, rows: p.term.rows,
+             elW: p.el.clientWidth, elH: p.el.clientHeight,
+             cellW: Math.round(cell.width * 100) / 100, cellH: Math.round(cell.height * 100) / 100,
+             screenH: screen ? screen.clientHeight : 0, dpr: window.devicePixelRatio,
+             viewportY: p.term.buffer.active.viewportY, baseY: p.term.buffer.active.baseY });
+    }, 600);
+  }
 
   function focusShown() {
     focusGroup(focused);
