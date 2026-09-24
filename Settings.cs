@@ -42,7 +42,8 @@ internal sealed class Settings
     public string LastClaudeEffort { get; set; } = "";
     public string LastCodexModel { get; set; } = "";
     public string LastCodexEffort { get; set; } = "";
-    public bool AutoRestartOnUpdate { get; set; } = true;                    // restart idle deck sessions when their CLI has updated underneath them
+    public bool AutoRestartOnUpdate { get; set; } = true;
+    public List<SessionGroup> SessionGroups { get; set; } = new();          // named, collapsible sets of sessions in the list; members are session ids                    // restart idle deck sessions when their CLI has updated underneath them
 
     public void RememberFolder(string cwd)
     {

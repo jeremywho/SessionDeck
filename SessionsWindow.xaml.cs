@@ -77,6 +77,12 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         if (_app.Settings.WindowWidth > 300) Width = _app.Settings.WindowWidth;
         if (_app.Settings.WindowHeight > 200) Height = _app.Settings.WindowHeight;
         RestorePosition();
+        // The app is usually ended by a kill or by the updater's relaunch, never a graceful close,
+        // so geometry is saved shortly after every move or resize rather than on closing.
+        var geometry = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(600) };
+        geometry.Tick += (_, _) => { geometry.Stop(); if (WindowState == WindowState.Normal && IsLoaded) SavePosition(); };
+        LocationChanged += (_, _) => { geometry.Stop(); geometry.Start(); };
+        SizeChanged += (_, _) => { geometry.Stop(); geometry.Start(); };
 
         Topmost = _app.Settings.AlwaysOnTop;
         ShowInTaskbar = _app.Settings.ShowInTaskbar;
@@ -377,6 +383,11 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     void SetupSort()
     {
         var view = (ListCollectionView)CollectionViewSource.GetDefaultView(Rows);
+        view.SortDescriptions.Add(new SortDescription(nameof(SessionRow.GroupOrder), ListSortDirection.Ascending));
+        view.LiveSortingProperties.Add(nameof(SessionRow.GroupOrder));
+        view.GroupDescriptions.Add(new PropertyGroupDescription(nameof(SessionRow.GroupName)));
+        view.IsLiveGrouping = true;
+        view.LiveGroupingProperties.Add(nameof(SessionRow.GroupName));
         view.SortDescriptions.Add(new SortDescription(nameof(SessionRow.SortPriority), ListSortDirection.Ascending));
         view.SortDescriptions.Add(new SortDescription(nameof(SessionRow.LastChanged), ListSortDirection.Descending));
         view.SortDescriptions.Add(new SortDescription(nameof(SessionRow.Name), ListSortDirection.Ascending));
@@ -737,6 +748,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             var changes = ApplyRefresh(scan.Sessions, scan.Hosts, scan.Parents);
             apply.Stop();
             RestartUpdatedIdleSessions();
+            ApplyGroups();
             if (ExperimentOptions.TelemetryActive)
             {
                 double applyMs = apply.Elapsed.TotalMilliseconds;
@@ -1037,6 +1049,138 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         UsageBar.Opacity = subdued ? 0.5 : 1.0;
     }
 
+    // ---------------- session groups ----------------
+
+    List<SessionGroup> GroupsSetting => _app.Settings.SessionGroups;
+
+    /// <summary>Stamp every row with its group so the view groups and orders it; ungrouped rows come first.</summary>
+    void ApplyGroups()
+    {
+        var groups = GroupsSetting;
+        foreach (var row in Rows)
+        {
+            int i = groups.FindIndex(g => g.Members.Contains(row.GroupKey));
+            row.SetGroup(i >= 0 ? groups[i].Name : "", i + 1);
+        }
+    }
+
+    void GroupsChanged()
+    {
+        _app.Settings.Save();
+        ApplyGroups();
+        CollectionViewSource.GetDefaultView(Rows).Refresh();
+    }
+
+    void MoveToGroup(SessionRow row, string? groupName)
+    {
+        foreach (var g in GroupsSetting) g.Members.Remove(row.GroupKey);
+        if (!string.IsNullOrEmpty(groupName))
+        {
+            var g = GroupsSetting.FirstOrDefault(x => x.Name == groupName);
+            if (g == null) { g = new SessionGroup { Name = groupName }; GroupsSetting.Add(g); }
+            g.Members.Add(row.GroupKey);
+        }
+        GroupsChanged();
+    }
+
+    string? PromptGroupName(string title, string initial = "")
+    {
+        var dlg = new TextPromptWindow(this, title, "Group name", initial);
+        if (dlg.ShowDialog() != true) return null;
+        return GroupsSetting.Any(g => g.Name == dlg.Text && g.Name != initial) ? null : dlg.Text;
+    }
+
+    MenuItem GroupSubmenu(SessionRow row)
+    {
+        var sub = new MenuItem { Header = "Group" };
+        foreach (var g in GroupsSetting)
+        {
+            string name = g.Name;
+            var item = Item(name, () => MoveToGroup(row, name));
+            item.IsCheckable = true;
+            item.IsChecked = row.GroupName == name;
+            sub.Items.Add(item);
+        }
+        if (GroupsSetting.Count > 0) sub.Items.Add(new Separator());
+        sub.Items.Add(Item("New group…", () => { var name = PromptGroupName("New group"); if (name != null) MoveToGroup(row, name); }));
+        if (row.GroupName.Length > 0) sub.Items.Add(Item("Remove from group", () => MoveToGroup(row, null)));
+        return sub;
+    }
+
+    static string? GroupNameOf(object sender) => sender is FrameworkElement { Tag: string name } && name.Length > 0 ? name : null;
+
+    void GroupHeader_Click(object sender, MouseButtonEventArgs e)
+    {
+        if (GroupNameOf(sender) is not { } name) return;
+        var g = GroupsSetting.FirstOrDefault(x => x.Name == name);
+        if (g == null) return;
+        g.Collapsed = !g.Collapsed;
+        GroupsChanged();
+        e.Handled = true;
+    }
+
+    readonly ContextMenu _groupMenu = new();
+
+    void GroupHeader_RightClick(object sender, MouseButtonEventArgs e)
+    {
+        if (GroupNameOf(sender) is not { } name) return;
+        e.Handled = true;
+        _groupMenu.Items.Clear();
+        _groupMenu.Items.Add(Item("Rename…", () =>
+        {
+            var g = GroupsSetting.FirstOrDefault(x => x.Name == name);
+            var renamed = g == null ? null : PromptGroupName("Rename group", g.Name);
+            if (g != null && renamed != null) { g.Name = renamed; GroupsChanged(); }
+        }));
+        _groupMenu.Items.Add(Item("Ungroup (keep the sessions)", () => { GroupsSetting.RemoveAll(x => x.Name == name); GroupsChanged(); }));
+        _groupMenu.PlacementTarget = SessionsGrid;
+        _groupMenu.Placement = PlacementMode.MousePoint;
+        Dispatcher.BeginInvoke(() => _groupMenu.IsOpen = true);
+    }
+
+    Point _rowDragStart;
+    SessionRow? _rowDragCandidate;
+
+    void Grid_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        _rowDragCandidate = RowAt(e.OriginalSource);
+        _rowDragStart = e.GetPosition(this);
+    }
+
+    void Grid_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (_rowDragCandidate == null || e.LeftButton != MouseButtonState.Pressed) return;
+        var d = e.GetPosition(this) - _rowDragStart;
+        if (Math.Abs(d.X) < SystemParameters.MinimumHorizontalDragDistance && Math.Abs(d.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+        var row = _rowDragCandidate;
+        _rowDragCandidate = null;
+        DragDrop.DoDragDrop(SessionsGrid, new DataObject(typeof(SessionRow), row), DragDropEffects.Move);
+    }
+
+    void Grid_DragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = e.Data.GetDataPresent(typeof(SessionRow)) ? DragDropEffects.Move : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    /// <summary>Drop on a row: join that row's group (or leave one). Drop on a group header: join that group.</summary>
+    void Grid_Drop(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetData(typeof(SessionRow)) is not SessionRow dragged) return;
+        e.Handled = true;
+        string? target = null;
+        if (RowAt(e.OriginalSource) is { } onRow) target = onRow.GroupName.Length > 0 ? onRow.GroupName : null;
+        else
+        {
+            var dep = e.OriginalSource as DependencyObject;
+            while (dep != null && !(dep is Border { Tag: string } )) dep = VisualTreeHelper.GetParent(dep);
+            if (dep is Border { Tag: string name } && name.Length > 0) target = name;
+            else if (dep == null) return;
+        }
+        if ((target ?? "") == dragged.GroupName) return;
+        MoveToGroup(dragged, target);
+    }
+
     static SessionRow? RowAt(object? originalSource)
     {
         var dep = originalSource as DependencyObject;
@@ -1091,6 +1235,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             _rowMenu.Items.Add(restart);
         }
         _rowMenu.Items.Add(new Separator());
+        _rowMenu.Items.Add(GroupSubmenu(row));
         _rowMenu.Items.Add(Item("Copy session id", () => TrySetClipboard(row.Host.SessionId)));
         _rowMenu.Items.Add(Item("Copy folder", () => TrySetClipboard(row.Cwd)));
         _rowMenu.PlacementTarget = SessionsGrid;

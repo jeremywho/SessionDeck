@@ -158,6 +158,23 @@ internal sealed class SessionRow : INotifyPropertyChanged
     public bool OnOtherDesktop => _desktopIndex >= 0 && !_onCurrentDesktop;
     public string DesktopLabel => _desktopIndex >= 0 ? $"Desktop {_desktopIndex + 1}" : "";
 
+    /// <summary>What a group membership is keyed on: the CLI's own session id once known, else the host.</summary>
+    public string GroupKey => Host.SessionId.Length > 0 ? Host.SessionId : Host.Id;
+
+    /// <summary>"" for ungrouped, which sorts first.</summary>
+    public string GroupName { get; private set; } = "";
+    public int GroupOrder { get; private set; }
+
+    public void SetGroup(string name, int order)
+    {
+        if (GroupName == name && GroupOrder == order) return;
+        GroupName = name; GroupOrder = order;
+        var h = PropertyChanged;
+        if (h == null) return;
+        h(this, new PropertyChangedEventArgs(nameof(GroupOrder)));
+        h(this, new PropertyChangedEventArgs(nameof(GroupName)));
+    }
+
     public void SetDesktop(int index, bool onCurrent)
     {
         if (_desktopIndex == index && _onCurrentDesktop == onCurrent) return;
