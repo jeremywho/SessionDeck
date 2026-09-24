@@ -44,6 +44,7 @@ internal static class SessionScanner
             if (s == null || !IsAlive(s.Pid)) continue;   // skip dead/stale registry files
             Enrich(s);
             CountSubagents(s);
+            CountBackgroundWork(s);
             list.Add(s);
         }
 
@@ -226,6 +227,35 @@ internal static class SessionScanner
             (s.SubagentsTotal, s.SubagentsActive) = _subagents.Count(dir, DateTime.UtcNow);
         }
         catch { }
+    }
+
+    /// <summary>
+    /// Claude writes each background task's output to %TEMP%\claude\&lt;project&gt;\&lt;session&gt;\tasks\*.output
+    /// and keeps appending while the task runs; a file written recently means the task is alive.
+    /// </summary>
+    internal static readonly TimeSpan BackgroundWindow = TimeSpan.FromSeconds(90);
+
+    static void CountBackgroundWork(SessionInfo s)
+    {
+        try
+        {
+            string project = s.TranscriptPath.Length > 0
+                ? Path.GetFileName(Path.GetDirectoryName(s.TranscriptPath) ?? "")
+                : Regex.Replace(s.Cwd, "[^a-zA-Z0-9]", "-");
+            if (project.Length == 0 || s.SessionId.Length == 0) return;
+            string dir = Path.Combine(Path.GetTempPath(), "claude", project, s.SessionId, "tasks");
+            s.BackgroundWork = CountRecentOutputs(dir, DateTime.UtcNow, BackgroundWindow);
+        }
+        catch { }
+    }
+
+    internal static int CountRecentOutputs(string dir, DateTime nowUtc, TimeSpan window)
+    {
+        if (!Directory.Exists(dir)) return 0;
+        int n = 0;
+        foreach (var f in Directory.EnumerateFiles(dir, "*.output"))
+            if (nowUtc - File.GetLastWriteTimeUtc(f) <= window) n++;
+        return n;
     }
 
     static string SubagentsDir(SessionInfo s)

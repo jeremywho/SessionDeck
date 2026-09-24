@@ -144,7 +144,21 @@ internal sealed class SessionRow : INotifyPropertyChanged
     }
     public string Status => _s.Status;                            // raw status (optional column)
     public bool HostExited => Host.HasExited;
-    public SessionState State => Host.HasExited ? SessionState.Idle : _s.ApiError ? SessionState.Error : SessionStateMap.FromStatus(_s.Status);
+    /// <summary>
+    /// A session whose own turn is over but which still has subagents streaming or background tasks
+    /// writing is not done: it shows as Scheduled, since something of its own will bring it back.
+    /// </summary>
+    public SessionState State
+    {
+        get
+        {
+            if (Host.HasExited) return SessionState.Idle;
+            if (_s.ApiError) return SessionState.Error;
+            var state = SessionStateMap.FromStatus(_s.Status);
+            if (state is SessionState.Completed or SessionState.Idle && HasActiveSubagents) return SessionState.Scheduled;
+            return state;
+        }
+    }
 
     /// <summary>What the status glyph means, for its tooltip; the legend used to live at the bottom of the window.</summary>
     public string StateTooltip => Host.HasExited ? "Ended" : State switch
@@ -207,7 +221,7 @@ internal sealed class SessionRow : INotifyPropertyChanged
     /// click into — see <see cref="CodexAttribution"/>). They're counted together because the question
     /// the badge answers is "is this session waiting on something?", and the tooltip splits them.
     /// </summary>
-    public int SubagentsActive => _s.SubagentsActive + _s.BackgroundTasks;
+    public int SubagentsActive => _s.SubagentsActive + _s.BackgroundTasks + _s.BackgroundWork;
     public bool HasActiveSubagents => SubagentsActive > 0;
 
     public string SubagentTooltip
@@ -219,6 +233,8 @@ internal sealed class SessionRow : INotifyPropertyChanged
                 parts.Add($"{_s.SubagentsActive} subagent{(_s.SubagentsActive == 1 ? "" : "s")} working · {_s.SubagentsTotal} this session");
             if (_s.BackgroundTasks > 0)
                 parts.Add($"{_s.BackgroundTasks} Codex task{(_s.BackgroundTasks == 1 ? "" : "s")} running (no terminal)");
+            if (_s.BackgroundWork > 0)
+                parts.Add($"{_s.BackgroundWork} background task{(_s.BackgroundWork == 1 ? "" : "s")} (shell, monitor or loop) still writing output");
             return string.Join("\n", parts);
         }
     }

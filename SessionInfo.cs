@@ -31,6 +31,9 @@ internal sealed class SessionInfo
     /// runs) — rolled onto the parent row by <see cref="CodexAttribution"/> instead of listed on their
     /// own, since there's no terminal to click into.</summary>
     public int BackgroundTasks;
+    /// <summary>Claude background tasks (a shell run in the background, a monitor, a loop) whose output
+    /// file was written in the last little while: work of the session's own, going on while it holds.</summary>
+    public int BackgroundWork;
     public DateTime StartedAt;
     public DateTime UpdatedAt;
     public DateTime StatusUpdatedAt;   // when the status field last changed (sessions/<pid>.json)
