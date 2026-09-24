@@ -57,6 +57,9 @@ internal sealed class HostRecord
     public string TranscriptPath { get; set; } = "";
     public int HookEvents { get; set; }
 
+    /// <summary>The stamped copy this host (and its hook forwarders) run from; the app must not prune it while the host lives.</summary>
+    public string HostBin { get; set; } = "";
+
     [JsonIgnore] public bool HasExited => ExitCode.HasValue;
 }
 
@@ -160,6 +163,7 @@ internal static class HostProgram
             Cwd = spec.Cwd,
             HostPid = self.Id,
             HostStartTicks = self.StartTime.ToUniversalTime().Ticks,
+            HostBin = Path.GetDirectoryName(Environment.ProcessPath ?? "") ?? "",
             ChildPid = _pty.Pid,
             Port = port,
             Token = token,

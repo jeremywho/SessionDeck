@@ -143,13 +143,35 @@ internal static class HostManager
         Directory.Move(tmp, to);
     }
 
+    /// <summary>
+    /// Drop stamped copies nothing runs from any more. A copy a live host reports, or whose exe is
+    /// locked by a process, stays whole: a recursive delete would strip the runtime config and
+    /// dependencies around a locked exe, and the host's next hook forwarder would then die on the
+    /// ".NET Desktop Runtime" dialog.
+    /// </summary>
     static void PruneHostBins(string root, string keep)
     {
+        var inUse = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { Path.GetFullPath(keep) };
+        foreach (var rec in Discover())
+            if (rec.HostBin.Length > 0) inUse.Add(Path.GetFullPath(rec.HostBin));
         foreach (var dir in Directory.GetDirectories(root))
         {
-            if (string.Equals(dir, keep, StringComparison.OrdinalIgnoreCase)) continue;
+            if (inUse.Contains(Path.GetFullPath(dir))) continue;
+            if (Directory.GetFiles(dir, "*.exe").Any(IsLocked)) continue;
             try { Directory.Delete(dir, true); } catch { }
         }
+    }
+
+    /// <summary>Can the file be opened for exclusive access? A running exe cannot.</summary>
+    internal static bool IsLocked(string file)
+    {
+        try
+        {
+            using var f = File.Open(file, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            return false;
+        }
+        catch (IOException) { return true; }
+        catch (UnauthorizedAccessException) { return true; }
     }
 
     /// <summary>
