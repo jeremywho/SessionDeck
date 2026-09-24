@@ -4,6 +4,65 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
              AllowDrop="True">
+  <UserControl.Resources>
+    <!-- One column's tab strip. The column's DataContext is its DeckGroup. -->
+    <DataTemplate x:Key="GroupStripTemplate">
+      <Border Background="Transparent" Padding="6,5,6,6" AllowDrop="True" DragOver="Strip_DragOver" Drop="Strip_Drop">
+        <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+          <ItemsControl ItemsSource="{Binding Tabs}">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <Border x:Name="Tab" CornerRadius="6" Margin="0,0,4,0" Padding="10,4,4,4" Cursor="Hand"
+                        Background="Transparent" BorderThickness="1" BorderBrush="Transparent"
+                        MouseLeftButtonDown="Tab_MouseLeftButtonDown" MouseMove="Tab_MouseMove"
+                        MouseDown="Tab_MouseDown" AllowDrop="True" Drop="Tab_Drop" Tag="{Binding}">
+                  <Border.ContextMenu>
+                    <ContextMenu>
+                      <MenuItem Header="Close tab (session keeps running)" Click="CloseTabMenu_Click" Tag="{Binding}"/>
+                      <MenuItem Header="Close &amp; end session" Click="StopMenu_Click" Tag="{Binding}"/>
+                      <MenuItem Header="Restart session (resume on the installed CLI)" Click="RestartMenu_Click" Tag="{Binding}"/>
+                      <Separator/>
+                      <MenuItem Header="Split right" Click="SplitMenu_Click" Tag="{Binding}"/>
+                      <Separator/>
+                      <MenuItem Header="Copy session id" Click="CopyIdMenu_Click" Tag="{Binding}"/>
+                      <MenuItem Header="Copy folder" Click="CopyCwdMenu_Click" Tag="{Binding}"/>
+                    </ContextMenu>
+                  </Border.ContextMenu>
+                  <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="{Binding Glyph}" FontSize="9.5" VerticalAlignment="Center" Margin="0,0,6,0"
+                               Foreground="{Binding GlyphBrush}"/>
+                    <TextBlock Text="{Binding Title}" FontSize="12.5" VerticalAlignment="Center" MaxWidth="180"
+                               TextTrimming="CharacterEllipsis" Foreground="{DynamicResource FgBrush}"
+                               ToolTip="{Binding Tooltip}"/>
+                    <TextBlock Text="exited" FontSize="10" Margin="6,0,0,0" VerticalAlignment="Center" Opacity="0.6"
+                               Foreground="{DynamicResource Fg3Brush}"
+                               Visibility="{Binding ExitedVisibility}"/>
+                    <ui:Button Appearance="Transparent" BorderThickness="0" MinHeight="0" MaxHeight="22" Width="22" Padding="0"
+                               Margin="6,0,0,0" Click="CloseTab_Click" Tag="{Binding}" ToolTip="Close tab (session keeps running) — middle-click also closes">
+                      <ui:Button.Icon><ui:SymbolIcon Symbol="Dismiss24" FontSize="10"/></ui:Button.Icon>
+                    </ui:Button>
+                  </StackPanel>
+                </Border>
+                <DataTemplate.Triggers>
+                  <DataTrigger Binding="{Binding IsActive}" Value="True">
+                    <Setter TargetName="Tab" Property="Background" Value="{DynamicResource Surface2Brush}"/>
+                    <Setter TargetName="Tab" Property="BorderBrush" Value="{DynamicResource Border2Brush}"/>
+                  </DataTrigger>
+                  <DataTrigger Binding="{Binding IsForeground}" Value="True">
+                    <Setter TargetName="Tab" Property="BorderBrush" Value="{DynamicResource BlueBrush}"/>
+                  </DataTrigger>
+                </DataTemplate.Triggers>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+      </Border>
+    </DataTemplate>
+  </UserControl.Resources>
+
   <Grid>
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto"/>
@@ -11,53 +70,9 @@
     </Grid.RowDefinitions>
 
     <Border Grid.Row="0" Background="{DynamicResource TitlebarBrush}" BorderBrush="{DynamicResource Border2Brush}"
-            BorderThickness="0,0,0,1" Padding="6,5,6,6" AllowDrop="True" DragOver="Strip_DragOver" Drop="Strip_Drop">
-      <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
-        <ItemsControl x:Name="TabStrip" ItemsSource="{Binding Tabs}">
-          <ItemsControl.ItemsPanel>
-            <ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate>
-          </ItemsControl.ItemsPanel>
-          <ItemsControl.ItemTemplate>
-            <DataTemplate>
-              <Border x:Name="Tab" CornerRadius="6" Margin="0,0,4,0" Padding="10,4,4,4" Cursor="Hand"
-                      Background="Transparent" BorderThickness="1" BorderBrush="Transparent"
-                      MouseLeftButtonDown="Tab_MouseLeftButtonDown" MouseMove="Tab_MouseMove"
-                      MouseDown="Tab_MouseDown" AllowDrop="True" Drop="Tab_Drop" Tag="{Binding}">
-                <Border.ContextMenu>
-                  <ContextMenu>
-                    <MenuItem Header="Close tab (session keeps running)" Click="CloseTabMenu_Click" Tag="{Binding}"/>
-                    <MenuItem Header="Close &amp; end session" Click="StopMenu_Click" Tag="{Binding}"/>
-                    <MenuItem Header="Restart session (resume on the installed CLI)" Click="RestartMenu_Click" Tag="{Binding}"/>
-                    <Separator/>
-                    <MenuItem Header="Copy session id" Click="CopyIdMenu_Click" Tag="{Binding}"/>
-                    <MenuItem Header="Copy folder" Click="CopyCwdMenu_Click" Tag="{Binding}"/>
-                  </ContextMenu>
-                </Border.ContextMenu>
-                <StackPanel Orientation="Horizontal">
-                  <TextBlock Text="{Binding Glyph}" FontSize="9.5" VerticalAlignment="Center" Margin="0,0,6,0"
-                             Foreground="{Binding GlyphBrush}"/>
-                  <TextBlock Text="{Binding Title}" FontSize="12.5" VerticalAlignment="Center" MaxWidth="180"
-                             TextTrimming="CharacterEllipsis" Foreground="{DynamicResource FgBrush}"
-                             ToolTip="{Binding Tooltip}"/>
-                  <TextBlock Text="exited" FontSize="10" Margin="6,0,0,0" VerticalAlignment="Center" Opacity="0.6"
-                             Foreground="{DynamicResource Fg3Brush}"
-                             Visibility="{Binding ExitedVisibility}"/>
-                  <ui:Button Appearance="Transparent" BorderThickness="0" MinHeight="0" MaxHeight="22" Width="22" Padding="0"
-                             Margin="6,0,0,0" Click="CloseTab_Click" Tag="{Binding}" ToolTip="Close tab (session keeps running) — middle-click also closes">
-                    <ui:Button.Icon><ui:SymbolIcon Symbol="Dismiss24" FontSize="10"/></ui:Button.Icon>
-                  </ui:Button>
-                </StackPanel>
-              </Border>
-              <DataTemplate.Triggers>
-                <DataTrigger Binding="{Binding IsActive}" Value="True">
-                  <Setter TargetName="Tab" Property="Background" Value="{DynamicResource Surface2Brush}"/>
-                  <Setter TargetName="Tab" Property="BorderBrush" Value="{DynamicResource Border2Brush}"/>
-                </DataTrigger>
-              </DataTemplate.Triggers>
-            </DataTemplate>
-          </ItemsControl.ItemTemplate>
-        </ItemsControl>
-      </ScrollViewer>
+            BorderThickness="0,0,0,1">
+      <!-- One column per group, widths kept in step with the page's columns. Built in code. -->
+      <Grid x:Name="StripGrid" MinHeight="36"/>
     </Border>
 
     <Grid x:Name="Body" Grid.Row="1"/>

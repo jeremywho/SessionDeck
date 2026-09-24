@@ -13,8 +13,13 @@
   /* xterm sizes the overlay slider inline at 10 px; Windows Terminal's is a 6 px rounded thumb on a bare track. */
   .xterm .xterm-scrollable-element > .scrollbar.vertical { width: 10px !important; }
   .xterm .xterm-scrollable-element > .scrollbar.vertical > .slider { width: 6px !important; left: 2px !important; border-radius: 3px; }
-  .pane { position: absolute; inset: 0; padding: 6px 0 0 8px; background: var(--bg, rgba(12,12,12,0.96)); visibility: hidden; }
+  .pane { position: absolute; top: 0; bottom: 0; left: 0; width: 100%; padding: 6px 0 0 8px; background: var(--bg, rgba(12,12,12,0.96)); visibility: hidden; }
   .pane.shown { visibility: visible; }
+  .divider { position: absolute; top: 0; bottom: 0; width: 7px; margin-left: -3px; cursor: col-resize; z-index: 5; }
+    .divider::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px; background: var(--fg3, #8a8d93); opacity: 0.45; }
+  .divider:hover::after, body.dragging .divider::after { opacity: 0.9; }
+  body.dragging .pane { pointer-events: none; }
+  body.dragging { cursor: col-resize; user-select: none; }
   #empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center;
            font: 13px "Segoe UI Variable", "Segoe UI", sans-serif; color: var(--fg3, #8a8d93); opacity: 0.7; line-height: 1.6;
            user-select: none; }
@@ -125,8 +130,12 @@
 
   const ESC = String.fromCharCode(27), CR = String.fromCharCode(13), DEL = String.fromCharCode(127);
   const panes = new Map();
-  let shownId = null;
   const empty = document.getElementById('empty');
+  // Columns ("groups") as the app lays them out: each shows one terminal by id, or none, and has a
+  // share of the width. The dividers between them are draggable; the app is told the new shares.
+  let groups = [];
+  let focused = 0;
+  const dividers = [];
 
   function send(p, obj) {
     if (p.ws && p.ws.readyState === WebSocket.OPEN) p.ws.send(JSON.stringify(obj));
@@ -148,6 +157,11 @@
     const p = { id, port, token, el, term, fit, ws: null, seq: 0, ended: false, retries: 0, ro: null };
     panes.set(id, p);
     term.onData(data => send(p, { type: 'input', data }));
+    term.textarea.addEventListener('focus', () => {
+      const gi = groups.findIndex(g => g.id === id);
+      if (gi >= 0 && gi !== focused) { focused = gi; layout(); }
+      post({ type: 'focused', id });
+    });
     // Windows Terminal (via Claude Code's terminal setup) sends ESC CR for Shift+Enter, which both
     // CLIs take as "newline, don't submit", and ESC DEL for Ctrl+Backspace (delete word); xterm
     // would send a bare CR and a bare DEL. Ctrl+Enter gets the same as Shift+Enter.
@@ -217,13 +231,67 @@
     sock.onerror = () => {};
   }
 
-  function show(id) {
-    const p = id ? panes.get(id) : null;
-    for (const [k, v] of panes) v.el.classList.toggle('shown', p !== null && k === id);
-    shownId = p ? id : null;
-    empty.classList.toggle('hidden', !!p);
-    document.title = p ? `terminal port=${p.port}` : 'terminal';
-    if (p) { p.fit.fit(); p.term.focus(); }
+  function layout() {
+    const n = groups.length;
+    const total = groups.reduce((a, g) => a + g.frac, 0) || 1;
+    while (dividers.length < Math.max(0, n - 1)) dividers.push(makeDivider(dividers.length));
+    while (dividers.length > Math.max(0, n - 1)) dividers.pop().remove();
+    const shownIds = new Set(groups.map(g => g.id).filter(Boolean));
+    for (const [k, v] of panes) v.el.classList.toggle('shown', shownIds.has(k));
+    let x = 0;
+    for (let i = 0; i < n; i++) {
+      const w = groups[i].frac / total * 100;
+      const p = groups[i].id ? panes.get(groups[i].id) : null;
+      if (p) {
+        p.el.style.left = i === 0 ? '0' : `calc(${x}% + 1px)`;
+        p.el.style.width = `calc(${w}% - ${(i === 0 ? 0 : 1) + (i === n - 1 ? 0 : 1)}px)`;
+        p.fit.fit();
+      }
+      x += w;
+      if (i < n - 1) dividers[i].style.left = `${x}%`;
+    }
+    empty.classList.toggle('hidden', shownIds.size > 0);
+    const f = groups[focused] && groups[focused].id ? panes.get(groups[focused].id) : null;
+    document.title = f ? `terminal port=${f.port}` : 'terminal';
+  }
+
+  function focusGroup(i) {
+    if (i < 0 || i >= groups.length) return;
+    focused = i;
+    const p = groups[i].id ? panes.get(groups[i].id) : null;
+    if (p) p.term.focus();
+  }
+
+  function makeDivider(i) {
+    const d = document.createElement('div');
+    d.className = 'divider';
+    document.body.appendChild(d);
+    d.addEventListener('mousedown', ev => {
+      ev.preventDefault();
+      document.body.classList.add('dragging');
+      const total = groups.reduce((a, g) => a + g.frac, 0) || 1;
+      const leftStart = groups.slice(0, i).reduce((a, g) => a + g.frac, 0) / total;
+      const pair = (groups[i].frac + groups[i + 1].frac) / total;
+      let pending = false;
+      const move = e => {
+        const pos = e.clientX / document.body.clientWidth;
+        const a = Math.max(0.15 * pair, Math.min(0.85 * pair, pos - leftStart));
+        groups[i].frac = a * total;
+        groups[i + 1].frac = (pair - a) * total;
+        if (!pending) { pending = true; requestAnimationFrame(() => { pending = false; layout(); }); }
+      };
+      const up = () => {
+        document.body.classList.remove('dragging');
+        document.removeEventListener('mousemove', move);
+        document.removeEventListener('mouseup', up);
+        layout();
+        post({ type: 'fractions', id: groups[i].id || groups[i + 1].id || '', fracs: groups.map(g => g.frac) });
+        focusGroup(focused);
+      };
+      document.addEventListener('mousemove', move);
+      document.addEventListener('mouseup', up);
+    });
+    return d;
   }
 
   function close(id) {
@@ -235,7 +303,8 @@
     p.term.dispose();
     p.el.remove();
     panes.delete(id);
-    if (shownId === id) show(null);
+    for (const g of groups) if (g.id === id) g.id = null;
+    layout();
   }
 
   function applyLook() {
@@ -251,8 +320,7 @@
   }
 
   function focusShown() {
-    const p = panes.get(shownId);
-    if (p) p.term.focus();
+    focusGroup(focused);
   }
 
   window.addEventListener('focus', focusShown);
@@ -263,7 +331,11 @@
       if (!m || !m.type) return;
       switch (m.type) {
         case 'open': open(m.id, m.port, m.token); break;
-        case 'show': show(m.id); break;
+        case 'layout':
+          groups = m.groups.map(g => ({ id: g.id || null, frac: Number(g.frac) || 1 }));
+          focused = Math.min(m.focused ?? focused, Math.max(0, groups.length - 1));
+          layout();
+          break;
         case 'close': close(m.id); break;
         case 'focus': focusShown(); break;
         case 'fit': for (const p of panes.values()) p.fit.fit(); break;
