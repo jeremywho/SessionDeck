@@ -462,6 +462,9 @@ internal partial class DeckPane : UserControl
     }
 
     void CloseTabMenu_Click(object sender, RoutedEventArgs e) { if (TabOf(sender) is { } tab) Close(tab); }
+    /// <summary>Tabs only; every session keeps running.</summary>
+    void CloseOthersMenu_Click(object sender, RoutedEventArgs e) { if (TabOf(sender) is { } keep) foreach (var t in Tabs.Where(t => t != keep).ToList()) Close(t); }
+    void CloseAllMenu_Click(object sender, RoutedEventArgs e) { foreach (var t in Tabs.ToList()) Close(t); }
     void StopMenu_Click(object sender, RoutedEventArgs e) { if (TabOf(sender) is { } tab) { Stop(tab); Close(tab); } }
     void RestartMenu_Click(object sender, RoutedEventArgs e) { if (TabOf(sender) is { } tab) RestartRequested?.Invoke(tab); }
     void SplitMenu_Click(object sender, RoutedEventArgs e) { if (TabOf(sender) is { } tab) SplitRight(tab); }
