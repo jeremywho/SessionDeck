@@ -123,6 +123,14 @@ internal sealed class DeckBrowser : Grid
                 case "open":
                     OpenOutside(root.GetProperty("uri").GetString());
                     return;
+                case "copy":
+                    try { Clipboard.SetText(root.GetProperty("text").GetString() ?? ""); } catch (Exception ex) { App.LogError(ex); }
+                    return;
+                case "paste":
+                    string pasted = "";
+                    try { if (Clipboard.ContainsText()) pasted = Clipboard.GetText(); } catch (Exception ex) { App.LogError(ex); }
+                    Send(new { type = "paste", id = root.GetProperty("id").GetString(), text = pasted });
+                    return;
             }
             if (root.TryGetProperty("id", out var id) && id.GetString() is { Length: > 0 } hostId)
                 Message?.Invoke(hostId, type, root);

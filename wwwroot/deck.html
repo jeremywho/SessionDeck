@@ -169,7 +169,29 @@
     // Windows Terminal (via Claude Code's terminal setup) sends ESC CR for Shift+Enter, which both
     // CLIs take as "newline, don't submit", and ESC DEL for Ctrl+Backspace (delete word); xterm
     // would send a bare CR and a bare DEL. Ctrl+Enter gets the same as Shift+Enter.
+    // Clipboard keys as Windows Terminal has them. xterm would otherwise send Ctrl+V and Ctrl+C
+    // to the CLI as control characters. The app reads and writes the Windows clipboard; Alt+V is
+    // passed through as ESC v, which Claude Code takes as "read the image on the clipboard".
+    const key = ev => (ev.key || '').toLowerCase();
+    const isPaste = ev => (ev.ctrlKey && !ev.altKey && key(ev) === 'v') || (ev.shiftKey && !ev.ctrlKey && ev.key === 'Insert');
+    const isCopy = ev => (ev.ctrlKey && !ev.altKey && key(ev) === 'c' && (ev.shiftKey || term.hasSelection()))
+      || (ev.ctrlKey && !ev.shiftKey && ev.key === 'Insert');
     term.attachCustomKeyEventHandler(ev => {
+      if (isPaste(ev)) {
+        if (ev.type === 'keydown') post({ type: 'paste', id });
+        ev.preventDefault();
+        return false;
+      }
+      if (isCopy(ev)) {
+        if (ev.type === 'keydown' && term.hasSelection()) { post({ type: 'copy', text: term.getSelection() }); term.clearSelection(); }
+        ev.preventDefault();
+        return false;
+      }
+      if (ev.altKey && !ev.ctrlKey && key(ev) === 'v') {
+        if (ev.type === 'keydown') send(p, { type: 'input', data: ESC + 'v' });
+        ev.preventDefault();
+        return false;
+      }
       const chord = ev.key === 'Enter' && (ev.shiftKey || ev.ctrlKey) && !ev.altKey ? ESC + CR
         : ev.key === 'Backspace' && ev.ctrlKey && !ev.altKey ? ESC + DEL
         : null;
@@ -177,6 +199,12 @@
       if (ev.type === 'keydown') send(p, { type: 'input', data: chord });
       ev.preventDefault();
       return false;
+    });
+    // Right-click: copy the selection if there is one, otherwise paste, as in Windows Terminal.
+    el.addEventListener('contextmenu', ev => {
+      ev.preventDefault();
+      if (term.hasSelection()) { post({ type: 'copy', text: term.getSelection() }); term.clearSelection(); }
+      else post({ type: 'paste', id });
     });
     term.onResize(({ cols, rows }) => send(p, { type: 'resize', cols, rows }));
     term.onTitleChange(title => post({ type: 'title', id, title }));
@@ -392,6 +420,14 @@
           break;
         case 'close': close(m.id); break;
         case 'focus': focusShown(); break;
+        case 'paste': {
+          // No text on the clipboard: hand the CLI the bare Ctrl+V so Codex (and Claude on other
+          // platforms) can read an image from the clipboard themselves.
+          const p = panes.get(m.id);
+          if (!p) break;
+          if (m.text) p.term.paste(m.text); else send(p, { type: 'input', data: String.fromCharCode(22) });
+          break;
+        }
         case 'fit': for (const p of panes.values()) p.fit.fit(); break;
         case 'kill': { const p = panes.get(m.id); if (p) send(p, { type: 'kill' }); break; }
         case 'theme': dark = !!m.dark; look = lookFrom(m.look || {}); applyLook(); break;
