@@ -117,6 +117,17 @@ internal partial class DeckPane : UserControl
         }
         var tab = FindByHost(hostId);
         if (tab == null) return;
+        if (type == "dropTab")
+        {
+            int gi = Math.Clamp(root.GetProperty("group").GetInt32(), 0, Math.Max(0, Groups.Count - 1));
+            switch (root.GetProperty("side").GetString())
+            {
+                case "left": SplitAt(tab, gi, gi); break;
+                case "right": SplitAt(tab, gi + 1, gi); break;
+                default: if (Groups.Count > 0) MoveTo(tab, Groups[gi], Groups[gi].Tabs.Count); break;
+            }
+            return;
+        }
         if (type == "focused")
         {
             var g = GroupOf(tab);
@@ -230,10 +241,26 @@ internal partial class DeckPane : UserControl
     {
         var from = GroupOf(tab);
         if (from == null) return;
+        int i = Groups.IndexOf(from);
+        SplitAt(tab, i + 1, i);
+    }
+
+    /// <summary>
+    /// Move the tab into a new column inserted at <paramref name="insertAt"/>, taking half the width of
+    /// the column at <paramref name="takeFrom"/> (the one the tab was dropped beside). A tab that was
+    /// alone in its column just moves that column.
+    /// </summary>
+    void SplitAt(DeckTab tab, int insertAt, int takeFrom)
+    {
+        var from = GroupOf(tab);
+        if (from == null) return;
+        var donor = takeFrom >= 0 && takeFrom < Groups.Count ? Groups[takeFrom] : from;
+        if (from.Tabs.Count == 1 && donor == from) { Activate(tab); return; }
         var to = new DeckGroup();
-        Groups.Insert(Groups.IndexOf(from) + 1, to);
+        Groups.Insert(Math.Clamp(insertAt, 0, Groups.Count), to);
         Detach(tab, from);
-        if (Groups.Contains(from)) { to.Fraction = from.Fraction / 2; from.Fraction /= 2; }
+        if (Groups.Contains(donor) && donor != from) { to.Fraction = donor.Fraction / 2; donor.Fraction /= 2; }
+        else if (Groups.Contains(from)) { to.Fraction = from.Fraction / 2; from.Fraction /= 2; }
         else to.Fraction = from.Fraction;
         to.Tabs.Add(tab);
         to.Active = tab;
@@ -356,7 +383,9 @@ internal partial class DeckPane : UserControl
         if (Math.Abs(d.X) < SystemParameters.MinimumHorizontalDragDistance && Math.Abs(d.Y) < SystemParameters.MinimumVerticalDragDistance) return;
         var tab = _dragCandidate;
         _dragCandidate = null;
-        DragDrop.DoDragDrop((DependencyObject)sender, new DataObject(typeof(DeckTab), tab), DragDropEffects.Move);
+        var data = new DataObject(typeof(DeckTab), tab);
+        data.SetText("sessiondeck-tab:" + tab.View.Host.Id);
+        DragDrop.DoDragDrop((DependencyObject)sender, data, DragDropEffects.Move);
     }
 
     void Tab_MouseDown(object sender, MouseButtonEventArgs e)

@@ -19,6 +19,9 @@
     .divider::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px; background: var(--fg3, #8a8d93); opacity: 0.45; }
   .divider:hover::after, body.dragging .divider::after { opacity: 0.9; }
   body.dragging .pane { pointer-events: none; }
+  #dropzone { position: absolute; top: 0; bottom: 0; display: none; pointer-events: none; z-index: 6;
+              background: rgba(79, 155, 240, 0.16); border: 1px solid rgba(79, 155, 240, 0.7); border-radius: 4px; }
+  #dropzone.shown { display: block; }
   body.dragging { cursor: col-resize; user-select: none; }
   #empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center;
            font: 13px "Segoe UI Variable", "Segoe UI", sans-serif; color: var(--fg3, #8a8d93); opacity: 0.7; line-height: 1.6;
@@ -29,6 +32,7 @@
 </style>
 </head>
 <body>
+<div id="dropzone"></div>
 <div id="empty">No session open.<br>Click a hosted row on the left, or start one with the buttons.<br><br>Ctrl+Tab cycles tabs · Ctrl+W closes · drag tabs to reorder</div>
 <script src="xterm.js"></script>
 <script src="addon-fit.js"></script>
@@ -318,6 +322,56 @@
       p.fit.fit();
     }
   }
+
+  // A tab dragged out of a strip: the app puts "sessiondeck-tab:<host id>" in the drag's text, and
+  // Chromium hands the drag to the page. Near a column's left or right edge the drop opens a new
+  // column on that side, like VS Code; in the middle it moves the tab into that column.
+  const dropzone = document.getElementById('dropzone');
+  const TAB_PREFIX = 'sessiondeck-tab:';
+
+  function dropTarget(clientX) {
+    const width = document.body.clientWidth || 1;
+    if (groups.length === 0) return { group: 0, side: 'center', left: 0, right: width };
+    const total = groups.reduce((a, g) => a + g.frac, 0) || 1;
+    let x = 0;
+    for (let i = 0; i < groups.length; i++) {
+      const w = groups[i].frac / total * width;
+      if (clientX <= x + w || i === groups.length - 1) {
+        const edge = Math.min(w * 0.25, 160);
+        if (clientX < x + edge) return { group: i, side: 'left', left: x, right: x + edge };
+        if (clientX > x + w - edge) return { group: i, side: 'right', left: x + w - edge, right: x + w };
+        return { group: i, side: 'center', left: x, right: x + w };
+      }
+      x += w;
+    }
+    return { group: groups.length - 1, side: 'center', left: 0, right: width };
+  }
+
+  function isTabDrag(ev) {
+    return ev.dataTransfer && Array.from(ev.dataTransfer.types || []).includes('text/plain');
+  }
+
+  document.addEventListener('dragover', ev => {
+    if (!isTabDrag(ev)) return;
+    ev.preventDefault();
+    ev.dataTransfer.dropEffect = 'move';
+    const t = dropTarget(ev.clientX);
+    dropzone.style.left = `${t.left}px`;
+    dropzone.style.width = `${Math.max(0, t.right - t.left)}px`;
+    dropzone.classList.add('shown');
+  });
+  document.addEventListener('dragleave', ev => {
+    if (ev.relatedTarget === null || ev.clientX <= 0 || ev.clientY <= 0) dropzone.classList.remove('shown');
+  });
+  document.addEventListener('drop', ev => {
+    dropzone.classList.remove('shown');
+    if (!isTabDrag(ev)) return;
+    ev.preventDefault();
+    const text = ev.dataTransfer.getData('text/plain') || '';
+    if (!text.startsWith(TAB_PREFIX)) return;
+    const t = dropTarget(ev.clientX);
+    post({ type: 'dropTab', id: text.slice(TAB_PREFIX.length), group: t.group, side: t.side });
+  });
 
   function focusShown() {
     focusGroup(focused);
