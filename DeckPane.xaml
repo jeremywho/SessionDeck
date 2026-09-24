@@ -5,9 +5,10 @@
              xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
              AllowDrop="True">
   <UserControl.Resources>
-    <!-- A 3 px thumb on a bare track, as under VS Code's tab bar. -->
+    <!-- A 2 px thumb on a bare track that fades in while the mouse is over the strip, like the terminal's. -->
     <Style x:Key="SlimHScrollBar" TargetType="ScrollBar">
       <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="Opacity" Value="0"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="ScrollBar">
@@ -16,10 +17,10 @@
                 <Track.DecreaseRepeatButton><RepeatButton Command="ScrollBar.PageLeftCommand" Opacity="0" Focusable="False"/></Track.DecreaseRepeatButton>
                 <Track.IncreaseRepeatButton><RepeatButton Command="ScrollBar.PageRightCommand" Opacity="0" Focusable="False"/></Track.IncreaseRepeatButton>
                 <Track.Thumb>
-                  <Thumb>
+                  <Thumb MinHeight="0" MinWidth="0">
                     <Thumb.Template>
                       <ControlTemplate TargetType="Thumb">
-                        <Border CornerRadius="1.5" Background="{DynamicResource Fg3Brush}" Opacity="0.55"/>
+                        <Border CornerRadius="1" Background="{DynamicResource Fg3Brush}" Opacity="0.7"/>
                       </ControlTemplate>
                     </Thumb.Template>
                   </Thumb>
@@ -29,6 +30,16 @@
           </ControlTemplate>
         </Setter.Value>
       </Setter>
+      <Style.Triggers>
+        <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=ScrollViewer}}" Value="True">
+          <DataTrigger.EnterActions>
+            <BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.12"/></Storyboard></BeginStoryboard>
+          </DataTrigger.EnterActions>
+          <DataTrigger.ExitActions>
+            <BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.6" BeginTime="0:0:0.4"/></Storyboard></BeginStoryboard>
+          </DataTrigger.ExitActions>
+        </DataTrigger>
+      </Style.Triggers>
     </Style>
     <!-- Horizontal-only scroller whose bar overlays the strip's bottom padding, so nothing moves when it appears. -->
     <Style x:Key="TabScroller" TargetType="ScrollViewer">
@@ -39,7 +50,7 @@
           <ControlTemplate TargetType="ScrollViewer">
             <Grid>
               <ScrollContentPresenter x:Name="PART_ScrollContentPresenter" CanContentScroll="{TemplateBinding CanContentScroll}"/>
-              <ScrollBar x:Name="PART_HorizontalScrollBar" Orientation="Horizontal" VerticalAlignment="Bottom" Height="3" Margin="0,0,0,-5"
+              <ScrollBar x:Name="PART_HorizontalScrollBar" Orientation="Horizontal" VerticalAlignment="Bottom" Height="2" MinHeight="0" MinWidth="0" Margin="0,0,0,-5"
                          Style="{StaticResource SlimHScrollBar}"
                          Visibility="{TemplateBinding ComputedHorizontalScrollBarVisibility}"
                          Value="{TemplateBinding HorizontalOffset}" Maximum="{TemplateBinding ScrollableWidth}" ViewportSize="{TemplateBinding ViewportWidth}"/>
