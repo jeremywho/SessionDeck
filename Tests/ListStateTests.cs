@@ -115,6 +115,17 @@ public class ListStateTests
         Assert.Equal(row.LiveSessionId, row.GroupKey);
     }
 
+    /// <summary>Builds before this one grouped such a row under the host record's id; the first launch of this build must not drop it from its group.</summary>
+    [Fact]
+    public void A_row_grouped_under_its_host_records_id_keeps_its_group_after_the_upgrade()
+    {
+        var groups = Groups(("side", new[] { "stale" }));
+        var row = Row(Host("h1", "stale", At(9, 0)), Idle("live", At(9, 5)));
+        SessionGroup.Apply(groups, new[] { row });
+        Assert.Equal("side", row.GroupName);
+        Assert.Equal(new[] { "live" }, groups[0].Members);
+    }
+
     [Fact]
     public void A_restarted_session_that_comes_back_under_another_id_keeps_its_group()
     {

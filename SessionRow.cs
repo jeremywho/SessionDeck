@@ -224,6 +224,9 @@ internal sealed class SessionRow : INotifyPropertyChanged
     /// <summary>What a group membership is keyed on: the conversation running in the pane once known, else the host.</summary>
     public string GroupKey => LiveSessionId.Length > 0 ? LiveSessionId : Host.Id;
 
+    /// <summary>The key by the host record alone; a membership stored under it moves to <see cref="GroupKey"/>.</summary>
+    public string HostGroupKey => Host.SessionId.Length > 0 ? Host.SessionId : Host.Id;
+
     /// <summary>The key this row was grouped under last time; when the key changes (the session
     /// switched conversation, or first learned its id) the membership is moved to the new key.</summary>
     public string GroupedAs { get; set; } = "";

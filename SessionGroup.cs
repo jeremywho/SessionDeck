@@ -31,10 +31,11 @@ internal sealed class SessionGroup
         foreach (var row in rows)
         {
             string key = row.GroupKey;
-            if (row.GroupedAs.Length > 0 && row.GroupedAs != key)
+            string was = row.GroupedAs.Length > 0 ? row.GroupedAs : row.HostGroupKey;
+            if (was != key)
                 foreach (var g in groups)
                 {
-                    int at = g.Members.IndexOf(row.GroupedAs);
+                    int at = g.Members.IndexOf(was);
                     if (at < 0) continue;
                     if (g.Members.Contains(key)) g.Members.RemoveAt(at);
                     else g.Members[at] = key;
