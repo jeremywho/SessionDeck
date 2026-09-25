@@ -61,16 +61,8 @@ internal static class SessionRegistry
     /// </summary>
     public static bool Frozen;
 
-    public static List<SavedSession> Load()
-    {
-        try
-        {
-            if (File.Exists(FilePath))
-                return JsonSerializer.Deserialize<List<SavedSession>>(File.ReadAllText(FilePath)) ?? new();
-        }
-        catch { }
-        return new();
-    }
+    public static List<SavedSession> Load() =>
+        AtomicFile.Read(FilePath, text => JsonSerializer.Deserialize<List<SavedSession>>(text)) ?? new();
 
     /// <summary>Rewrite the file when anything about the live interactive set changes (not just the
     /// id-set — a rename or cwd change must persist too), plus a periodic checkpoint for LastSeen.</summary>
@@ -102,11 +94,7 @@ internal static class SessionRegistry
             Provider = s.Provider, LastChanged = settled.GetValueOrDefault(s.SessionId),
         }).ToList();
 
-        try
-        {
-            Directory.CreateDirectory(Dir);
-            File.WriteAllText(FilePath, JsonSerializer.Serialize(saved, new JsonSerializerOptions { WriteIndented = true }));
-        }
-        catch { }
+        try { AtomicFile.Write(FilePath, JsonSerializer.Serialize(saved, new JsonSerializerOptions { WriteIndented = true })); }
+        catch (Exception ex) { App.LogError(ex); }
     }
 }

@@ -1348,7 +1348,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     /// <summary>What a restarted session's new row inherits from the row it replaces.</summary>
     sealed record Succession(string GroupedAs, DateTime LastChanged);
     readonly Dictionary<string, Succession> _successors = new();
-    readonly Dictionary<string, string> _autoRestartedFor = new(StringComparer.OrdinalIgnoreCase);
+    readonly AutoRestartLedger _autoRestarted = new(AutoRestartLedger.DefaultPath);
     Task _autoRestart = Task.CompletedTask;
     static readonly TimeSpan IdleBeforeRestart = TimeSpan.FromMinutes(2);
 
@@ -1368,7 +1368,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         {
             if (!row.UpdatePending || !row.CanRestart || _restarting.Contains(row.Host.Id)) continue;
             string target = InstalledVersions.For(row.Provider);
-            if (_autoRestartedFor.TryGetValue(row.LiveSessionId, out var done) && done == target) continue;
+            if (_autoRestarted.Done(row.LiveSessionId, target)) continue;
             // Only a session whose live conversation is provably resumable is touched on its own;
             // anything else waits for a restart you ask for.
             if (!SessionScanner.HasConversation(row.TranscriptPath)) continue;
@@ -1380,7 +1380,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             var tab = Deck.FindByHost(row.Host.Id);
             if (tab != null && tab == Deck.Active && IsActive) continue;
             PerformanceLog.Write($"auto-restart host={row.Host.Id} provider={row.Provider} from=v{row.Version} to=v{target}");
-            _autoRestartedFor[row.LiveSessionId] = target;
+            _autoRestarted.Record(row.LiveSessionId, target);
             _autoRestart = RestartSession(row);
             return;
         }

@@ -175,6 +175,32 @@ public class DeckModelTests
     }
 
     [Fact]
+    public void A_closed_tab_reopens_in_its_slot_after_an_app_relaunch()
+    {
+        var m = Arranged(out var hosts);
+        m.Close(m.FindByHost("b")!);
+        var again = NewModel();
+        again.Restore(m.Snapshot(h => h.SessionId, _ => true), hosts, h => new Tab(h));
+        again.Focused = 2;
+        again.Add(new Tab(hosts.Single(h => h.Id == "b")), activate: true);
+        Assert.Equal("a b* c | d e* | f* @0 0.50/0.30/0.20", Describe(again));
+    }
+
+    [Fact]
+    public void A_closed_tab_reopens_in_its_slot_after_a_reboot_resume()
+    {
+        var m = Arranged(out _);
+        m.Close(m.FindByHost("d")!);
+        var saved = m.Snapshot(h => h.SessionId, _ => true);
+        var resumed = AllIds.Select(id => H(id + "2", "s-" + id)).ToList();
+        var after = NewModel();
+        after.Restore(saved, resumed, h => new Tab(h));
+        after.Focused = 0;
+        after.Add(new Tab(resumed.Single(h => h.Id == "d2")), activate: false);
+        Assert.Equal("a2 b2* c2 | d2 e2* | f2* @0 0.50/0.30/0.20", Describe(after));
+    }
+
+    [Fact]
     public void A_closed_tab_of_a_host_that_ended_is_not_saved()
     {
         var m = Arranged(out _);

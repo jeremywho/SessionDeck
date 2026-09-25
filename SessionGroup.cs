@@ -59,6 +59,10 @@ internal sealed class DeckLayout
     public List<string> ClosedHosts { get; set; } = new();
     public List<string> ClosedSessions { get; set; } = new();
 
+    /// <summary>Where each closed tab sat (same index): its column in <see cref="Columns"/> (-1 once that column is gone) and its index there.</summary>
+    public List<int> ClosedColumns { get; set; } = new();
+    public List<int> ClosedIndexes { get; set; } = new();
+
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? Unknown { get; set; }
 }

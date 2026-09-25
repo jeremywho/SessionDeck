@@ -160,9 +160,12 @@ internal sealed class DeckModel<TTab> where TTab : class
     /// </summary>
     public DeckLayout Snapshot(Func<HostRecord, string> sessionOf, Func<HostRecord, bool> isLive)
     {
-        var closed = _closed.Values.Select(c => c.Host).Where(isLive).ToList();
+        var slots = _closed.Values.Where(c => isLive(c.Host)).ToList();
+        var closed = slots.Select(c => c.Host).ToList();
         return new DeckLayout
         {
+            ClosedColumns = slots.Select(c => c.Group is { } g ? Groups.IndexOf(g) : -1).ToList(),
+            ClosedIndexes = slots.Select(c => c.Index).ToList(),
             Focused = Focused,
             Columns = Groups.Select(g => new DeckColumn
             {
@@ -191,12 +194,14 @@ internal sealed class DeckModel<TTab> where TTab : class
             .ToDictionary(g => g.Key, g => new Queue<HostRecord>(g), StringComparer.OrdinalIgnoreCase);
         var placed = new HashSet<string>();
         DeckGroup<TTab>? focused = null;
+        var restored = new DeckGroup<TTab>?[layout.Columns.Count];
         Groups.Clear();
         _closed.Clear();
         for (int c = 0; c < layout.Columns.Count; c++)
         {
             var col = layout.Columns[c];
             var g = new DeckGroup<TTab> { Fraction = col.Fraction > 0 ? col.Fraction : 1 };
+            restored[c] = g;
             for (int i = 0; i < col.Hosts.Count; i++)
             {
                 var host = byId.GetValueOrDefault(col.Hosts[i]) ?? BySession(At(col.Sessions, i));
@@ -213,7 +218,10 @@ internal sealed class DeckModel<TTab> where TTab : class
         for (int i = 0; i < layout.ClosedHosts.Count; i++)
         {
             var host = byId.GetValueOrDefault(layout.ClosedHosts[i]) ?? BySession(At(layout.ClosedSessions, i));
-            if (host != null && placed.Add(host.Id)) _closed[host.Id] = new ClosedSlot(host, null, 0);
+            if (host == null || !placed.Add(host.Id)) continue;
+            int column = i < layout.ClosedColumns.Count ? layout.ClosedColumns[i] : -1;
+            var group = column >= 0 && column < restored.Length && restored[column] is { } g && Groups.Contains(g) ? g : null;
+            _closed[host.Id] = new ClosedSlot(host, group, i < layout.ClosedIndexes.Count ? layout.ClosedIndexes[i] : 0);
         }
         var rest = hosts.Where(h => !placed.Contains(h.Id)).ToList();
         if (rest.Count > 0)

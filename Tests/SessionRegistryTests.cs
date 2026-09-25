@@ -135,6 +135,20 @@ public class SessionRegistryTests
         Assert.Equal(ids, rows.OrderByDescending(r => r.LastChanged).Select(r => r.LiveSessionId));
     }
 
+    /// <summary>A damaged registry after a crash must not cost the sessions a reboot would bring back.</summary>
+    [Fact]
+    public void A_damaged_registry_falls_back_to_its_last_good_copy_and_is_kept_aside()
+    {
+        SessionRegistry.ResetForTests();
+        SessionRegistry.Snapshot(new[] { Session("good-1"), Session("good-2") });
+        SessionRegistry.Snapshot(new[] { Session("good-1"), Session("good-2"), Session("good-3") });
+        File.WriteAllText(RegistryFile, "[{\"Id\":\"good-1\",\"Cw");
+
+        Assert.Equal(new[] { "good-1", "good-2" }, SessionRegistry.Load().Select(s => s.Id));
+        Assert.Contains(Directory.GetFiles(DataDir, "active-sessions.json.corrupt-*"), f => File.ReadAllText(f) == "[{\"Id\":\"good-1\",\"Cw");
+        Assert.Equal(new[] { "good-1", "good-2" }, SessionRegistry.Load().Select(s => s.Id));
+    }
+
     [Fact]
     public void Saved_sessions_keep_keys_this_build_does_not_know()
     {

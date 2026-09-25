@@ -77,18 +77,13 @@ internal sealed class Settings
     static string Dir => DataDir;
     static string FilePath => Path.Combine(Dir, "settings.json");
 
-    public static Settings Load()
-    {
-        Settings s;
-        try
-        {
-            s = (File.Exists(FilePath)
-                    ? JsonSerializer.Deserialize<Settings>(File.ReadAllText(FilePath))
-                    : null) ?? new Settings();
-        }
-        catch { s = new Settings(); }
+    public static Settings Load() => Load(FilePath);
 
-        if (s.ApplyNewDefaults()) s.Save();
+    /// <summary>A file that does not parse is kept aside and its last good copy loaded; see <see cref="AtomicFile.Read"/>.</summary>
+    internal static Settings Load(string path)
+    {
+        var s = AtomicFile.Read(path, text => JsonSerializer.Deserialize<Settings>(text)) ?? new Settings();
+        if (s.ApplyNewDefaults()) s.Save(path);
         return s;
     }
 
@@ -107,13 +102,11 @@ internal sealed class Settings
         return true;
     }
 
-    public void Save()
+    public void Save() => Save(FilePath);
+
+    internal void Save(string path)
     {
-        try
-        {
-            Directory.CreateDirectory(Dir);
-            File.WriteAllText(FilePath, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
-        }
-        catch { }
+        try { AtomicFile.Write(path, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true })); }
+        catch (Exception ex) { App.LogError(ex); }
     }
 }
