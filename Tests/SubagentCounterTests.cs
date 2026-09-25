@@ -64,6 +64,32 @@ public sealed class SubagentCounterTests : IDisposable
         Assert.Equal((0, 0), counter.Count(_dir, now + TimeSpan.FromSeconds(1)));
     }
 
+    [Fact]
+    public void An_agent_mid_turn_stays_active_while_its_tool_runs_quietly()
+    {
+        var now = DateTime.UtcNow;
+        string running = Path.Combine(_dir, "agent-running.jsonl");
+        File.WriteAllText(running, "{\"type\":\"assistant\",\"message\":{\"stop_reason\":\"tool_use\"}}\n{\"type\":\"user\",\"message\":{\"content\":[{\"type\":\"tool_result\"}]}}\n");
+        File.SetLastWriteTimeUtc(running, now - TimeSpan.FromMinutes(6));
+        string done = Path.Combine(_dir, "agent-done.jsonl");
+        File.WriteAllText(done, "{\"type\":\"user\"}\n{\"type\":\"assistant\",\"message\":{\"stop_reason\":\"end_turn\"}}\n");
+        File.SetLastWriteTimeUtc(done, now - TimeSpan.FromMinutes(6));
+        var counter = new SubagentCounter();
+
+        Assert.Equal((2, 1), counter.Count(_dir, now));
+        Assert.Equal((2, 0), counter.Count(_dir, now + SubagentCounter.LongRunCap + TimeSpan.FromMinutes(1)));
+    }
+
+    [Fact]
+    public void A_streaming_reply_with_no_stop_reason_is_mid_turn()
+    {
+        string p = Path.Combine(_dir, "agent-streaming.jsonl");
+        File.WriteAllText(p, "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"thinking\"}]}}\n");
+        Assert.True(SubagentCounter.IsMidTurn(p));
+        File.WriteAllText(p, "{\"type\":\"assistant\",\"message\":{\"stop_reason\":\"end_turn\"}}\n{\"type\":\"cost-state\"}\n");
+        Assert.False(SubagentCounter.IsMidTurn(p));
+    }
+
     string WriteAgent(string name, DateTime writtenUtc)
     {
         string path = Path.Combine(_dir, name);
