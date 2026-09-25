@@ -63,7 +63,8 @@ internal sealed class HostRecord
     /// <summary>The current turn armed something that will wake the session by itself.</summary>
     public bool Pending { get; set; }
 
-    /// <summary>How this host derives status. 2: idle notifications no longer mean waiting; turns can end scheduled.</summary>
+    /// <summary>How this host derives status. 2: idle notifications no longer mean waiting; turns can end
+    /// scheduled. 3: a background shell command no longer counts as scheduling a wake-up.</summary>
     public int Protocol { get; set; }
 
     [JsonIgnore] public bool HasExited => ExitCode.HasValue;
@@ -170,7 +171,7 @@ internal static class HostProgram
             HostPid = self.Id,
             HostStartTicks = self.StartTime.ToUniversalTime().Ticks,
             HostBin = Path.GetDirectoryName(Environment.ProcessPath ?? "") ?? "",
-            Protocol = 2,
+            Protocol = 3,
             ChildPid = _pty.Pid,
             Port = port,
             Token = token,

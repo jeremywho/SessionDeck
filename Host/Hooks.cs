@@ -75,17 +75,12 @@ internal static class Hooks
     public static bool AsksUser(string tool) => tool == "AskUserQuestion";
 
     /// <summary>
-    /// A tool whose effect outlives the turn and wakes the session later: a scheduled wake-up, a cron
-    /// entry, a monitor, or a shell command run in the background.
+    /// A tool whose effect outlives the turn and is certain to wake the session later: a scheduled
+    /// wake-up, a cron entry, a monitor. A shell command run in the background is deliberately not
+    /// here: the hooks cannot see it finish, so it would pin the session as scheduled until the next
+    /// prompt; the app watches such commands' output files instead.
     /// </summary>
-    public static bool Defers(JsonElement root)
-    {
-        string tool = ToolName(root);
-        if (tool is "ScheduleWakeup" or "CronCreate" or "Monitor") return true;
-        return tool == "Bash"
-            && root.TryGetProperty("tool_input", out var input) && input.ValueKind == JsonValueKind.Object
-            && input.TryGetProperty("run_in_background", out var bg) && bg.ValueKind == JsonValueKind.True;
-    }
+    public static bool Defers(JsonElement root) => ToolName(root) is "ScheduleWakeup" or "CronCreate" or "Monitor";
 
     static string? NotificationStatus(JsonElement root)
     {

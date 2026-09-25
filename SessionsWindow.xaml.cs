@@ -865,6 +865,9 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         bool newer = at > info.StatusUpdatedAt.ToUniversalTime();
         // Hosts from before protocol 2 called Claude's idle notification "waiting"; read it as idle.
         string agentStatus = h.Protocol < 2 && h.AgentStatus == "waiting" && h.LastEvent == "Notification" ? "idle" : h.AgentStatus;
+        // Hosts before protocol 3 pinned a turn that ran a background shell as "scheduled"; the app
+        // sees live background work through its output files, so read the hook's word as idle.
+        if (h.Protocol < 3 && agentStatus == "scheduled") agentStatus = "idle";
         // The CLI's own registry says "shell" while background shells it started are still running;
         // the hooks only see the agent's turn end. Background work in flight outranks an idle hook.
         bool backgroundHolds = info.Status == "shell" && agentStatus is "idle" or "scheduled";

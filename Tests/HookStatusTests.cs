@@ -19,7 +19,7 @@ public class HookStatusTests
     [InlineData("ScheduleWakeup", "{}", true)]
     [InlineData("CronCreate", "{}", true)]
     [InlineData("Monitor", "{}", true)]
-    [InlineData("Bash", "{\"run_in_background\": true}", true)]
+    [InlineData("Bash", "{\"run_in_background\": true}", false)]
     [InlineData("Bash", "{\"run_in_background\": false}", false)]
     [InlineData("Bash", "{}", false)]
     [InlineData("Read", "{}", false)]
