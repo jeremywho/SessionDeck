@@ -1266,8 +1266,11 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             // Only a session whose live conversation is provably resumable is touched on its own;
             // anything else waits for a restart you ask for.
             if (!SessionScanner.HasConversation(row.TranscriptPath)) continue;
-            if (row.Host.AgentStatus != "idle" || row.Host.StatusAt is not DateTime at) continue;
-            if (DateTime.UtcNow - at.ToUniversalTime() < IdleBeforeRestart) continue;
+            // Idle means the row shows Completed (hook or registry, whichever is live) with nothing of
+            // its own running, and has for a while; the host's hook status alone can be stale when
+            // the CLI in the pane was started by hand.
+            if (row.State != SessionState.Completed || row.HasActiveSubagents) continue;
+            if (DateTime.Now - row.LastChanged < IdleBeforeRestart) continue;
             var tab = Deck.FindByHost(row.Host.Id);
             if (tab != null && tab == Deck.Active && IsActive) continue;
             PerformanceLog.Write($"auto-restart host={row.Host.Id} provider={row.Provider} from=v{row.Version} to=v{InstalledVersions.For(row.Provider)}");
@@ -1290,7 +1293,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             int slot = tab != null ? Deck.Tabs.IndexOf(tab) : -1;
             bool wasActive = tab != null && Deck.Active == tab;
             var provider = row.Provider;
-            string sessionId = host.SessionId;
+            string sessionId = row.LiveSessionId;
             bool hasTranscript = SessionScanner.HasConversation(row.TranscriptPath);
             string cmd = provider == SessionProvider.Codex
                 ? HostManager.ResumeCodexCommand(sessionId, _app.Settings.CodexFlags)

@@ -317,7 +317,14 @@ internal sealed class SessionRow : INotifyPropertyChanged
     public bool UpdatePending => !Host.HasExited && InstalledVersions.IsBehind(_s.Provider, _s.Version);
 
     /// <summary>Restart means end the child and start the same session again; both CLIs need the id for that.</summary>
-    public bool CanRestart => Host.SessionId.Length > 0;
+    public bool CanRestart => LiveSessionId.Length > 0;
+
+    /// <summary>
+    /// The conversation actually running in the pane. The registry entry for the live process wins
+    /// over the host record: a session started by hand inside the pane, or switched with /resume
+    /// before the host followed such switches, is only known there.
+    /// </summary>
+    public string LiveSessionId => _s.SessionId.Length > 0 ? _s.SessionId : Host.SessionId;
 
     /// <summary>Where the CLI keeps this session's conversation, from the hook if the scanner has not said.</summary>
     public string TranscriptPath => _s.TranscriptPath.Length > 0 ? _s.TranscriptPath : Host.TranscriptPath;
