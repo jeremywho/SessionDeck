@@ -185,7 +185,25 @@ internal static class SessionScanner
 
     /// <summary>Claude writes a transcript only once something has been said; without one, <c>--resume</c> refuses the id.</summary>
     public static bool HasTranscript(string sessionId, string cwd) =>
-        TranscriptPath(new SessionInfo { SessionId = sessionId, Cwd = cwd }).Length > 0;
+        HasConversation(TranscriptPath(new SessionInfo { SessionId = sessionId, Cwd = cwd }));
+
+    /// <summary>
+    /// Whether <c>claude --resume</c> would find a conversation here. A fresh session writes metadata
+    /// lines to its transcript before anyone has typed; resume refuses such a file ("No conversation
+    /// found") and Claude removes it on exit, so only a user message counts.
+    /// </summary>
+    public static bool HasConversation(string transcriptPath)
+    {
+        if (transcriptPath.Length == 0) return false;
+        try
+        {
+            if (!File.Exists(transcriptPath)) return false;
+            foreach (var line in File.ReadLines(transcriptPath))
+                if (line.Contains("\"type\":\"user\"", StringComparison.Ordinal)) return true;
+            return false;
+        }
+        catch { return false; }
+    }
 
     static string TranscriptPath(SessionInfo s)
     {

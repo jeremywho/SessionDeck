@@ -1288,7 +1288,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             bool wasActive = tab != null && Deck.Active == tab;
             var provider = row.Provider;
             string sessionId = host.SessionId;
-            bool hasTranscript = row.TranscriptPath.Length > 0 && File.Exists(row.TranscriptPath);
+            bool hasTranscript = SessionScanner.HasConversation(row.TranscriptPath);
             string cmd = provider == SessionProvider.Codex
                 ? HostManager.ResumeCodexCommand(sessionId, _app.Settings.CodexFlags)
                 : hasTranscript
