@@ -1263,6 +1263,9 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         foreach (var row in Rows.ToList())
         {
             if (!row.UpdatePending || !row.CanRestart || _restarting.Contains(row.Host.Id)) continue;
+            // Only a session whose live conversation is provably resumable is touched on its own;
+            // anything else waits for a restart you ask for.
+            if (!SessionScanner.HasConversation(row.TranscriptPath)) continue;
             if (row.Host.AgentStatus != "idle" || row.Host.StatusAt is not DateTime at) continue;
             if (DateTime.UtcNow - at.ToUniversalTime() < IdleBeforeRestart) continue;
             var tab = Deck.FindByHost(row.Host.Id);

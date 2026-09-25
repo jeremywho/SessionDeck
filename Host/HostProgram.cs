@@ -493,9 +493,12 @@ internal static class HostProgram
             if (status != null) _record.AgentStatus = status;
             if (root.TryGetProperty("tool_name", out var t) && t.ValueKind == JsonValueKind.String && ev == "PreToolUse")
                 _record.LastTool = t.GetString() ?? "";
-            if (root.TryGetProperty("session_id", out var sid) && sid.ValueKind == JsonValueKind.String && _record.SessionId.Length == 0)
+            // Always the latest: /resume or /clear inside the session switches it to another conversation,
+            // and every hook after that carries the new id and transcript. A restart must resume the
+            // conversation that is live, not the one the process was started with.
+            if (root.TryGetProperty("session_id", out var sid) && sid.ValueKind == JsonValueKind.String && (sid.GetString() ?? "").Length > 0)
                 _record.SessionId = sid.GetString() ?? "";
-            if (root.TryGetProperty("transcript_path", out var tp) && tp.ValueKind == JsonValueKind.String && _record.TranscriptPath.Length == 0)
+            if (root.TryGetProperty("transcript_path", out var tp) && tp.ValueKind == JsonValueKind.String && (tp.GetString() ?? "").Length > 0)
                 _record.TranscriptPath = tp.GetString() ?? "";
         }
         WriteRecord();
