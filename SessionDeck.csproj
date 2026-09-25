@@ -15,7 +15,7 @@
     <AssemblyName>SessionDeck</AssemblyName>
     <RootNamespace>SessionDeck</RootNamespace>
     <StartupObject>SessionDeck.Program</StartupObject>
-    <Version>0.5.3</Version>
+    <Version>0.5.4</Version>
   </PropertyGroup>
 
   <ItemGroup>
