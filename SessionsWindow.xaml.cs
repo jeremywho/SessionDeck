@@ -1085,11 +1085,25 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     void ApplyGroups()
     {
         var groups = GroupsSetting;
+        bool moved = false;
         foreach (var row in Rows)
         {
-            int i = groups.FindIndex(g => g.Members.Contains(row.GroupKey));
+            string key = row.GroupKey;
+            if (row.GroupedAs.Length > 0 && row.GroupedAs != key)
+            {
+                // The row's id changed under it (/resume or /clear inside the session, or a fresh
+                // session that has now reported its id): carry its membership to the new key.
+                foreach (var g in groups)
+                {
+                    int at = g.Members.IndexOf(row.GroupedAs);
+                    if (at >= 0) { g.Members[at] = key; moved = true; }
+                }
+            }
+            row.GroupedAs = key;
+            int i = groups.FindIndex(g => g.Members.Contains(key));
             row.SetGroup(i >= 0 ? groups[i].Name : "", i + 1);
         }
+        if (moved) _app.Settings.Save();
     }
 
     void GroupsChanged()

@@ -187,6 +187,10 @@ internal sealed class SessionRow : INotifyPropertyChanged
     /// <summary>What a group membership is keyed on: the CLI's own session id once known, else the host.</summary>
     public string GroupKey => Host.SessionId.Length > 0 ? Host.SessionId : Host.Id;
 
+    /// <summary>The key this row was grouped under last time; when the key changes (the session
+    /// switched conversation, or first learned its id) the membership is moved to the new key.</summary>
+    public string GroupedAs { get; set; } = "";
+
     /// <summary>"" for ungrouped, which sorts first.</summary>
     public string GroupName { get; private set; } = "";
     public int GroupOrder { get; private set; }
