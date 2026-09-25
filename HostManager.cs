@@ -61,9 +61,17 @@ internal static class HostManager
     /// Windows Terminal tab would. <c>-NoExit</c> keeps the pane readable after the CLI exits.
     /// </summary>
     static string WrapInShell(string cmd) =>
-        $"\"{SessionLauncher.ResolvePowerShell()}\" -NoLogo -NoExit -Command \"{cmd.Replace("\"", "\\\"")}\"";
+        cmd.Length == 0
+            ? $"\"{SessionLauncher.ResolvePowerShell()}\" -NoLogo"
+            : $"\"{SessionLauncher.ResolvePowerShell()}\" -NoLogo -NoExit -Command \"{cmd.Replace("\"", "\\\"")}\"";
 
-    public static HostRecord Spawn(string sessionId, SessionProvider provider, string command, string cwd, string? title, string initialPrompt = "")
+    public static HostRecord Spawn(string sessionId, SessionProvider provider, string command, string cwd, string? title, string initialPrompt = "") =>
+        Spawn(sessionId, provider.ToString(), command, cwd, title, initialPrompt);
+
+    /// <summary>A pane with just a shell in it: nothing launched, no hooks, no session id.</summary>
+    public static HostRecord SpawnShell(string cwd) => Spawn("", "Shell", "", cwd, "Terminal");
+
+    public static HostRecord Spawn(string sessionId, string provider, string command, string cwd, string? title, string initialPrompt = "")
     {
         Directory.CreateDirectory(HostsDir);
         string id = Guid.NewGuid().ToString("N")[..12];
@@ -71,7 +79,7 @@ internal static class HostManager
         {
             Id = id,
             SessionId = sessionId,
-            Provider = provider.ToString(),
+            Provider = provider,
             CommandLine = WrapInShell(command),
             Cwd = string.IsNullOrWhiteSpace(cwd) ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) : cwd,
             HostsDir = HostsDir,

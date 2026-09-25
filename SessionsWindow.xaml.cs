@@ -108,6 +108,15 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         var layoutSave = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
         layoutSave.Tick += (_, _) => { layoutSave.Stop(); _app.Settings.Deck = Deck.Layout; _app.Settings.Save(); };
         Deck.LayoutChanged += () => { layoutSave.Stop(); layoutSave.Start(); };
+        Deck.NewSessionRequested += kind =>
+        {
+            switch (kind)
+            {
+                case "codex": NewCodexSessionButton_Click(this, new RoutedEventArgs()); break;
+                case "shell": SpawnShellIntoDeck(); break;
+                default: NewSessionButton_Click(this, new RoutedEventArgs()); break;
+            }
+        };
         Deck.RestartRequested += tab =>
         {
             var row = Rows.FirstOrDefault(r => r.Host.Id == tab.View.Host.Id);
@@ -570,6 +579,16 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
                 ? HostManager.ResumeClaudeCommand(s.Id, _app.Settings.ResumeFlags)
                 : HostManager.NewClaudeCommand(s.Id, s.Name, _app.Settings.ResumeFlags);
         SpawnIntoDeck(s.Id, s.Provider, cmd, cwd, s.Name);
+    }
+
+    void SpawnShellIntoDeck()
+    {
+        try { Deck.Open(HostManager.SpawnShell(HomeDir)); }
+        catch (Exception ex)
+        {
+            App.LogError(ex);
+            LiveLabel.Text = "Could not start the terminal host: " + ex.Message;
+        }
     }
 
     void SpawnIntoDeck(string sessionId, SessionProvider provider, string cmd, string cwd, string? title, string initialPrompt = "")

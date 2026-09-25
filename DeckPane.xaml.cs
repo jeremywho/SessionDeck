@@ -22,7 +22,7 @@ internal partial class DeckPane : UserControl
         public DeckTab(TerminalView v) { View = v; }
 
         public string Title => StripMark(View.Title);
-        public string Glyph => View.Host.Provider == "Codex" ? "◆" : "✳";
+        public string Glyph => View.Host.Provider switch { "Codex" => "◆", "Shell" => ">", _ => "✳" };
 
         /// <summary>Claude titles its own window "✳ …"; the tab already leads with that mark.</summary>
         internal static string StripMark(string t)
@@ -83,6 +83,25 @@ internal partial class DeckPane : UserControl
 
     /// <summary>The tab's menu asked for a restart; the window owns the resume logic.</summary>
     public event Action<DeckTab>? RestartRequested;
+
+    /// <summary>A column's "+" asked for a new session there: "claude", "codex" or "shell". The column is focused first.</summary>
+    public event Action<string>? NewSessionRequested;
+
+    void RequestNew(object sender, string kind)
+    {
+        if (sender is FrameworkElement { Tag: DeckGroup g } && Groups.Contains(g)) { _focused = Groups.IndexOf(g); Mark(); }
+        NewSessionRequested?.Invoke(kind);
+    }
+
+    void NewInGroup_Click(object sender, RoutedEventArgs e) => RequestNew(sender, "claude");
+    void NewInGroup_RightClick(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is FrameworkElement { ContextMenu: { } menu }) { menu.PlacementTarget = (UIElement)sender; Dispatcher.BeginInvoke(() => menu.IsOpen = true); }
+        e.Handled = true;
+    }
+    void NewClaudeMenu_Click(object sender, RoutedEventArgs e) => RequestNew(sender, "claude");
+    void NewCodexMenu_Click(object sender, RoutedEventArgs e) => RequestNew(sender, "codex");
+    void NewShellMenu_Click(object sender, RoutedEventArgs e) => RequestNew(sender, "shell");
 
     public DeckPane()
     {
