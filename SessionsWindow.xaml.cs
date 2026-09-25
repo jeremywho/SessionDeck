@@ -868,6 +868,8 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         // Hosts before protocol 3 pinned a turn that ran a background shell as "scheduled"; the app
         // sees live background work through its output files, so read the hook's word as idle.
         if (h.Protocol < 3 && agentStatus == "scheduled") agentStatus = "idle";
+        // A SessionStart mid-turn (Codex compaction) must not downgrade a turn the CLI's own record says is open.
+        if (h.LastEvent == "SessionStart" && agentStatus == "idle" && info.Status == "busy") return;
         // The CLI's own registry says "shell" while background shells it started are still running;
         // the hooks only see the agent's turn end. Background work in flight outranks an idle hook.
         bool backgroundHolds = info.Status == "shell" && agentStatus is "idle" or "scheduled";

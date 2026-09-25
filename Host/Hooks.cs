@@ -56,7 +56,7 @@ internal static class Hooks
     /// </summary>
     public static string? StatusFor(string eventName, JsonElement root, bool pending) => eventName switch
     {
-        "SessionStart" => "idle",
+        "SessionStart" => StartSource(root) == "compact" ? null : "idle",
         "UserPromptSubmit" => "busy",
         "PreToolUse" => AsksUser(ToolName(root)) ? "waiting" : "busy",
         "PostToolUse" => "busy",
@@ -67,6 +67,10 @@ internal static class Hooks
         "SessionEnd" => "ended",
         _ => null,
     };
+
+    /// <summary>Why a SessionStart fired: startup, resume, clear, or compact. A compaction happens mid-turn and changes nothing.</summary>
+    public static string StartSource(JsonElement root) =>
+        root.TryGetProperty("source", out var s) && s.ValueKind == JsonValueKind.String ? s.GetString() ?? "" : "";
 
     public static string ToolName(JsonElement root) =>
         root.TryGetProperty("tool_name", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString() ?? "" : "";

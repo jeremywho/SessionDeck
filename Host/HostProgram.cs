@@ -491,6 +491,7 @@ internal static class HostProgram
             if (ev == "SessionStart" || turnStarts) _record.Pending = false;
             if (ev == "PreToolUse" && Hooks.Defers(root)) _record.Pending = true;
             string? status = Hooks.StatusFor(ev, root, _record.Pending);
+            if (ev == "SessionStart" && _record.AgentStatus == "busy") status = null;
             if (status != null) _record.AgentStatus = status;
             if (root.TryGetProperty("tool_name", out var t) && t.ValueKind == JsonValueKind.String && ev == "PreToolUse")
                 _record.LastTool = t.GetString() ?? "";

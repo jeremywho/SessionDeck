@@ -29,6 +29,13 @@ public class HookStatusTests
     }
 
     [Fact]
+    public void A_compaction_session_start_changes_nothing()
+    {
+        Assert.Null(Hooks.StatusFor("SessionStart", J("{\"source\": \"compact\"}"), pending: false));
+        Assert.Equal("idle", Hooks.StatusFor("SessionStart", J("{\"source\": \"startup\"}"), pending: false));
+    }
+
+    [Fact]
     public void Claudes_idle_notification_changes_nothing()
     {
         Assert.Null(Hooks.StatusFor("Notification", J("{\"notification_type\": \"idle_prompt\", \"message\": \"Claude is waiting for your input\"}"), pending: false));
