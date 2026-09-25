@@ -51,8 +51,10 @@ internal sealed class DeckBrowser : Grid
 
     static Task<CoreWebView2Environment> Environment_()
     {
-        return _env ??= CoreWebView2Environment.CreateAsync(null,
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SessionDeck", "WebView2"),
+        string profile = Environment.GetEnvironmentVariable("SD_DATA_DIR") is { Length: > 0 } d
+            ? Path.Combine(d, "WebView2")
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SessionDeck", "WebView2");
+        return _env ??= CoreWebView2Environment.CreateAsync(null, profile,
             new CoreWebView2EnvironmentOptions { AdditionalBrowserArguments = "--disable-features=msSmartScreenProtection" });
     }
 

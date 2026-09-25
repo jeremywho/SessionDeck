@@ -77,12 +77,20 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         if (_app.Settings.WindowWidth > 300) Width = _app.Settings.WindowWidth;
         if (_app.Settings.WindowHeight > 200) Height = _app.Settings.WindowHeight;
         RestorePosition();
+        if (_app.Settings.WindowMaximized) WindowState = WindowState.Maximized;
         // The app is usually ended by a kill or by the updater's relaunch, never a graceful close,
         // so geometry is saved shortly after every move or resize rather than on closing.
         var geometry = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(600) };
         geometry.Tick += (_, _) => { geometry.Stop(); if (WindowState == WindowState.Normal && IsLoaded) SavePosition(); };
         LocationChanged += (_, _) => { geometry.Stop(); geometry.Start(); };
         SizeChanged += (_, _) => { geometry.Stop(); geometry.Start(); };
+        StateChanged += (_, _) =>
+        {
+            if (WindowState == WindowState.Minimized || _app.Settings.WindowMaximized == (WindowState == WindowState.Maximized)) return;
+            _app.Settings.WindowMaximized = WindowState == WindowState.Maximized;
+            SaveSoon();
+        };
+        _saveSoon.Tick += (_, _) => { _saveSoon.Stop(); _app.Settings.Save(); };
 
         Topmost = _app.Settings.AlwaysOnTop;
         ShowInTaskbar = _app.Settings.ShowInTaskbar;
@@ -105,9 +113,15 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         _timer.Tick += (_, _) => { RequestRefresh(); if (DateTime.UtcNow - InstalledVersions.CheckedAt > TimeSpan.FromMinutes(10)) InstalledVersions.Refresh(); };
         InstalledVersions.Changed += () => Dispatcher.BeginInvoke(RequestRefresh);
         InstalledVersions.Refresh();
-        var layoutSave = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
-        layoutSave.Tick += (_, _) => { layoutSave.Stop(); _app.Settings.Deck = Deck.Layout; _app.Settings.Save(); };
-        Deck.LayoutChanged += () => { layoutSave.Stop(); layoutSave.Start(); };
+        _layoutSave.Tick += (_, _) =>
+        {
+            _layoutSave.Stop();
+            // Before the saved layout has been rebuilt, the deck is empty; saving it would erase the layout.
+            if (!_deckRestored) return;
+            _app.Settings.Deck = Deck.LayoutFor(SessionOf, HostManager.IsAlive);
+            _app.Settings.Save();
+        };
+        Deck.LayoutChanged += SaveLayoutSoon;
         Deck.NewSessionRequested += kind =>
         {
             switch (kind)
@@ -140,6 +154,26 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         DwmDiagnostics.Mark("window-config",
             $"backdrop={WindowBackdropType}; animations=false; " +
             $"backgroundWork={!DwmDiagnosticOptions.DisableBackgroundWork}; desktopUia={!ExperimentOptions.DisableDesktopUia}");
+    }
+
+    readonly DispatcherTimer _layoutSave = new() { Interval = TimeSpan.FromMilliseconds(500) };
+    bool _deckRestored;
+    readonly DispatcherTimer _saveSoon = new() { Interval = TimeSpan.FromMilliseconds(600) };
+    string _sessionMap = "";
+
+    void SaveLayoutSoon() { _layoutSave.Stop(); _layoutSave.Start(); }
+    void SaveSoon() { _saveSoon.Stop(); _saveSoon.Start(); }
+
+    /// <summary>The conversation a host runs now: the row follows /resume and /clear, the tab's own record does not.</summary>
+    string SessionOf(Host.HostRecord h) => _rowsById.TryGetValue(h.Id, out var row) ? row.LiveSessionId : h.SessionId;
+
+    /// <summary>A session id changing under a host changes what the saved layout must name, though no tab moved.</summary>
+    void SaveLayoutIfSessionsMoved()
+    {
+        string map = string.Join("|", Rows.Select(r => r.Host.Id + "=" + r.LiveSessionId).Order(StringComparer.Ordinal));
+        if (map == _sessionMap) return;
+        _sessionMap = map;
+        SaveLayoutSoon();
     }
 
     int _scanCount;
@@ -352,7 +386,9 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         _zoom = Math.Round(Math.Clamp(z <= 0 ? 1.0 : z, 0.6, 2.5), 2);
         ZoomTransform.ScaleX = _zoom;
         ZoomTransform.ScaleY = _zoom;
-        _app.Settings.Zoom = _zoom;   // persisted with the rest on close
+        if (_app.Settings.Zoom == _zoom) return;
+        _app.Settings.Zoom = _zoom;
+        SaveSoon();
     }
 
     protected override void OnPreviewMouseWheel(MouseWheelEventArgs e)
@@ -457,6 +493,9 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         }
 
         SessionsGrid.ColumnReordered += (_, _) => { PersistLayout(); _app.Settings.Save(); };
+        var width = DependencyPropertyDescriptor.FromProperty(DataGridColumn.WidthProperty, typeof(DataGridColumn));
+        foreach (var c in _columns.Where(c => c.Toggleable))
+            width.AddValueChanged(c.Column, (_, _) => { if (IsLoaded) { PersistLayout(); SaveSoon(); } });
         SessionsGrid.PreviewMouseRightButtonUp += OnHeaderRightClick;
     }
 
@@ -572,14 +611,33 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     /// <summary>Resume a saved session inside a deck tab rather than an external terminal.</summary>
     public void ResumeInDeck(SavedSession s)
     {
+        if (SpawnResumed(s) is { } host) Deck.Open(host);
+    }
+
+    Host.HostRecord? SpawnResumed(SavedSession s)
+    {
         string cwd = string.IsNullOrWhiteSpace(s.Cwd) ? HomeDir : s.Cwd;
         string cmd = s.Provider == SessionProvider.Codex
             ? HostManager.ResumeCodexCommand(s.Id, _app.Settings.CodexFlags)
             : SessionScanner.HasTranscript(s.Id, cwd)
                 ? HostManager.ResumeClaudeCommand(s.Id, _app.Settings.ResumeFlags)
                 : HostManager.NewClaudeCommand(s.Id, s.Name, _app.Settings.ResumeFlags);
-        SpawnIntoDeck(s.Id, s.Provider, cmd, cwd, s.Name);
+        try { return HostManager.Spawn(s.Id, s.Provider, cmd, cwd, s.Name); }
+        catch (Exception ex)
+        {
+            App.LogError(ex);
+            LiveLabel.Text = "Could not start the session host: " + ex.Message;
+            return null;
+        }
     }
+
+    List<SavedSession> _resumeOnAttach = new();
+
+    /// <summary>
+    /// Sessions lost to a reboot or crash, resumed when the deck is first built: their hosts are
+    /// started before the saved layout is rebuilt, so each lands in the slot its session had.
+    /// </summary>
+    public void ResumeWhenAttached(List<SavedSession> sessions) => _resumeOnAttach = sessions;
 
     void SpawnShellIntoDeck()
     {
@@ -605,12 +663,17 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         }
     }
 
-    /// <summary>Hosts still running from a previous run of this app: reopen their tabs.</summary>
+    /// <summary>Hosts still running from a previous run of this app, and sessions resumed after a reboot: rebuild their tabs.</summary>
     void ReattachHosts()
     {
+        var resumed = _resumeOnAttach.Select(SpawnResumed).OfType<Host.HostRecord>().ToList();
+        if (_resumeOnAttach.Count > 0)
+            PerformanceLog.Write($"auto-resume after reboot/crash sessions={_resumeOnAttach.Count} started={resumed.Count} ids={string.Join(",", _resumeOnAttach.Select(s => s.Id))}");
+        _resumeOnAttach = new();
         var hosts = HostManager.Discover().OrderBy(h => h.StartedAt).ToList();
         PerformanceLog.Write($"reattach hosts={hosts.Count} ids={string.Join(",", hosts.Select(h => h.Id))} columns={_app.Settings.Deck.Columns.Count}");
         Deck.Restore(_app.Settings.Deck, hosts);
+        _deckRestored = true;
     }
 
     static string HomeDir => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -826,8 +889,16 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             foreach (var (h, s) in byHost)
             {
                 seen.Add(h.Id);
-                if (_rowsById.TryGetValue(h.Id, out var row)) propertyChanges += row.Update(s);
-                else { row = new SessionRow(h, s); _rowsById[h.Id] = row; Rows.Add(row); added++; }
+                if (_rowsById.TryGetValue(h.Id, out var row)) propertyChanges += row.Update(s, h);
+                else
+                {
+                    row = new SessionRow(h, s);
+                    if (_successors.Remove(h.Id, out var from)) row.Inherit(from.GroupedAs, from.LastChanged);
+                    else row.Hold(SessionRegistry.SettledAt(row.LiveSessionId));
+                    _rowsById[h.Id] = row;
+                    Rows.Add(row);
+                    added++;
+                }
             }
             for (int i = Rows.Count - 1; i >= 0; i--)
                 if (!seen.Contains(Rows[i].SessionId))
@@ -842,7 +913,12 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         _externalSnapshot = live.Where(s => !claimed.Contains(s)).ToArray();
         // A CLI that has exited leaves its host alive (the shell wrapper stays open), so hook status is
         // what says the session is really over; otherwise it would be offered for restore next launch.
-        SessionRegistry.Snapshot(byHost.Where(x => !x.Host.HasExited && x.Host.AgentStatus != "ended" && x.Info.SessionId.Length > 0 && IsRestorable(x.Info)).Select(x => x.Info).ToList());
+        var rowOf = byHost.Where(x => _rowsById.ContainsKey(x.Host.Id))
+            .ToDictionary(x => x.Info, x => _rowsById[x.Host.Id]);
+        SessionRegistry.Snapshot(
+            byHost.Where(x => !x.Host.HasExited && x.Host.AgentStatus != "ended" && x.Info.SessionId.Length > 0 && IsRestorable(x.Info)).Select(x => x.Info).ToList(),
+            s => rowOf.TryGetValue(s, out var r) && r.State is SessionState.Completed or SessionState.Idle ? r.LastChanged : null);
+        SaveLayoutIfSessionsMoved();
 
         int hostsLive = hosts.Count(h => !h.HasExited);
         int external = _externalSnapshot.Count(s => s.Kind != "companion");
@@ -1086,26 +1162,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     /// <summary>Stamp every row with its group so the view groups and orders it; ungrouped rows come first.</summary>
     void ApplyGroups()
     {
-        var groups = GroupsSetting;
-        bool moved = false;
-        foreach (var row in Rows)
-        {
-            string key = row.GroupKey;
-            if (row.GroupedAs.Length > 0 && row.GroupedAs != key)
-            {
-                // The row's id changed under it (/resume or /clear inside the session, or a fresh
-                // session that has now reported its id): carry its membership to the new key.
-                foreach (var g in groups)
-                {
-                    int at = g.Members.IndexOf(row.GroupedAs);
-                    if (at >= 0) { g.Members[at] = key; moved = true; }
-                }
-            }
-            row.GroupedAs = key;
-            int i = groups.FindIndex(g => g.Members.Contains(key));
-            row.SetGroup(i >= 0 ? groups[i].Name : "", i + 1);
-        }
-        if (moved) _app.Settings.Save();
+        if (SessionGroup.Apply(GroupsSetting, Rows)) _app.Settings.Save();
     }
 
     void GroupsChanged()
@@ -1288,19 +1345,30 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     }
 
     readonly HashSet<string> _restarting = new();
+    /// <summary>What a restarted session's new row inherits from the row it replaces.</summary>
+    sealed record Succession(string GroupedAs, DateTime LastChanged);
+    readonly Dictionary<string, Succession> _successors = new();
+    readonly Dictionary<string, string> _autoRestartedFor = new(StringComparer.OrdinalIgnoreCase);
+    Task _autoRestart = Task.CompletedTask;
     static readonly TimeSpan IdleBeforeRestart = TimeSpan.FromMinutes(2);
 
     /// <summary>
     /// A session whose CLI has updated underneath it is restarted once it has sat idle for a while and
     /// is not the tab in front of a focused window, so no turn is cut off and no half-typed prompt is
     /// lost. The session itself survives: the restart resumes it from its transcript.
+    /// <para>One at a time: a CLI update makes every idle session eligible in the same pass, and a
+    /// dozen CLIs starting at once is a burst of load; eligibility is also re-checked right before
+    /// each kill. A session is restarted at most once per installed version, so a CLI that still
+    /// reports the old version after its restart cannot loop.</para>
     /// </summary>
     void RestartUpdatedIdleSessions()
     {
-        if (!_app.Settings.AutoRestartOnUpdate) return;
+        if (!_app.Settings.AutoRestartOnUpdate || !_autoRestart.IsCompleted) return;
         foreach (var row in Rows.ToList())
         {
             if (!row.UpdatePending || !row.CanRestart || _restarting.Contains(row.Host.Id)) continue;
+            string target = InstalledVersions.For(row.Provider);
+            if (_autoRestartedFor.TryGetValue(row.LiveSessionId, out var done) && done == target) continue;
             // Only a session whose live conversation is provably resumable is touched on its own;
             // anything else waits for a restart you ask for.
             if (!SessionScanner.HasConversation(row.TranscriptPath)) continue;
@@ -1311,15 +1379,19 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             if (DateTime.Now - row.LastChanged < IdleBeforeRestart) continue;
             var tab = Deck.FindByHost(row.Host.Id);
             if (tab != null && tab == Deck.Active && IsActive) continue;
-            PerformanceLog.Write($"auto-restart host={row.Host.Id} provider={row.Provider} from=v{row.Version} to=v{InstalledVersions.For(row.Provider)}");
-            _ = RestartSession(row);
+            PerformanceLog.Write($"auto-restart host={row.Host.Id} provider={row.Provider} from=v{row.Version} to=v{target}");
+            _autoRestartedFor[row.LiveSessionId] = target;
+            _autoRestart = RestartSession(row);
+            return;
         }
     }
 
     /// <summary>
-    /// End the host's child and start the same session again in a new host, in the same tab slot.
-    /// Claude only writes a transcript once something has been said, and <c>--resume</c> refuses a
-    /// session without one, so an unused session is started fresh under its own id instead.
+    /// End the host's child and start the same session again in a new host. The new host takes the
+    /// old one's tab slot wherever that tab is by then (or stays tab-less), and its row keeps the
+    /// group and place the old row had. Claude only writes a transcript once something has been said,
+    /// and <c>--resume</c> refuses a session without one, so an unused session is started fresh under
+    /// its own id instead.
     /// </summary>
     async Task RestartSession(SessionRow row)
     {
@@ -1327,9 +1399,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         if (!row.CanRestart || !_restarting.Add(host.Id)) return;
         try
         {
-            var tab = Deck.FindByHost(host.Id);
-            int slot = tab != null ? Deck.Tabs.IndexOf(tab) : -1;
-            bool wasActive = tab != null && Deck.Active == tab;
+            var inherit = new Succession(row.GroupedAs, row.LastChanged);
             var provider = row.Provider;
             string sessionId = row.LiveSessionId;
             bool hasTranscript = SessionScanner.HasConversation(row.TranscriptPath);
@@ -1352,10 +1422,10 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             }
 
             var next = HostManager.Spawn(sessionId, provider, cmd, host.Cwd, host.Title);
+            _successors[next.Id] = inherit;
+            Deck.ReplaceHost(host.Id, next);
             HostManager.Forget(host);
-            if (tab != null) Deck.Close(tab);
-            var opened = Deck.Open(next, activate: wasActive);
-            if (slot >= 0) Deck.Move(opened, slot);
+            PerformanceLog.Write($"restart host={host.Id} -> {next.Id} session={sessionId}");
             RequestRefresh();
         }
         catch (Exception ex)

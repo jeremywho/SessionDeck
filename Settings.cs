@@ -31,6 +31,7 @@ internal sealed class Settings
     public string DockPosition { get; set; } = "Free";                      // Free | LeftEdge | RightEdge | TopLeft | TopRight | BottomLeft | BottomRight
     public double? WindowLeft { get; set; }
     public double? WindowTop { get; set; }
+    public bool WindowMaximized { get; set; }
     public double Zoom { get; set; } = 1.0;                                 // content zoom (Ctrl+wheel), 0.6–2.5
     public bool ShowInTaskbar { get; set; } = true;                         // false = tray-only (no taskbar button)
     public string TerminalFont { get; set; } = "CaskaydiaCove NF";          // xterm font family; falls back down the stack in terminal.html
@@ -62,8 +63,18 @@ internal sealed class Settings
     }
     public bool RunOnLogin { get; set; } = true;                            // HKCU Run registration (installed instance only)
 
-    static string Dir => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SessionDeck");
+    /// <summary>Where this instance keeps its state. <c>SD_DATA_DIR</c> moves all of it, so a test instance never shares a file with the installed one.</summary>
+    internal static string DataDir =>
+        Environment.GetEnvironmentVariable("SD_DATA_DIR") is { Length: > 0 } d ? d
+        : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SessionDeck");
+
+    /// <summary>The single-instance lock is per data dir, so an isolated instance can run beside the installed one.</summary>
+    internal static string InstanceMutexName =>
+        Environment.GetEnvironmentVariable("SD_DATA_DIR") is { Length: > 0 }
+            ? "SessionDeck_SingleInstance_" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(Path.GetFullPath(DataDir).ToUpperInvariant())))[..16]
+            : "SessionDeck_SingleInstance";
+
+    static string Dir => DataDir;
     static string FilePath => Path.Combine(Dir, "settings.json");
 
     public static Settings Load()

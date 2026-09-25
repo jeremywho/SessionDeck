@@ -28,6 +28,9 @@ internal sealed class HostSpec
     /// moment: the CLI's prompt is up by then. Text first, Enter as a separate write, because the
     /// Codex TUI does not submit both when they arrive in one chunk.</summary>
     public string InitialPrompt { get; set; } = "";
+
+    /// <summary>The tab's name until the CLI sets a title of its own: the name the session had before a restart or resume.</summary>
+    public string Title { get; set; } = "";
 }
 
 /// <summary>
@@ -176,6 +179,7 @@ internal static class HostProgram
             Port = port,
             Token = token,
             StartedAt = DateTime.UtcNow,
+            Title = spec.Title,
         };
         WriteRecord();
         ready.WriteLine("ready");

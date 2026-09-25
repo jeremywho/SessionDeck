@@ -59,19 +59,11 @@ internal partial class DeckPane : UserControl
         public void Raise(string name) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
     }
 
-    /// <summary>A column: its tabs, the one it shows, and its share of the width.</summary>
-    internal sealed class DeckGroup
-    {
-        public ObservableCollection<DeckTab> Tabs { get; } = new();
-        public DeckTab? Active { get; set; }
-        public double Fraction { get; set; } = 1;
-    }
-
     /// <summary>Every tab, in column order then strip order. Kept for callers that only care which hosts are open.</summary>
     public ObservableCollection<DeckTab> Tabs { get; } = new();
-    internal List<DeckGroup> Groups { get; } = new();
+    readonly DeckModel<DeckTab> _model = new(t => t.View.Host);
+    List<DeckGroup<DeckTab>> Groups => _model.Groups;
     readonly DeckBrowser _browser;
-    int _focused;
     bool _dark = true;
     Point _dragStart;
     DeckTab? _dragCandidate;
@@ -89,7 +81,7 @@ internal partial class DeckPane : UserControl
 
     void RequestNew(object sender, string kind)
     {
-        if (sender is FrameworkElement { Tag: DeckGroup g } && Groups.Contains(g)) { _focused = Groups.IndexOf(g); Mark(); }
+        if (sender is FrameworkElement { Tag: DeckGroup<DeckTab> g } && Groups.Contains(g)) { _model.Focused = Groups.IndexOf(g); Mark(); }
         NewSessionRequested?.Invoke(kind);
     }
 
@@ -118,15 +110,14 @@ internal partial class DeckPane : UserControl
     public DeckTab? Active => FocusedGroup?.Active;
     public IEnumerable<HostRecord> OpenHosts => Tabs.Select(t => t.View.Host);
 
-    DeckGroup? FocusedGroup => Groups.Count == 0 ? null : Groups[Math.Clamp(_focused, 0, Groups.Count - 1)];
-    DeckGroup? GroupOf(DeckTab tab) => Groups.FirstOrDefault(g => g.Tabs.Contains(tab));
+    DeckGroup<DeckTab>? FocusedGroup => _model.FocusedGroup;
+    DeckGroup<DeckTab>? GroupOf(DeckTab tab) => _model.GroupOf(tab);
 
     public DeckTab? FindBySession(string sessionId) =>
         string.IsNullOrEmpty(sessionId) ? null
         : Tabs.FirstOrDefault(t => string.Equals(t.View.Host.SessionId, sessionId, StringComparison.OrdinalIgnoreCase));
 
-    public DeckTab? FindByHost(string hostId) =>
-        Tabs.FirstOrDefault(t => t.View.Host.Id == hostId);
+    public DeckTab? FindByHost(string hostId) => _model.FindByHost(hostId);
 
     void Route(string hostId, string type, JsonElement root)
     {
@@ -154,7 +145,7 @@ internal partial class DeckPane : UserControl
         if (type == "focused")
         {
             var g = GroupOf(tab);
-            if (g != null && Groups.IndexOf(g) != _focused) { _focused = Groups.IndexOf(g); Mark(); }
+            if (g != null && Groups.IndexOf(g) != _model.Focused) { _model.Focused = Groups.IndexOf(g); Mark(); LayoutChanged?.Invoke(); }
             return;
         }
         tab.View.OnMessage(type, root);
@@ -175,7 +166,7 @@ internal partial class DeckPane : UserControl
         {
             type = "layout",
             groups = Groups.Select(g => new { id = g.Active?.View.Host.Id, frac = g.Fraction }).ToArray(),
-            focused = _focused,
+            focused = _model.Focused,
         });
     }
 
@@ -185,14 +176,14 @@ internal partial class DeckPane : UserControl
             foreach (var t in Groups[i].Tabs)
             {
                 t.IsActive = t == Groups[i].Active;
-                t.IsForeground = t.IsActive && i == _focused;
+                t.IsForeground = t.IsActive && i == _model.Focused;
             }
     }
 
     void RebuildFlat()
     {
         Tabs.Clear();
-        foreach (var g in Groups) foreach (var t in g.Tabs) Tabs.Add(t);
+        foreach (var t in _model.AllTabs) Tabs.Add(t);
     }
 
     /// <summary>One strip per group, widths as star shares matching the page's columns, a hairline between.</summary>
@@ -217,46 +208,14 @@ internal partial class DeckPane : UserControl
         }
     }
 
-    /// <summary>The current columns, for saving.</summary>
-    public DeckLayout Layout => new()
-    {
-        Focused = _focused,
-        Columns = Groups.Select(g => new DeckColumn
-        {
-            Hosts = g.Tabs.Select(t => t.View.Host.Id).ToList(),
-            Active = g.Active?.View.Host.Id ?? "",
-            Fraction = g.Fraction,
-        }).ToList(),
-    };
+    /// <summary>The current columns, for saving; <paramref name="sessionOf"/> names the conversation each host runs now.</summary>
+    public DeckLayout LayoutFor(Func<HostRecord, string> sessionOf, Func<HostRecord, bool> isLive) => _model.Snapshot(sessionOf, isLive);
 
-    /// <summary>
-    /// Rebuild the columns from a saved layout for the hosts still alive. Hosts the layout does not
-    /// mention go into the last column; columns left with no live host are dropped.
-    /// </summary>
-    public void Restore(DeckLayout layout, IEnumerable<HostRecord> hosts)
+    /// <summary>Rebuild the columns from a saved layout for the hosts alive now; see <see cref="DeckModel{TTab}.Restore"/>.</summary>
+    public void Restore(DeckLayout layout, IReadOnlyCollection<HostRecord> hosts)
     {
-        var byId = hosts.ToDictionary(h => h.Id);
-        var placed = new HashSet<string>();
-        Groups.Clear();
-        foreach (var col in layout.Columns)
-        {
-            var g = new DeckGroup { Fraction = col.Fraction > 0 ? col.Fraction : 1 };
-            foreach (var id in col.Hosts)
-                if (byId.TryGetValue(id, out var host) && placed.Add(id)) g.Tabs.Add(NewTab(host));
-            if (g.Tabs.Count == 0) continue;
-            g.Active = g.Tabs.FirstOrDefault(t => t.View.Host.Id == col.Active) ?? g.Tabs[^1];
-            Groups.Add(g);
-        }
-        var rest = hosts.Where(h => !placed.Contains(h.Id)).ToList();
-        if (rest.Count > 0)
-        {
-            if (Groups.Count == 0) Groups.Add(new DeckGroup());
-            var last = Groups[^1];
-            foreach (var host in rest) last.Tabs.Add(NewTab(host));
-            last.Active ??= last.Tabs[^1];
-        }
-        _focused = Math.Clamp(layout.Focused, 0, Math.Max(0, Groups.Count - 1));
-        foreach (var g in Groups) foreach (var t in g.Tabs) t.View.Open();
+        _model.Restore(layout, hosts, NewTab);
+        foreach (var t in _model.AllTabs) t.View.Open();
         Changed();
         FocusedGroup?.Active?.View.FocusTerminal();
     }
@@ -311,30 +270,35 @@ internal partial class DeckPane : UserControl
 
     // ---------------- model edits ----------------
 
-    /// <summary>Open (or focus) a tab attached to <paramref name="host"/>, in the focused column.</summary>
+    /// <summary>Open (or focus) a tab attached to <paramref name="host"/>: back where it was if it was closed here, else in the focused column.</summary>
     public DeckTab Open(HostRecord host, bool activate = true)
     {
         var existing = FindByHost(host.Id);
         if (existing != null) { if (activate) Activate(existing); return existing; }
 
         var tab = NewTab(host);
-        if (Groups.Count == 0) Groups.Add(new DeckGroup());
-        var group = FocusedGroup!;
-        group.Tabs.Add(tab);
+        _model.Add(tab, activate);
         tab.View.Open();
-        if (activate || group.Active == null) { group.Active = tab; _focused = Groups.IndexOf(group); }
         Changed();
         if (activate) tab.View.FocusTerminal();
         return tab;
     }
 
+    /// <summary>The host behind a tab was replaced by <paramref name="host"/> (a restart); see <see cref="DeckModel{TTab}.ReplaceHost"/>.</summary>
+    public void ReplaceHost(string oldHostId, HostRecord host)
+    {
+        if (_model.ReplaceHost(oldHostId, host, NewTab) is not { } swap) { LayoutChanged?.Invoke(); return; }
+        var (old, tab) = swap;
+        old.View.Close();
+        tab.View.Open();
+        Changed();
+        if (old.IsForeground) tab.View.FocusTerminal();
+    }
+
     /// <summary>Show the tab in its column and make that column the focused one.</summary>
     public void Activate(DeckTab tab)
     {
-        var group = GroupOf(tab);
-        if (group == null) return;
-        group.Active = tab;
-        _focused = Groups.IndexOf(group);
+        if (!_model.Activate(tab)) return;
         Changed();
         tab.View.FocusTerminal();
     }
@@ -348,81 +312,32 @@ internal partial class DeckPane : UserControl
         SplitAt(tab, i + 1, i);
     }
 
-    /// <summary>
-    /// Move the tab into a new column inserted at <paramref name="insertAt"/>, taking half the width of
-    /// the column at <paramref name="takeFrom"/> (the one the tab was dropped beside). A tab that was
-    /// alone in its column just moves that column.
-    /// </summary>
+    /// <summary>Move the tab into a new column at <paramref name="insertAt"/>, beside the column at <paramref name="takeFrom"/>.</summary>
     void SplitAt(DeckTab tab, int insertAt, int takeFrom)
     {
-        var from = GroupOf(tab);
-        if (from == null) return;
-        var donor = takeFrom >= 0 && takeFrom < Groups.Count ? Groups[takeFrom] : from;
-        if (from.Tabs.Count == 1 && donor == from) { Activate(tab); return; }
-        var to = new DeckGroup();
-        Groups.Insert(Math.Clamp(insertAt, 0, Groups.Count), to);
-        Detach(tab, from);
-        if (Groups.Contains(donor) && donor != from) { to.Fraction = donor.Fraction / 2; donor.Fraction /= 2; }
-        else if (Groups.Contains(from)) { to.Fraction = from.Fraction / 2; from.Fraction /= 2; }
-        else to.Fraction = from.Fraction;
-        to.Tabs.Add(tab);
-        to.Active = tab;
-        _focused = Groups.IndexOf(to);
+        if (!_model.SplitAt(tab, insertAt, takeFrom)) return;
         Changed();
         tab.View.FocusTerminal();
     }
 
     /// <summary>Move the tab into <paramref name="to"/> at <paramref name="index"/> and show it there.</summary>
-    void MoveTo(DeckTab tab, DeckGroup to, int index)
+    void MoveTo(DeckTab tab, DeckGroup<DeckTab> to, int index)
     {
-        var from = GroupOf(tab);
-        if (from == null) return;
-        if (from == to)
-        {
-            int cur = to.Tabs.IndexOf(tab);
-            index = Math.Clamp(index, 0, to.Tabs.Count - 1);
-            if (cur != index) to.Tabs.Move(cur, index);
-        }
-        else
-        {
-            Detach(tab, from);
-            to.Tabs.Insert(Math.Clamp(index, 0, to.Tabs.Count), tab);
-        }
-        to.Active = tab;
-        _focused = Groups.IndexOf(to);
+        if (!_model.MoveTo(tab, to, index)) return;
         Changed();
         tab.View.FocusTerminal();
-    }
-
-    /// <summary>Take the tab out of its column; a column left empty goes away and its width joins a neighbour.</summary>
-    void Detach(DeckTab tab, DeckGroup from)
-    {
-        from.Tabs.Remove(tab);
-        if (from.Active == tab) from.Active = from.Tabs.LastOrDefault();
-        if (from.Tabs.Count == 0 && Groups.Count > 1)
-        {
-            int i = Groups.IndexOf(from);
-            Groups.RemoveAt(i);
-            Groups[Math.Max(0, i - 1)].Fraction += from.Fraction;
-            if (_focused >= Groups.Count) _focused = Groups.Count - 1;
-        }
     }
 
     /// <summary>Cycle the focused column through its own tabs.</summary>
     public void CycleActive(int delta)
     {
-        var g = FocusedGroup;
-        if (g == null || g.Tabs.Count == 0) return;
-        int idx = g.Active == null ? 0 : g.Tabs.IndexOf(g.Active);
-        Activate(g.Tabs[((idx + delta) % g.Tabs.Count + g.Tabs.Count) % g.Tabs.Count]);
+        if (_model.CycleTarget(delta) is { } next) Activate(next);
     }
 
-    /// <summary>Detach the tab. The host keeps running; the row on the left still knows it.</summary>
+    /// <summary>Detach the tab. The host keeps running; the row on the left still knows it, and reopening puts the tab back here.</summary>
     public void Close(DeckTab tab)
     {
-        var group = GroupOf(tab);
-        if (group == null) return;
-        Detach(tab, group);
+        if (!_model.Close(tab)) return;
         tab.View.Close();
         Changed();
         FocusedGroup?.Active?.View.FocusTerminal();
@@ -435,12 +350,6 @@ internal partial class DeckPane : UserControl
 
     /// <summary>Stop the session behind the tab. The tab stays so the exit is visible; close it after.</summary>
     public void Stop(DeckTab tab) => tab.View.Kill();
-
-    public void Move(DeckTab tab, int toIndex)
-    {
-        var g = GroupOf(tab);
-        if (g != null) MoveTo(tab, g, toIndex);
-    }
 
     public void ApplyTheme(bool dark)
     {
@@ -468,7 +377,7 @@ internal partial class DeckPane : UserControl
     // ---------------- strip interaction ----------------
 
     static DeckTab? TabOf(object sender) => sender is FrameworkElement { Tag: DeckTab tab } ? tab : null;
-    static DeckGroup? GroupOfStrip(object sender) => sender is FrameworkElement { DataContext: DeckGroup g } ? g : null;
+    static DeckGroup<DeckTab>? GroupOfStrip(object sender) => sender is FrameworkElement { DataContext: DeckGroup<DeckTab> g } ? g : null;
 
     void Tab_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {

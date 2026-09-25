@@ -95,7 +95,7 @@ internal static class Program
         int retries = afterUpdate ? 80 : 0;   // ~8s of 100ms retries to let the old instance release the mutex
         for (int i = 0; ; i++)
         {
-            var m = new Mutex(true, "SessionDeck_SingleInstance", out bool isNew);
+            var m = new Mutex(true, Settings.InstanceMutexName, out bool isNew);
             if (isNew) return m;
             m.Dispose();
             if (i >= retries) return null;     // held and out of retries -> a genuine second instance, exit

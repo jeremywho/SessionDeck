@@ -12,10 +12,7 @@ namespace SessionDeck;
 /// </summary>
 internal static class HostManager
 {
-    public static string HostsDir =>
-        Environment.GetEnvironmentVariable("SD_DATA_DIR") is { Length: > 0 } d
-            ? Path.Combine(d, "hosts")
-            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SessionDeck", "hosts");
+    public static string HostsDir => Path.Combine(Settings.DataDir, "hosts");
 
     /// <summary>The claude launch for a brand-new session with a preassigned id, so the transcript
     /// is known before the first byte is written.</summary>
@@ -84,6 +81,7 @@ internal static class HostManager
             Cwd = string.IsNullOrWhiteSpace(cwd) ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) : cwd,
             HostsDir = HostsDir,
             InitialPrompt = initialPrompt ?? "",
+            Title = title ?? "",
         };
 
         var psi = new ProcessStartInfo(HostExe())
@@ -105,9 +103,7 @@ internal static class HostManager
         if (ready != "ready")
             throw new InvalidOperationException($"host did not start (exit {(p.HasExited ? p.ExitCode : -1)})");
 
-        var rec = ReadRecord(Path.Combine(HostsDir, id + ".json")) ?? throw new InvalidOperationException("host wrote no record");
-        if (!string.IsNullOrWhiteSpace(title)) rec.Title = title;
-        return rec;
+        return ReadRecord(Path.Combine(HostsDir, id + ".json")) ?? throw new InvalidOperationException("host wrote no record");
     }
 
     /// <summary>

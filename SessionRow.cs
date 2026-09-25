@@ -15,10 +15,10 @@ internal sealed class SessionRow : INotifyPropertyChanged
     public string SessionId { get; }
     SessionInfo _s;
 
-    /// <summary>The deck host this row stands for. Rows exist only for hosts; the scanner's
+    /// <summary>The deck host this row stands for, as last read. Rows exist only for hosts; the scanner's
     /// <see cref="SessionInfo"/> is what it knows about the CLI running inside the host, and it can be
     /// a placeholder before the CLI has registered itself.</summary>
-    public Host.HostRecord Host { get; }
+    public Host.HostRecord Host { get; private set; }
 
     public SessionRow(Host.HostRecord host, SessionInfo s)
     {
@@ -45,17 +45,19 @@ internal sealed class SessionRow : INotifyPropertyChanged
         UpdatedAt = h.StartedAt,
     };
 
-    public int Update(SessionInfo s)
+    /// <summary>Take the latest scan and the host record as it is on disk now: the host follows the
+    /// session's id through /resume and /clear, and the row's group key has to follow with it.</summary>
+    public int Update(SessionInfo s, Host.HostRecord? host = null)
     {
         var h = PropertyChanged;
-        if (h == null) { _s = s; return 0; }
+        if (h == null) { Take(s, host); return 0; }
 
         // Raise only what actually changed. Every raise re-runs bindings and converters, and three
         // of these are live-sort keys the collection view re-evaluates per raise — so a blanket
         // raise on the 2s tick had the whole grid churning while nothing was visibly different.
         var before = new object?[Tracked.Length];
         for (int i = 0; i < Tracked.Length; i++) before[i] = Tracked[i].Get(this);
-        _s = s;
+        Take(s, host);
         int changed = 0;
         for (int i = 0; i < Tracked.Length; i++)
             if (!Equals(before[i], Tracked[i].Get(this)))
@@ -65,6 +67,13 @@ internal sealed class SessionRow : INotifyPropertyChanged
                 changed++;
             }
         return changed;
+    }
+
+    void Take(SessionInfo s, Host.HostRecord? host)
+    {
+        _s = s;
+        if (host != null && host.Id == Host.Id) Host = host;
+        if (_held != DateTime.MinValue && HasTakenATurn) _held = DateTime.MinValue;
     }
 
     static readonly (string Name, Func<SessionRow, object?> Get)[] Tracked =
@@ -99,6 +108,7 @@ internal sealed class SessionRow : INotifyPropertyChanged
         (nameof(HasActiveSubagents), r => r.HasActiveSubagents),
         (nameof(SubagentTooltip), r => r.SubagentTooltip),
         (nameof(IsBackgroundAgent), r => r.IsBackgroundAgent),
+        (nameof(HostExited), r => r.HostExited),
     };
 
     public SessionInfo Info => _s;
@@ -173,7 +183,34 @@ internal sealed class SessionRow : INotifyPropertyChanged
     public bool ApiError => _s.ApiError;
 
     /// <summary>When the status last changed — secondary sort key (most-recent-first within each group).</summary>
-    public DateTime LastChanged => _s.StatusUpdatedAt > DateTime.MinValue ? _s.StatusUpdatedAt : _s.UpdatedAt;
+    public DateTime LastChanged => _held != DateTime.MinValue ? _held : _s.StatusUpdatedAt > DateTime.MinValue ? _s.StatusUpdatedAt : _s.UpdatedAt;
+
+    DateTime _held = DateTime.MinValue;
+
+    static readonly HashSet<string> TurnEvents = new(StringComparer.Ordinal)
+        { "UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest", "Stop", "Interrupt" };
+
+    /// <summary>The host has run a turn since it started; a resume or an idle notification is not one.</summary>
+    bool HasTakenATurn => TurnEvents.Contains(Host.LastEvent);
+
+    /// <summary>
+    /// A session brought back in a new host (restart, reboot resume) reports its startup as a status
+    /// change. Until it takes a turn, it keeps <paramref name="settledAt"/>, the time it last settled
+    /// before this host, so it keeps its place in its group.
+    /// </summary>
+    public void Hold(DateTime settledAt)
+    {
+        if (settledAt == DateTime.MinValue || HasTakenATurn) return;
+        if (settledAt.ToUniversalTime() >= Host.StartedAt.ToUniversalTime()) return;
+        _held = settledAt;
+    }
+
+    /// <summary>This row stands for a session restarted out of the row that had <paramref name="groupedAs"/> and <paramref name="lastChanged"/>.</summary>
+    public void Inherit(string groupedAs, DateTime lastChanged)
+    {
+        GroupedAs = groupedAs;
+        Hold(lastChanged);
+    }
 
     readonly bool _hosted;
 
@@ -184,8 +221,8 @@ internal sealed class SessionRow : INotifyPropertyChanged
     public bool OnOtherDesktop => _desktopIndex >= 0 && !_onCurrentDesktop;
     public string DesktopLabel => _desktopIndex >= 0 ? $"Desktop {_desktopIndex + 1}" : "";
 
-    /// <summary>What a group membership is keyed on: the CLI's own session id once known, else the host.</summary>
-    public string GroupKey => Host.SessionId.Length > 0 ? Host.SessionId : Host.Id;
+    /// <summary>What a group membership is keyed on: the conversation running in the pane once known, else the host.</summary>
+    public string GroupKey => LiveSessionId.Length > 0 ? LiveSessionId : Host.Id;
 
     /// <summary>The key this row was grouped under last time; when the key changes (the session
     /// switched conversation, or first learned its id) the membership is moved to the new key.</summary>

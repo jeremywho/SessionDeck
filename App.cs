@@ -61,11 +61,10 @@ internal sealed class App : Application
         // of them back; the tray's "Restore sessions…" keeps the checklist for picking by hand.
         var orphaned = ComputeOrphaned();
 
+        _window = new SessionsWindow(this);
+        _window.ResumeWhenAttached(orphaned);
         ShowWindow();
         DwmDiagnostics.Mark("main-window-shown");
-
-        foreach (var s in orphaned) _window!.ResumeInDeck(s);
-        if (orphaned.Count > 0) PerformanceLog.Write($"auto-resume after reboot/crash sessions={orphaned.Count} ids={string.Join(",", orphaned.Select(s => s.Id))}");
 
         StartUpdater();
     }
