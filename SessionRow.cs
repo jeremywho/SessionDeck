@@ -225,7 +225,11 @@ internal sealed class SessionRow : INotifyPropertyChanged
     /// click into — see <see cref="CodexAttribution"/>). They're counted together because the question
     /// the badge answers is "is this session waiting on something?", and the tooltip splits them.
     /// </summary>
-    public int SubagentsActive => _s.SubagentsActive + _s.BackgroundTasks + _s.BackgroundWork;
+    /// <summary>Shell chains under the CLI, less the one that is a foreground Bash call in progress.</summary>
+    int BackgroundShells => _s.Status == "busy" && string.Equals(_s.LastTool, "Bash", StringComparison.OrdinalIgnoreCase)
+        ? Math.Max(0, _s.BackgroundShells - 1)
+        : _s.BackgroundShells;
+    public int SubagentsActive => _s.SubagentsActive + _s.BackgroundTasks + Math.Max(_s.BackgroundWork, BackgroundShells);
     public bool HasActiveSubagents => SubagentsActive > 0;
 
     public string SubagentTooltip
@@ -239,6 +243,8 @@ internal sealed class SessionRow : INotifyPropertyChanged
                 parts.Add($"{_s.BackgroundTasks} Codex task{(_s.BackgroundTasks == 1 ? "" : "s")} running (no terminal)");
             if (_s.BackgroundWork > 0)
                 parts.Add($"{_s.BackgroundWork} background task{(_s.BackgroundWork == 1 ? "" : "s")} (shell, monitor or loop) still writing output");
+            if (BackgroundShells > 0)
+                parts.Add($"{BackgroundShells} background shell{(BackgroundShells == 1 ? "" : "s")} running");
             return string.Join("\n", parts);
         }
     }

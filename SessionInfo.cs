@@ -34,6 +34,8 @@ internal sealed class SessionInfo
     /// <summary>Claude background tasks (a shell run in the background, a monitor, a loop) whose output
     /// file was written in the last little while: work of the session's own, going on while it holds.</summary>
     public int BackgroundWork;
+    /// <summary>Shell chains still running under the CLI process: Claude's "N shells".</summary>
+    public int BackgroundShells;
     public DateTime StartedAt;
     public DateTime UpdatedAt;
     public DateTime StatusUpdatedAt;   // when the status field last changed (sessions/<pid>.json)

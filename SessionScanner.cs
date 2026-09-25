@@ -33,8 +33,12 @@ internal static class SessionScanner
     static readonly Dictionary<string, Detail> _detailCache = new();
     static readonly SubagentCounter _subagents = new();
 
+    /// <summary>One process snapshot per scan, shared by every session's shell count.</summary>
+    static Dictionary<int, (int Parent, string Name)> _procs = new();
+
     public static List<SessionInfo> Scan()
     {
+        try { _procs = Native.BuildProcessTable(); } catch { _procs = new(); }
         var list = new List<SessionInfo>();
         if (!Directory.Exists(SessionsDir)) return list;
 
@@ -265,6 +269,7 @@ internal static class SessionScanner
             s.BackgroundWork = CountRecentOutputs(dir, DateTime.UtcNow, BackgroundWindow);
         }
         catch { }
+        try { if (s.Pid > 0) s.BackgroundShells = Native.TopLevelShells(s.Pid, _procs); } catch { }
     }
 
     internal static int CountRecentOutputs(string dir, DateTime nowUtc, TimeSpan window)
