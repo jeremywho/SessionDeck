@@ -124,13 +124,14 @@ public class SessionRegistryTests
         SessionRegistry.ResetForTests();
 
         var boot = new DateTime(2026, 9, 25, 18, 0, 0, DateTimeKind.Local);
-        var rows = ids.Reverse().Select((id, i) =>
+        var rows = ids.Select((id, i) =>
         {
             var host = new Host.HostRecord { Id = "h-" + id, SessionId = id, StartedAt = boot.ToUniversalTime(), LastEvent = "SessionStart" };
             var row = new SessionRow(host, new SessionInfo { SessionId = id, Status = "idle", StatusUpdatedAt = boot.AddSeconds(5 + i), Name = id });
             row.Hold(SessionRegistry.SettledAt(row.LiveSessionId));
             return row;
         }).ToList();
+        Assert.Equal(ids.Reverse(), rows.OrderByDescending(r => r.Info.StatusUpdatedAt).Select(r => r.LiveSessionId));
         Assert.Equal(ids, rows.OrderByDescending(r => r.LastChanged).Select(r => r.LiveSessionId));
     }
 
