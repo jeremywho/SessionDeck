@@ -278,16 +278,44 @@
       const w = groups[i].frac / total * 100;
       const p = groups[i].id ? panes.get(groups[i].id) : null;
       if (p) {
-        p.el.style.left = i === 0 ? '0' : `calc(${x}% + 1px)`;
-        p.el.style.width = `calc(${w}% - ${(i === 0 ? 0 : 1) + (i === n - 1 ? 0 : 1)}px)`;
+        place(p.el, i, x, w);
         p.fit.fit();
       }
       x += w;
       if (i < n - 1) dividers[i].style.left = `${x}%`;
     }
+    placeFillers();
     empty.classList.toggle('hidden', shownIds.size > 0);
     const f = groups[focused] && groups[focused].id ? panes.get(groups[focused].id) : null;
     document.title = f ? `terminal port=${f.port}` : 'terminal';
+  }
+
+  function place(el, i, x, w) {
+    const n = groups.length;
+    el.style.left = i === 0 ? '0' : `calc(${x}% + 1px)`;
+    el.style.width = `calc(${w}% - ${(i === 0 ? 0 : 1) + (i === n - 1 ? 0 : 1)}px)`;
+  }
+
+  // A column with no terminal (a spacer) gets a filler painted like a pane. The page body is
+  // transparent, so without one nothing repaints that region and stale pixels can linger there.
+  const fillers = [];
+  function placeFillers() {
+    const total = groups.reduce((a, g) => a + g.frac, 0) || 1;
+    let x = 0, used = 0;
+    for (let i = 0; i < groups.length; i++) {
+      const w = groups[i].frac / total * 100;
+      if (!groups[i].id) {
+        if (used >= fillers.length) {
+          const el = document.createElement('div');
+          el.className = 'pane filler shown';
+          document.body.appendChild(el);
+          fillers.push(el);
+        }
+        place(fillers[used++], i, x, w);
+      }
+      x += w;
+    }
+    while (fillers.length > used) fillers.pop().remove();
   }
 
   // While a divider is dragged only its two neighbours are laid out again. Every other pane keeps
@@ -300,13 +328,13 @@
       const w = groups[k].frac / total * 100;
       const p = groups[k].id ? panes.get(groups[k].id) : null;
       if (p) {
-        p.el.style.left = k === 0 ? '0' : `calc(${x}% + 1px)`;
-        p.el.style.width = `calc(${w}% - ${(k === 0 ? 0 : 1) + (k === n - 1 ? 0 : 1)}px)`;
+        place(p.el, k, x, w);
         p.fit.fit();
       }
       x += w;
       if (k === i && i < n - 1) dividers[i].style.left = `${x}%`;
     }
+    placeFillers();
   }
 
   function focusGroup(i) {
