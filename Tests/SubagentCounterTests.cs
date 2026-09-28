@@ -90,6 +90,28 @@ public sealed class SubagentCounterTests : IDisposable
         Assert.False(SubagentCounter.IsMidTurn(p));
     }
 
+    [Fact]
+    public void An_agent_stopped_by_the_user_is_finished()
+    {
+        var now = DateTime.UtcNow;
+        string stopped = Path.Combine(_dir, "agent-stopped.jsonl");
+        File.WriteAllText(stopped, "{\"type\":\"assistant\",\"message\":{\"stop_reason\":\"tool_use\",\"content\":[{\"type\":\"tool_use\"}]}}\n{\"type\":\"user\",\"message\":{\"content\":[{\"type\":\"tool_result\"}]}}\n{\"type\":\"user\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"[Request interrupted by user for tool use]\"}]}}\n");
+        Assert.False(SubagentCounter.IsMidTurn(stopped));
+        File.SetLastWriteTimeUtc(stopped, now - TimeSpan.FromMinutes(6));
+
+        Assert.Equal((1, 0), new SubagentCounter().Count(_dir, now));
+    }
+
+    [Fact]
+    public void A_user_prompt_as_a_string_is_not_mid_turn_but_a_tool_result_is()
+    {
+        string p = Path.Combine(_dir, "agent-prompted.jsonl");
+        File.WriteAllText(p, "{\"type\":\"user\",\"message\":{\"content\":\"do the thing\"}}\n");
+        Assert.False(SubagentCounter.IsMidTurn(p));
+        File.WriteAllText(p, "{\"type\":\"user\",\"message\":{\"content\":[{\"type\":\"tool_result\",\"content\":\"ok\"}]}}\n");
+        Assert.True(SubagentCounter.IsMidTurn(p));
+    }
+
     string WriteAgent(string name, DateTime writtenUtc)
     {
         string path = Path.Combine(_dir, name);

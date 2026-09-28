@@ -161,7 +161,7 @@ internal sealed class SubagentCounter
                 {
                     var root = doc.RootElement;
                     string type = root.TryGetProperty("type", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString() ?? "" : "";
-                    if (type == "user") return true;
+                    if (type == "user") return CarriesToolResult(root);
                     if (type != "assistant") continue;
                     string stop = root.TryGetProperty("message", out var m) && m.ValueKind == JsonValueKind.Object
                                   && m.TryGetProperty("stop_reason", out var s) && s.ValueKind == JsonValueKind.String ? s.GetString() ?? "" : "";
@@ -170,6 +170,21 @@ internal sealed class SubagentCounter
             }
         }
         catch { }
+        return false;
+    }
+
+    /// <summary>
+    /// A user entry keeps the agent mid-turn only when it hands back a tool result. A user entry of
+    /// plain text is either the prompt that started a turn, which the timestamp rule covers, or the
+    /// "[Request interrupted by user]" note the CLI appends when the agent is stopped, after which
+    /// nothing more is ever written.
+    /// </summary>
+    static bool CarriesToolResult(JsonElement root)
+    {
+        if (!root.TryGetProperty("message", out var m) || m.ValueKind != JsonValueKind.Object) return false;
+        if (!m.TryGetProperty("content", out var c) || c.ValueKind != JsonValueKind.Array) return false;
+        foreach (var part in c.EnumerateArray())
+            if (part.TryGetProperty("type", out var t) && t.ValueKind == JsonValueKind.String && t.GetString() == "tool_result") return true;
         return false;
     }
 }
