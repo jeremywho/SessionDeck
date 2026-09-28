@@ -4,7 +4,7 @@
                  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
                  Title="Settings"
-                 Width="470" Height="600"
+                 Width="470" Height="660"
                  ResizeMode="NoResize"
                  WindowStartupLocation="CenterScreen"
                  ExtendsContentIntoTitleBar="True"
@@ -51,6 +51,18 @@
             <TextBlock Text="A deck session running an older version than is installed is resumed on the new one once it has been idle a while and is not the tab in front." FontSize="11.5" TextWrapping="Wrap" Foreground="{DynamicResource Fg3Brush}"/>
           </StackPanel>
           <ui:ToggleSwitch x:Name="AutoRestartToggle" Grid.Column="1" VerticalAlignment="Center"/>
+        </Grid>
+
+        <Grid Margin="0,10,0,0">
+          <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+          <StackPanel Grid.Column="0">
+            <TextBlock Text="Session list order" Foreground="{DynamicResource FgBrush}"/>
+            <TextBlock Text="Within each group. Rows never move for recent activity." FontSize="11.5" Foreground="{DynamicResource Fg3Brush}"/>
+          </StackPanel>
+          <ComboBox x:Name="RowOrderBox" Grid.Column="1" VerticalAlignment="Center" MinWidth="150">
+            <ComboBoxItem Content="State, then name" Tag="State"/>
+            <ComboBoxItem Content="Name only" Tag="Name"/>
+          </ComboBox>
         </Grid>
 
         <TextBlock Text="Terminal" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource FgBrush}" Margin="0,20,0,0"/>

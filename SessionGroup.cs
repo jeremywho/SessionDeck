@@ -47,6 +47,24 @@ internal sealed class SessionGroup
         }
         return moved;
     }
+
+    /// <summary>
+    /// Drop the group <paramref name="dragged"/> into the slot of <paramref name="target"/>: dragging
+    /// down lands it below that group, dragging up lands it above. A drop with no group under it goes
+    /// to the top when <paramref name="toTop"/> (the ungrouped rows), otherwise to the bottom.
+    /// Returns whether the order changed.
+    /// </summary>
+    internal static bool Reorder(List<SessionGroup> groups, string dragged, string? target, bool toTop)
+    {
+        int from = groups.FindIndex(g => g.Name == dragged);
+        if (from < 0 || dragged == target) return false;
+        int to = target == null ? (toTop ? 0 : groups.Count - 1) : groups.FindIndex(g => g.Name == target);
+        if (to < 0 || to == from) return false;
+        var g = groups[from];
+        groups.RemoveAt(from);
+        groups.Insert(to, g);
+        return true;
+    }
 }
 
 /// <summary>The deck's columns as last laid out: which hosts each held, which was showing, its share of the width.</summary>

@@ -45,6 +45,9 @@ internal sealed class Settings
     public string LastCodexModel { get; set; } = "";
     public string LastCodexEffort { get; set; } = "";
     public bool AutoRestartOnUpdate { get; set; } = true;
+    public string RowOrder { get; set; } = RowOrderState;                    // State: attention bands, alphabetical inside each | Name: alphabetical, exited last
+    public const string RowOrderState = "State";
+    public const string RowOrderName = "Name";
     public List<SessionGroup> SessionGroups { get; set; } = new();          // named, collapsible sets of sessions in the list; members are session ids
     public DeckLayout Deck { get; set; } = new();                            // the tab columns as last laid out, rebuilt on reattach
 

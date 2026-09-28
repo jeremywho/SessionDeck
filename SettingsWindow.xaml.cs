@@ -14,6 +14,9 @@ internal partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         TaskbarToggle.IsChecked = _app.Settings.ShowInTaskbar;
         RunOnLoginToggle.IsChecked = _app.Settings.RunOnLogin;
         AutoRestartToggle.IsChecked = _app.Settings.AutoRestartOnUpdate;
+        foreach (System.Windows.Controls.ComboBoxItem item in RowOrderBox.Items)
+            if (string.Equals(item.Tag as string, _app.Settings.RowOrder, StringComparison.OrdinalIgnoreCase)) RowOrderBox.SelectedItem = item;
+        if (RowOrderBox.SelectedItem == null) RowOrderBox.SelectedIndex = 0;
         ResumeFlagsBox.Text = _app.Settings.ResumeFlags;
         CodexFlagsBox.Text = _app.Settings.CodexFlags;
         FontBox.Text = _app.Settings.TerminalFont;
@@ -43,6 +46,8 @@ internal partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         _app.Settings.RunOnLogin = RunOnLoginToggle.IsChecked == true;
         _app.Settings.AutoRestartOnUpdate = AutoRestartToggle.IsChecked == true;
         _app.ApplyRunOnLogin();
+        _app.Settings.RowOrder = (RowOrderBox.SelectedItem as System.Windows.Controls.ComboBoxItem)?.Tag as string ?? Settings.RowOrderState;
+        _app.ApplyRowOrder();
 
         _app.Settings.ResumeFlags = ResumeFlagsBox.Text?.Trim() ?? "";
         _app.Settings.CodexFlags = CodexFlagsBox.Text?.Trim() ?? "";

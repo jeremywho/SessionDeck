@@ -8,13 +8,14 @@ public class SettingsRoundTripTests
     [Fact]
     public void Session_groups_survive_a_save_and_load()
     {
-        var s = new Settings();
+        var s = new Settings { RowOrder = Settings.RowOrderName };
         s.SessionGroups.Add(new SessionGroup { Name = "bz", Collapsed = true, Members = { "sid-1", "sid-2" } });
         var back = JsonSerializer.Deserialize<Settings>(JsonSerializer.Serialize(s))!;
         var g = Assert.Single(back.SessionGroups);
         Assert.Equal("bz", g.Name);
         Assert.True(g.Collapsed);
         Assert.Equal(new[] { "sid-1", "sid-2" }, g.Members);
+        Assert.Equal(Settings.RowOrderName, back.RowOrder);
     }
 
     /// <summary>

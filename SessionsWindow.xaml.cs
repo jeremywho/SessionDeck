@@ -426,26 +426,38 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         base.OnPreviewKeyDown(e);
     }
 
-    /// <summary>Attention-first live sort (Error → Awaiting → Working → Completed → Idle); within each
-    /// group, most-recently-changed first, then name.</summary>
+    /// <summary>Live grouping by session group, then the row order from settings. Nothing time-based
+    /// takes part, so a row moves only when its state band or its name changes.</summary>
     void SetupSort()
     {
         var view = (ListCollectionView)CollectionViewSource.GetDefaultView(Rows);
-        view.SortDescriptions.Add(new SortDescription(nameof(SessionRow.GroupOrder), ListSortDirection.Ascending));
-        view.LiveSortingProperties.Add(nameof(SessionRow.GroupOrder));
         view.GroupDescriptions.Add(new PropertyGroupDescription(nameof(SessionRow.GroupName)));
         view.IsLiveGrouping = true;
         view.LiveGroupingProperties.Add(nameof(SessionRow.GroupName));
-        view.SortDescriptions.Add(new SortDescription(nameof(SessionRow.SortPriority), ListSortDirection.Ascending));
-        view.SortDescriptions.Add(new SortDescription(nameof(SessionRow.LastChanged), ListSortDirection.Descending));
-        view.SortDescriptions.Add(new SortDescription(nameof(SessionRow.Name), ListSortDirection.Ascending));
         view.IsLiveSorting = true;
+        view.LiveSortingProperties.Add(nameof(SessionRow.GroupOrder));
         view.LiveSortingProperties.Add(nameof(SessionRow.SortPriority));
-        view.LiveSortingProperties.Add(nameof(SessionRow.LastChanged));
+        view.LiveSortingProperties.Add(nameof(SessionRow.HostExited));
         view.LiveSortingProperties.Add(nameof(SessionRow.Name));
+        ApplyRowOrder();
         if (ExperimentOptions.TelemetryActive)
             ((System.Collections.Specialized.INotifyCollectionChanged)view).CollectionChanged +=
                 (_, e) => IsolationTelemetry.CollectionChanged(e.Action);
+    }
+
+    /// <summary>Rebuild the sort from <see cref="Settings.RowOrder"/>: state bands then name, or name alone with ended sessions last.</summary>
+    public void ApplyRowOrder()
+    {
+        var view = (ListCollectionView)CollectionViewSource.GetDefaultView(Rows);
+        using (view.DeferRefresh())
+        {
+            view.SortDescriptions.Clear();
+            view.SortDescriptions.Add(new SortDescription(nameof(SessionRow.GroupOrder), ListSortDirection.Ascending));
+            view.SortDescriptions.Add(new SortDescription(
+                _app.Settings.RowOrder == Settings.RowOrderName ? nameof(SessionRow.HostExited) : nameof(SessionRow.SortPriority),
+                ListSortDirection.Ascending));
+            view.SortDescriptions.Add(new SortDescription(nameof(SessionRow.Name), ListSortDirection.Ascending));
+        }
     }
 
     // ---------------- columns ----------------
@@ -1239,47 +1251,77 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         Dispatcher.BeginInvoke(() => _groupMenu.IsOpen = true);
     }
 
+    /// <summary>A group header being dragged to another place in the list.</summary>
+    sealed record GroupDrag(string Name);
+
     Point _rowDragStart;
     SessionRow? _rowDragCandidate;
+    string? _groupDragCandidate;
 
     void Grid_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         _rowDragCandidate = RowAt(e.OriginalSource);
+        _groupDragCandidate = _rowDragCandidate == null ? HeaderGroupAt(e.OriginalSource) : null;
         _rowDragStart = e.GetPosition(this);
     }
 
     void Grid_PreviewMouseMove(object sender, MouseEventArgs e)
     {
-        if (_rowDragCandidate == null || e.LeftButton != MouseButtonState.Pressed) return;
+        if ((_rowDragCandidate == null && _groupDragCandidate == null) || e.LeftButton != MouseButtonState.Pressed) return;
         var d = e.GetPosition(this) - _rowDragStart;
         if (Math.Abs(d.X) < SystemParameters.MinimumHorizontalDragDistance && Math.Abs(d.Y) < SystemParameters.MinimumVerticalDragDistance) return;
         var row = _rowDragCandidate;
+        var group = _groupDragCandidate;
         _rowDragCandidate = null;
-        DragDrop.DoDragDrop(SessionsGrid, new DataObject(typeof(SessionRow), row), DragDropEffects.Move);
+        _groupDragCandidate = null;
+        if (row != null) DragDrop.DoDragDrop(SessionsGrid, new DataObject(typeof(SessionRow), row), DragDropEffects.Move);
+        else if (group != null) DragDrop.DoDragDrop(SessionsGrid, new DataObject(typeof(GroupDrag), new GroupDrag(group)), DragDropEffects.Move);
     }
 
     void Grid_DragOver(object sender, DragEventArgs e)
     {
-        e.Effects = e.Data.GetDataPresent(typeof(SessionRow)) ? DragDropEffects.Move : DragDropEffects.None;
+        e.Effects = e.Data.GetDataPresent(typeof(SessionRow)) || e.Data.GetDataPresent(typeof(GroupDrag)) ? DragDropEffects.Move : DragDropEffects.None;
         e.Handled = true;
     }
 
-    /// <summary>Drop on a row: join that row's group (or leave one). Drop on a group header: join that group.</summary>
+    /// <summary>
+    /// A row dropped on a row joins that row's group (or leaves one); dropped on a group header, it joins
+    /// that group. A group header dropped on a group or one of its rows takes that group's place; dropped
+    /// on the ungrouped rows it goes first, on empty space last.
+    /// </summary>
     void Grid_Drop(object sender, DragEventArgs e)
     {
+        if (e.Data.GetData(typeof(GroupDrag)) is GroupDrag drag)
+        {
+            e.Handled = true;
+            var onRow = RowAt(e.OriginalSource);
+            string? under = onRow != null ? (onRow.GroupName.Length > 0 ? onRow.GroupName : null) : HeaderGroupAt(e.OriginalSource);
+            if (SessionGroup.Reorder(GroupsSetting, drag.Name, under, toTop: onRow != null)) GroupsChanged();
+            return;
+        }
         if (e.Data.GetData(typeof(SessionRow)) is not SessionRow dragged) return;
         e.Handled = true;
         string? target = null;
-        if (RowAt(e.OriginalSource) is { } onRow) target = onRow.GroupName.Length > 0 ? onRow.GroupName : null;
-        else
-        {
-            var dep = e.OriginalSource as DependencyObject;
-            while (dep != null && !(dep is Border { Tag: string } )) dep = VisualTreeHelper.GetParent(dep);
-            if (dep is Border { Tag: string name } && name.Length > 0) target = name;
-            else if (dep == null) return;
-        }
+        if (RowAt(e.OriginalSource) is { } row) target = row.GroupName.Length > 0 ? row.GroupName : null;
+        else if (HeaderGroupAt(e.OriginalSource) is { } name) target = name;
+        else if (!IsInsideGrid(e.OriginalSource)) return;
         if ((target ?? "") == dragged.GroupName) return;
         MoveToGroup(dragged, target);
+    }
+
+    /// <summary>The group whose header contains the element, or null.</summary>
+    static string? HeaderGroupAt(object? originalSource)
+    {
+        var dep = originalSource as DependencyObject;
+        while (dep != null && dep is not Border { Tag: string }) dep = VisualTreeHelper.GetParent(dep);
+        return dep is Border { Tag: string name } && name.Length > 0 ? name : null;
+    }
+
+    static bool IsInsideGrid(object? originalSource)
+    {
+        var dep = originalSource as DependencyObject;
+        while (dep != null && dep is not DataGrid) dep = VisualTreeHelper.GetParent(dep);
+        return dep != null;
     }
 
     static SessionRow? RowAt(object? originalSource)

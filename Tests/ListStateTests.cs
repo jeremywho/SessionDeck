@@ -17,9 +17,9 @@ public class ListStateTests
 
     static SessionRow Row(HostRecord host, SessionInfo info) => new(host, info);
 
-    /// <summary>The grid's own sort: group, then state, then most recently changed, then name.</summary>
+    /// <summary>The grid's default sort: group, then state band, then name. Nothing time-based.</summary>
     static List<string> Order(IEnumerable<SessionRow> rows) => rows
-        .OrderBy(r => r.GroupOrder).ThenBy(r => r.SortPriority).ThenByDescending(r => r.LastChanged).ThenBy(r => r.Name)
+        .OrderBy(r => r.GroupOrder).ThenBy(r => r.SortPriority).ThenBy(r => r.Name)
         .Select(r => r.LiveSessionId).ToList();
 
     static List<SessionGroup> Groups(params (string Name, string[] Members)[] groups) =>
@@ -167,5 +167,53 @@ public class ListStateTests
         Assert.Equal(new[] { "bz", "side", "spacer", "tr" }, groups.Select(g => g.Name));
         Assert.Equal(new[] { false, false, true, false }, groups.Select(g => g.Collapsed));
         Assert.Equal(new[] { 4, 1, 3 }, rows.Select(r => r.GroupOrder));
+    }
+
+    [Fact]
+    public void Activity_never_moves_a_row_only_its_state_band_or_name_does()
+    {
+        var a = Row(Host("h1", "s1", At(9, 0)), Idle("s1", At(16, 40)));
+        var b = Row(Host("h2", "s2", At(9, 0)), Idle("s2", At(16, 30)));
+        var c = Row(Host("h3", "s3", At(9, 0)), Idle("s3", At(16, 20)));
+        Assert.Equal(new[] { "s1", "s2", "s3" }, Order(new[] { c, b, a }));
+
+        c.Update(Idle("s3", At(17, 0)), Host("h3", "s3", At(9, 0), "Stop"));
+        Assert.Equal(new[] { "s1", "s2", "s3" }, Order(new[] { c, b, a }));
+    }
+
+    [Fact]
+    public void Dragging_a_group_down_lands_it_below_the_target_and_up_lands_it_above()
+    {
+        var groups = Groups(("a", new[] { "s1" }), ("b", new[] { "s2" }), ("c", new[] { "s3" }), ("d", new[] { "s4" }));
+        Assert.True(SessionGroup.Reorder(groups, "a", "c", toTop: false));
+        Assert.Equal(new[] { "b", "c", "a", "d" }, groups.Select(g => g.Name));
+        Assert.True(SessionGroup.Reorder(groups, "d", "b", toTop: false));
+        Assert.Equal(new[] { "d", "b", "c", "a" }, groups.Select(g => g.Name));
+    }
+
+    [Fact]
+    public void A_group_dropped_on_the_ungrouped_rows_goes_first_and_on_empty_space_last()
+    {
+        var groups = Groups(("a", new[] { "s1" }), ("b", new[] { "s2" }), ("c", new[] { "s3" }));
+        Assert.True(SessionGroup.Reorder(groups, "c", null, toTop: true));
+        Assert.Equal(new[] { "c", "a", "b" }, groups.Select(g => g.Name));
+        Assert.True(SessionGroup.Reorder(groups, "c", null, toTop: false));
+        Assert.Equal(new[] { "a", "b", "c" }, groups.Select(g => g.Name));
+        Assert.False(SessionGroup.Reorder(groups, "c", "c", toTop: false));
+        Assert.False(SessionGroup.Reorder(groups, "zz", "a", toTop: false));
+        Assert.Equal(new[] { "a", "b", "c" }, groups.Select(g => g.Name));
+    }
+
+    [Fact]
+    public void A_reordered_group_stamps_its_rows_with_the_new_position()
+    {
+        var groups = Groups(("a", new[] { "s1" }), ("b", new[] { "s2" }));
+        var r1 = Row(Host("h1", "s1", At(9, 0)), Idle("s1", At(9, 1)));
+        var r2 = Row(Host("h2", "s2", At(9, 0)), Idle("s2", At(9, 1)));
+        SessionGroup.Apply(groups, new[] { r1, r2 });
+        Assert.Equal(new[] { "s1", "s2" }, Order(new[] { r2, r1 }));
+        SessionGroup.Reorder(groups, "b", "a", toTop: false);
+        SessionGroup.Apply(groups, new[] { r1, r2 });
+        Assert.Equal(new[] { "s2", "s1" }, Order(new[] { r2, r1 }));
     }
 }

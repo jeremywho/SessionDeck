@@ -198,6 +198,8 @@ internal sealed class App : Application
 
     public void ApplyTerminalLook() => _window?.RefreshTerminalLook();
 
+    public void ApplyRowOrder() => _window?.ApplyRowOrder();
+
     /// <summary>Apply the "show in taskbar" preference to the live window.</summary>
     public void ApplyShowInTaskbar()
     {
