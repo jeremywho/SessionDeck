@@ -37,9 +37,9 @@ public class DeckModelTests
         return m;
     }
 
-    /// <summary>Columns as "a b* c | d e* | f*", then the focused column and the widths.</summary>
+    /// <summary>Columns as "a b* c | d e* | f*" (a spacer is "_"), then the focused column and the widths.</summary>
     static string Describe(DeckModel<Tab> m) =>
-        string.Join(" | ", m.Groups.Select(g => string.Join(" ", g.Tabs.Select(t => t.Host.Id + (g.Active == t ? "*" : "")))))
+        string.Join(" | ", m.Groups.Select(g => g.IsSpacer ? "_" : string.Join(" ", g.Tabs.Select(t => t.Host.Id + (g.Active == t ? "*" : "")))))
         + $" @{m.Focused} " + string.Join("/", m.Groups.Select(g => g.Fraction.ToString("0.00")));
 
     const string Original = "a b* c | d e* | f* @1 0.50/0.30/0.20";
@@ -298,6 +298,119 @@ public class DeckModelTests
         var m = NewModel();
         m.Restore(old, new[] { H("a"), H("b"), H("c") }, h => new Tab(h));
         Assert.Equal("a* b | c* @1 0.60/0.40", Describe(m));
+    }
+
+    // ---------------- spacer columns ----------------
+
+    static DeckModel<Tab> WithSpacer(out List<HostRecord> hosts)
+    {
+        var m = Arranged(out hosts);
+        m.AddSpacer(1);
+        return m;
+    }
+
+    const string Spaced = "a b* c | _ | d e* | f* @2 0.25/0.25/0.30/0.20";
+
+    [Fact]
+    public void A_spacer_takes_half_the_column_to_its_left_and_focus_stays_on_the_same_column()
+    {
+        var m = WithSpacer(out _);
+        Assert.Equal(Spaced, Describe(m));
+        m.AddSpacer(0);
+        Assert.Equal("_ | a b* c | _ | d e* | f* @3 0.13/0.13/0.25/0.30/0.20", Describe(m));
+    }
+
+    [Fact]
+    public void A_spacer_survives_an_app_restart_a_reboot_resume_and_a_restart_on_update()
+    {
+        var m = WithSpacer(out var hosts);
+        var again = NewModel();
+        again.Restore(m.Snapshot(h => h.SessionId, _ => true), hosts, h => new Tab(h));
+        Assert.Equal(Spaced, Describe(again));
+
+        var rebooted = NewModel();
+        var resumed = AllIds.Select(id => H(id + "2", "s-" + id)).ToList();
+        rebooted.Restore(m.Snapshot(h => h.SessionId, _ => true), resumed, h => new Tab(h));
+        Assert.Equal(Renamed(Spaced, AllIds), Describe(rebooted));
+
+        foreach (var id in AllIds) Restart(m, id);
+        Assert.Equal(Renamed(Spaced, AllIds), Describe(m));
+    }
+
+    [Fact]
+    public void A_spacer_stays_when_no_session_came_back_and_when_its_neighbours_empty_out()
+    {
+        var m = WithSpacer(out _);
+        var bare = NewModel();
+        bare.Restore(m.Snapshot(h => h.SessionId, _ => true), Array.Empty<HostRecord>(), h => new Tab(h));
+        Assert.Equal("_ @0 0.25", Describe(bare));
+
+        foreach (var t in m.Groups[0].Tabs.ToList()) m.Close(t);
+        Assert.Equal("_ | d e* | f* @1 0.50/0.30/0.20", Describe(m));
+    }
+
+    [Fact]
+    public void Closing_a_column_left_of_the_focused_one_keeps_focus_on_the_same_column()
+    {
+        var m = Arranged(out _);
+        m.Focused = 2;
+        foreach (var t in m.Groups[0].Tabs.ToList()) m.Close(t);
+        Assert.Equal("d e* | f* @1 0.80/0.20", Describe(m));
+    }
+
+    [Fact]
+    public void A_tab_dropped_on_a_spacer_makes_it_a_session_column()
+    {
+        var m = WithSpacer(out _);
+        var c = m.Groups[0].Tabs[2];
+        Assert.True(m.MoveTo(c, m.Groups[1], 0));
+        Assert.Equal("a b* | c* | d e* | f* @1 0.25/0.25/0.30/0.20", Describe(m));
+        Assert.False(m.Groups[1].IsSpacer);
+        m.Close(c);
+        Assert.Equal("a b* | d e* | f* @1 0.50/0.30/0.20", Describe(m));
+    }
+
+    [Fact]
+    public void A_new_tab_never_lands_in_a_spacer()
+    {
+        var m = WithSpacer(out _);
+        m.Focused = 1;
+        m.Add(new Tab(H("g")), activate: true);
+        Assert.Equal("a b c g* | _ | d e* | f* @0 0.25/0.25/0.30/0.20", Describe(m));
+
+        var only = NewModel();
+        only.AddSpacer(0);
+        only.Add(new Tab(H("h")), activate: true);
+        Assert.Equal("_ | h* @1 1.00/1.00", Describe(only));
+    }
+
+    [Fact]
+    public void A_spacer_moves_left_and_right_with_focus_following_its_column_and_stops_at_the_edges()
+    {
+        var m = WithSpacer(out _);
+        Assert.True(m.MoveGroup(m.Groups[1], 1));
+        Assert.Equal("a b* c | d e* | _ | f* @1 0.25/0.30/0.25/0.20", Describe(m));
+        Assert.True(m.MoveGroup(m.Groups[2], 1));
+        Assert.Equal("a b* c | d e* | f* | _ @1 0.25/0.30/0.20/0.25", Describe(m));
+        Assert.False(m.MoveGroup(m.Groups[3], 1));
+        Assert.True(m.MoveGroup(m.Groups[3], -1));
+        Assert.True(m.MoveGroup(m.Groups[2], -1));
+        Assert.True(m.MoveGroup(m.Groups[1], -1));
+        Assert.Equal("_ | a b* c | d e* | f* @2 0.25/0.25/0.30/0.20", Describe(m));
+        Assert.False(m.MoveGroup(m.Groups[0], -1));
+    }
+
+    [Fact]
+    public void Removing_a_spacer_gives_its_width_back_to_the_column_on_its_left()
+    {
+        var m = WithSpacer(out _);
+        Assert.True(m.RemoveSpacer(m.Groups[1]));
+        Assert.Equal(Original, Describe(m));
+        m.AddSpacer(0);
+        Assert.True(m.RemoveSpacer(m.Groups[0]));
+        Assert.Equal(Original, Describe(m));
+        Assert.False(m.RemoveSpacer(m.Groups[0]));
+        Assert.Equal(Original, Describe(m));
     }
 
     static IEnumerable<string[]> Permutations(string[] items)

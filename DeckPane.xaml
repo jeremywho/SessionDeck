@@ -76,6 +76,8 @@
                 <MenuItem Header="New Claude session" Click="NewClaudeMenu_Click" Tag="{Binding}"/>
                 <MenuItem Header="New Codex session" Click="NewCodexMenu_Click" Tag="{Binding}"/>
                 <MenuItem Header="New terminal" Click="NewShellMenu_Click" Tag="{Binding}"/>
+                <Separator/>
+                <MenuItem Header="Add spacer column to the right" Click="AddSpacerMenu_Click" Tag="{Binding}"/>
               </ContextMenu>
             </ui:Button.ContextMenu>
           </ui:Button>
@@ -99,6 +101,7 @@
                       <MenuItem Header="Restart session (resume on the installed CLI)" Click="RestartMenu_Click" Tag="{Binding}"/>
                       <Separator/>
                       <MenuItem Header="Split right" Click="SplitMenu_Click" Tag="{Binding}"/>
+                      <MenuItem Header="Add spacer column to the right" Click="AddSpacerMenu_Click" Tag="{Binding}"/>
                       <Separator/>
                       <MenuItem Header="Copy session id" Click="CopyIdMenu_Click" Tag="{Binding}"/>
                       <MenuItem Header="Copy folder" Click="CopyCwdMenu_Click" Tag="{Binding}"/>
@@ -133,6 +136,23 @@
           </ItemsControl>
         </ScrollViewer>
         </DockPanel>
+      </Border>
+    </DataTemplate>
+
+    <!-- A spacer column's strip: nothing to show, a place to drop a tab, a menu to move or remove it. -->
+    <DataTemplate x:Key="SpacerStripTemplate">
+      <Border Background="Transparent" Padding="6,5,6,6" AllowDrop="True" DragOver="Strip_DragOver" Drop="Strip_Drop"
+              ToolTip="Spacer column — drop a tab here to use it; right-click to move or remove it">
+        <Border.ContextMenu>
+          <ContextMenu>
+            <MenuItem Header="Move left" Click="SpacerMoveLeft_Click" Tag="{Binding}"/>
+            <MenuItem Header="Move right" Click="SpacerMoveRight_Click" Tag="{Binding}"/>
+            <Separator/>
+            <MenuItem Header="Remove spacer" Click="SpacerRemove_Click" Tag="{Binding}"/>
+          </ContextMenu>
+        </Border.ContextMenu>
+        <TextBlock Text="spacer" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center" Opacity="0.45"
+                   Foreground="{DynamicResource Fg3Brush}" AutomationProperties.AutomationId="SpacerStrip"/>
       </Border>
     </DataTemplate>
   </UserControl.Resources>

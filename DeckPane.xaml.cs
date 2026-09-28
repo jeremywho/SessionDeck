@@ -192,6 +192,7 @@ internal partial class DeckPane : UserControl
         StripGrid.Children.Clear();
         StripGrid.ColumnDefinitions.Clear();
         var template = (DataTemplate)FindResource("GroupStripTemplate");
+        var spacerTemplate = (DataTemplate)FindResource("SpacerStripTemplate");
         for (int i = 0; i < Groups.Count; i++)
         {
             if (i > 0)
@@ -202,7 +203,7 @@ internal partial class DeckPane : UserControl
                 StripGrid.Children.Add(line);
             }
             StripGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Math.Max(0.05, Groups[i].Fraction), GridUnitType.Star) });
-            var strip = new ContentPresenter { Content = Groups[i], ContentTemplate = template };
+            var strip = new ContentPresenter { Content = Groups[i], ContentTemplate = Groups[i].IsSpacer ? spacerTemplate : template };
             Grid.SetColumn(strip, StripGrid.ColumnDefinitions.Count - 1);
             StripGrid.Children.Add(strip);
         }
@@ -451,6 +452,23 @@ internal partial class DeckPane : UserControl
     void StopMenu_Click(object sender, RoutedEventArgs e) { if (TabOf(sender) is { } tab) { Stop(tab); Close(tab); } }
     void RestartMenu_Click(object sender, RoutedEventArgs e) { if (TabOf(sender) is { } tab) RestartRequested?.Invoke(tab); }
     void SplitMenu_Click(object sender, RoutedEventArgs e) { if (TabOf(sender) is { } tab) SplitRight(tab); }
+
+    // ---------------- spacer columns ----------------
+
+    static DeckGroup<DeckTab>? GroupTag(object sender) => sender is FrameworkElement { Tag: DeckGroup<DeckTab> g } ? g : null;
+
+    /// <summary>From a column's "+" menu (Tag = the column) or a tab's menu (Tag = the tab): a spacer to the right of that column.</summary>
+    void AddSpacerMenu_Click(object sender, RoutedEventArgs e)
+    {
+        var beside = GroupTag(sender) ?? (TabOf(sender) is { } tab ? GroupOf(tab) : null);
+        int at = beside != null && Groups.Contains(beside) ? Groups.IndexOf(beside) + 1 : Groups.Count;
+        _model.AddSpacer(at);
+        Changed();
+    }
+
+    void SpacerMoveLeft_Click(object sender, RoutedEventArgs e) { if (GroupTag(sender) is { } g && _model.MoveGroup(g, -1)) Changed(); }
+    void SpacerMoveRight_Click(object sender, RoutedEventArgs e) { if (GroupTag(sender) is { } g && _model.MoveGroup(g, 1)) Changed(); }
+    void SpacerRemove_Click(object sender, RoutedEventArgs e) { if (GroupTag(sender) is { } g && _model.RemoveSpacer(g)) { Changed(); FocusedGroup?.Active?.View.FocusTerminal(); } }
     void CopyIdMenu_Click(object sender, RoutedEventArgs e) { if (TabOf(sender) is { } tab) TrySetClipboard(tab.View.Host.SessionId); }
     void CopyCwdMenu_Click(object sender, RoutedEventArgs e) { if (TabOf(sender) is { } tab) TrySetClipboard(tab.View.Host.Cwd); }
 

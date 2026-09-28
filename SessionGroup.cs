@@ -94,6 +94,9 @@ internal sealed class DeckColumn
     public string Active { get; set; } = "";
     public double Fraction { get; set; } = 1;
 
+    /// <summary>An empty column kept on purpose; see <see cref="DeckGroup{TTab}.IsSpacer"/>.</summary>
+    public bool Spacer { get; set; }
+
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? Unknown { get; set; }
 }
