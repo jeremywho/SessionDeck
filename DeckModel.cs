@@ -80,10 +80,23 @@ internal sealed class DeckModel<TTab> where TTab : class
     public bool MoveGroup(DeckGroup<TTab> group, int delta)
     {
         int i = Groups.IndexOf(group), j = i + delta;
-        if (i < 0 || j < 0 || j >= Groups.Count || i == j) return false;
+        if (i < 0 || delta == 0 || j < 0 || j >= Groups.Count) return false;
+        return MoveGroupTo(group, delta > 0 ? j + 1 : j);
+    }
+
+    /// <summary>
+    /// Move the column so it sits just before the column now at <paramref name="at"/> (<c>Groups.Count</c>
+    /// puts it last). Dropping it beside itself changes nothing. Focus stays on the same column.
+    /// </summary>
+    public bool MoveGroupTo(DeckGroup<TTab> group, int at)
+    {
+        int i = Groups.IndexOf(group);
+        if (i < 0) return false;
+        at = Math.Clamp(at, 0, Groups.Count);
+        if (at == i || at == i + 1) return false;
         var focused = FocusedGroup;
         Groups.RemoveAt(i);
-        Groups.Insert(j, group);
+        Groups.Insert(at > i ? at - 1 : at, group);
         if (focused != null) Focused = Groups.IndexOf(focused);
         return true;
     }

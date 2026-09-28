@@ -129,6 +129,14 @@ internal partial class DeckPane : UserControl
             LayoutChanged?.Invoke();
             return;
         }
+        if (type == "dropSpacer")
+        {
+            int from = root.GetProperty("index").GetInt32();
+            int gi = Math.Clamp(root.GetProperty("group").GetInt32(), 0, Math.Max(0, Groups.Count - 1));
+            if (from >= 0 && from < Groups.Count && Groups[from].IsSpacer
+                && _model.MoveGroupTo(Groups[from], root.GetProperty("side").GetString() == "left" ? gi : gi + 1)) Changed();
+            return;
+        }
         var tab = FindByHost(hostId);
         if (tab == null) return;
         if (type == "dropTab")
@@ -406,12 +414,17 @@ internal partial class DeckPane : UserControl
         if (e.ChangedButton == MouseButton.Middle && TabOf(sender) is { } tab) Close(tab);
     }
 
-    /// <summary>Drop on a tab: land before or after it, in that tab's column.</summary>
+    /// <summary>Drop on a tab: land before or after it, in that tab's column. A spacer lands beside the column.</summary>
     void Tab_Drop(object sender, DragEventArgs e)
     {
-        if (e.Data.GetData(typeof(DeckTab)) is not DeckTab dragged || TabOf(sender) is not { } target) return;
-        var group = GroupOf(target);
-        if (group == null) return;
+        if (TabOf(sender) is not { } target || GroupOf(target) is not { } group) return;
+        if (e.Data.GetData(typeof(DeckGroup<DeckTab>)) is DeckGroup<DeckTab> spacer)
+        {
+            DropSpacerOn(spacer, group, RightHalf(sender, e));
+            e.Handled = true;
+            return;
+        }
+        if (e.Data.GetData(typeof(DeckTab)) is not DeckTab dragged) return;
         int to = group.Tabs.IndexOf(target);
         bool after = sender is FrameworkElement fe && e.GetPosition(fe).X > fe.ActualWidth / 2;
         if (GroupOf(dragged) == group)
@@ -427,15 +440,18 @@ internal partial class DeckPane : UserControl
 
     void Strip_DragOver(object sender, DragEventArgs e)
     {
-        e.Effects = e.Data.GetDataPresent(typeof(DeckTab)) ? DragDropEffects.Move : DragDropEffects.None;
+        e.Effects = e.Data.GetDataPresent(typeof(DeckTab)) || e.Data.GetDataPresent(typeof(DeckGroup<DeckTab>)) ? DragDropEffects.Move : DragDropEffects.None;
         e.Handled = true;
     }
 
-    /// <summary>Drop on a strip's empty space: append to that column.</summary>
+    /// <summary>Drop on a strip's empty space: a tab joins that column at the end, a spacer lands beside the column.</summary>
     void Strip_Drop(object sender, DragEventArgs e)
     {
-        if (e.Data.GetData(typeof(DeckTab)) is DeckTab dragged && GroupOfStrip(sender) is { } group)
-            MoveTo(dragged, group, group.Tabs.Count);
+        if (GroupOfStrip(sender) is { } group)
+        {
+            if (e.Data.GetData(typeof(DeckGroup<DeckTab>)) is DeckGroup<DeckTab> spacer) DropSpacerOn(spacer, group, RightHalf(sender, e));
+            else if (e.Data.GetData(typeof(DeckTab)) is DeckTab dragged) MoveTo(dragged, group, group.Tabs.Count);
+        }
         e.Handled = true;
     }
 
@@ -457,18 +473,54 @@ internal partial class DeckPane : UserControl
 
     static DeckGroup<DeckTab>? GroupTag(object sender) => sender is FrameworkElement { Tag: DeckGroup<DeckTab> g } ? g : null;
 
-    /// <summary>From a column's "+" menu (Tag = the column) or a tab's menu (Tag = the tab): a spacer to the right of that column.</summary>
-    void AddSpacerMenu_Click(object sender, RoutedEventArgs e)
+    /// <summary>From a column's "+" menu (Tag = the column) or a tab's menu (Tag = the tab): a spacer beside that column.</summary>
+    void AddSpacerBeside(object sender, int offset)
     {
         var beside = GroupTag(sender) ?? (TabOf(sender) is { } tab ? GroupOf(tab) : null);
-        int at = beside != null && Groups.Contains(beside) ? Groups.IndexOf(beside) + 1 : Groups.Count;
+        int at = beside != null && Groups.Contains(beside) ? Groups.IndexOf(beside) + offset : Groups.Count;
         _model.AddSpacer(at);
         Changed();
     }
 
+    void AddSpacerMenu_Click(object sender, RoutedEventArgs e) => AddSpacerBeside(sender, 1);
+    void AddSpacerLeftMenu_Click(object sender, RoutedEventArgs e) => AddSpacerBeside(sender, 0);
+
     void SpacerMoveLeft_Click(object sender, RoutedEventArgs e) { if (GroupTag(sender) is { } g && _model.MoveGroup(g, -1)) Changed(); }
     void SpacerMoveRight_Click(object sender, RoutedEventArgs e) { if (GroupTag(sender) is { } g && _model.MoveGroup(g, 1)) Changed(); }
     void SpacerRemove_Click(object sender, RoutedEventArgs e) { if (GroupTag(sender) is { } g && _model.RemoveSpacer(g)) { Changed(); FocusedGroup?.Active?.View.FocusTerminal(); } }
+
+    const string SpacerDragPrefix = "sessiondeck-spacer:";
+    Point _spacerDragStart;
+    DeckGroup<DeckTab>? _spacerDragCandidate;
+
+    void Spacer_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        _spacerDragCandidate = GroupTag(sender);
+        _spacerDragStart = e.GetPosition(this);
+    }
+
+    /// <summary>Drag the spacer's strip: the page and the other strips both accept it, by index.</summary>
+    void Spacer_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (_spacerDragCandidate == null || e.LeftButton != MouseButtonState.Pressed) return;
+        var d = e.GetPosition(this) - _spacerDragStart;
+        if (Math.Abs(d.X) < SystemParameters.MinimumHorizontalDragDistance && Math.Abs(d.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+        var g = _spacerDragCandidate;
+        _spacerDragCandidate = null;
+        if (!Groups.Contains(g)) return;
+        var data = new DataObject(typeof(DeckGroup<DeckTab>), g);
+        data.SetText(SpacerDragPrefix + Groups.IndexOf(g));
+        DragDrop.DoDragDrop((DependencyObject)sender, data, DragDropEffects.Move);
+    }
+
+    /// <summary>A spacer dropped on a column lands on whichever side of it the pointer is.</summary>
+    void DropSpacerOn(DeckGroup<DeckTab> spacer, DeckGroup<DeckTab> target, bool after)
+    {
+        if (!Groups.Contains(spacer) || !Groups.Contains(target)) return;
+        if (_model.MoveGroupTo(spacer, Groups.IndexOf(target) + (after ? 1 : 0))) Changed();
+    }
+
+    static bool RightHalf(object sender, DragEventArgs e) => sender is FrameworkElement fe && e.GetPosition(fe).X > fe.ActualWidth / 2;
     void CopyIdMenu_Click(object sender, RoutedEventArgs e) { if (TabOf(sender) is { } tab) TrySetClipboard(tab.View.Host.SessionId); }
     void CopyCwdMenu_Click(object sender, RoutedEventArgs e) { if (TabOf(sender) is { } tab) TrySetClipboard(tab.View.Host.Cwd); }
 

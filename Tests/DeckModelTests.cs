@@ -401,6 +401,32 @@ public class DeckModelTests
     }
 
     [Fact]
+    public void A_spacer_dropped_beside_a_column_lands_on_that_side_and_beside_itself_changes_nothing()
+    {
+        var m = WithSpacer(out _);
+        var spacer = m.Groups[1];
+        Assert.False(m.MoveGroupTo(spacer, 1));
+        Assert.False(m.MoveGroupTo(spacer, 2));
+        Assert.Equal(Spaced, Describe(m));
+        Assert.True(m.MoveGroupTo(spacer, 3));
+        Assert.Equal("a b* c | d e* | _ | f* @1 0.25/0.30/0.25/0.20", Describe(m));
+        Assert.True(m.MoveGroupTo(spacer, 4));
+        Assert.Equal("a b* c | d e* | f* | _ @1 0.25/0.30/0.20/0.25", Describe(m));
+        Assert.True(m.MoveGroupTo(spacer, 0));
+        Assert.Equal("_ | a b* c | d e* | f* @2 0.25/0.25/0.30/0.20", Describe(m));
+        Assert.True(m.MoveGroupTo(spacer, 2));
+        Assert.Equal(Spaced, Describe(m));
+    }
+
+    [Fact]
+    public void A_spacer_can_be_added_at_the_far_left()
+    {
+        var m = Arranged(out _);
+        m.AddSpacer(0);
+        Assert.Equal("_ | a b* c | d e* | f* @2 0.25/0.25/0.30/0.20", Describe(m));
+    }
+
+    [Fact]
     public void Removing_a_spacer_gives_its_width_back_to_the_column_on_its_left()
     {
         var m = WithSpacer(out _);

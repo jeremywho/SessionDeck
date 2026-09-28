@@ -290,6 +290,25 @@
     document.title = f ? `terminal port=${f.port}` : 'terminal';
   }
 
+  // While a divider is dragged only its two neighbours are laid out again. Every other pane keeps
+  // its geometry untouched and its terminal is not refit, so it does not redraw with each move.
+  function layoutPair(i) {
+    const n = groups.length;
+    const total = groups.reduce((a, g) => a + g.frac, 0) || 1;
+    let x = groups.slice(0, i).reduce((a, g) => a + g.frac, 0) / total * 100;
+    for (let k = i; k <= i + 1 && k < n; k++) {
+      const w = groups[k].frac / total * 100;
+      const p = groups[k].id ? panes.get(groups[k].id) : null;
+      if (p) {
+        p.el.style.left = k === 0 ? '0' : `calc(${x}% + 1px)`;
+        p.el.style.width = `calc(${w}% - ${(k === 0 ? 0 : 1) + (k === n - 1 ? 0 : 1)}px)`;
+        p.fit.fit();
+      }
+      x += w;
+      if (k === i && i < n - 1) dividers[i].style.left = `${x}%`;
+    }
+  }
+
   function focusGroup(i) {
     if (i < 0 || i >= groups.length) return;
     focused = i;
@@ -313,7 +332,7 @@
         const a = Math.max(0.15 * pair, Math.min(0.85 * pair, pos - leftStart));
         groups[i].frac = a * total;
         groups[i + 1].frac = (pair - a) * total;
-        if (!pending) { pending = true; requestAnimationFrame(() => { pending = false; layout(); }); }
+        if (!pending) { pending = true; requestAnimationFrame(() => { pending = false; layoutPair(i); }); }
       };
       const up = () => {
         document.body.classList.remove('dragging');
@@ -359,6 +378,7 @@
   // column on that side, like VS Code; in the middle it moves the tab into that column.
   const dropzone = document.getElementById('dropzone');
   const TAB_PREFIX = 'sessiondeck-tab:';
+  const SPACER_PREFIX = 'sessiondeck-spacer:';
 
   function dropTarget(clientX) {
     const width = document.body.clientWidth || 1;
@@ -399,9 +419,9 @@
     if (!isTabDrag(ev)) return;
     ev.preventDefault();
     const text = ev.dataTransfer.getData('text/plain') || '';
-    if (!text.startsWith(TAB_PREFIX)) return;
     const t = dropTarget(ev.clientX);
-    post({ type: 'dropTab', id: text.slice(TAB_PREFIX.length), group: t.group, side: t.side });
+    if (text.startsWith(TAB_PREFIX)) post({ type: 'dropTab', id: text.slice(TAB_PREFIX.length), group: t.group, side: t.side });
+    else if (text.startsWith(SPACER_PREFIX)) post({ type: 'dropSpacer', index: Number(text.slice(SPACER_PREFIX.length)), group: t.group, side: t.side });
   });
 
   // After a resize settles, tell the app what the terminal thinks its geometry is, so a mismatch
