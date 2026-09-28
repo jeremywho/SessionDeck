@@ -128,6 +128,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             {
                 case "codex": NewCodexSessionButton_Click(this, new RoutedEventArgs()); break;
                 case "shell": SpawnShellIntoDeck(); break;
+                case var p when p.StartsWith("profile:", StringComparison.Ordinal): NewProfileSession(p["profile:".Length..]); break;
                 default: NewSessionButton_Click(this, new RoutedEventArgs()); break;
             }
         };
@@ -560,6 +561,15 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         SpawnIntoDeck(sessionId, SessionProvider.Claude, HostManager.NewClaudeCommand(sessionId, null, _app.Settings.ResumeFlags), HomeDir, null);
     }
 
+    /// <summary>A new Claude session pinned to another Claude.ai login, with the same flags and hooks as any other.</summary>
+    void NewProfileSession(string profile)
+    {
+        string launcher = ClaudeProfiles.CommandFor(profile);
+        if (launcher.Length == 0) { LiveLabel.Text = $"No launcher for account \"{profile}\" under {ClaudeProfiles.DefaultRoot}"; return; }
+        string sessionId = Guid.NewGuid().ToString();
+        SpawnIntoDeck(sessionId, SessionProvider.Claude, HostManager.NewClaudeCommand(sessionId, null, _app.Settings.ResumeFlags, launcher: launcher), HomeDir, null, profile: profile);
+    }
+
     // Codex has no --name, so there are no named counterparts to these two — see NewCodexCommand.
     void NewCodexSessionButton_Click(object sender, RoutedEventArgs e) =>
         SpawnIntoDeck("", SessionProvider.Codex, HostManager.NewCodexCommand(_app.Settings.CodexFlags), HomeDir, null);
@@ -629,12 +639,13 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     Host.HostRecord? SpawnResumed(SavedSession s)
     {
         string cwd = string.IsNullOrWhiteSpace(s.Cwd) ? HomeDir : s.Cwd;
+        string launcher = ClaudeProfiles.CommandFor(s.Profile);
         string cmd = s.Provider == SessionProvider.Codex
             ? HostManager.ResumeCodexCommand(s.Id, _app.Settings.CodexFlags)
             : SessionScanner.HasTranscript(s.Id, cwd)
-                ? HostManager.ResumeClaudeCommand(s.Id, _app.Settings.ResumeFlags)
-                : HostManager.NewClaudeCommand(s.Id, s.Name, _app.Settings.ResumeFlags);
-        try { return HostManager.Spawn(s.Id, s.Provider, cmd, cwd, s.Name); }
+                ? HostManager.ResumeClaudeCommand(s.Id, _app.Settings.ResumeFlags, launcher)
+                : HostManager.NewClaudeCommand(s.Id, s.Name, _app.Settings.ResumeFlags, launcher: launcher);
+        try { return HostManager.Spawn(s.Id, s.Provider, cmd, cwd, s.Name, profile: s.Profile); }
         catch (Exception ex)
         {
             App.LogError(ex);
@@ -661,11 +672,11 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         }
     }
 
-    void SpawnIntoDeck(string sessionId, SessionProvider provider, string cmd, string cwd, string? title, string initialPrompt = "")
+    void SpawnIntoDeck(string sessionId, SessionProvider provider, string cmd, string cwd, string? title, string initialPrompt = "", string profile = "")
     {
         try
         {
-            var host = HostManager.Spawn(sessionId, provider, cmd, cwd, title, initialPrompt);
+            var host = HostManager.Spawn(sessionId, provider, cmd, cwd, title, initialPrompt, profile);
             Deck.Open(host);
         }
         catch (Exception ex)
@@ -929,7 +940,8 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             .ToDictionary(x => x.Info, x => _rowsById[x.Host.Id]);
         SessionRegistry.Snapshot(
             byHost.Where(x => !x.Host.HasExited && x.Host.AgentStatus != "ended" && x.Info.SessionId.Length > 0 && IsRestorable(x.Info)).Select(x => x.Info).ToList(),
-            s => rowOf.TryGetValue(s, out var r) && r.State is SessionState.Completed or SessionState.Idle ? r.LastChanged : null);
+            s => rowOf.TryGetValue(s, out var r) && r.State is SessionState.Completed or SessionState.Idle ? r.LastChanged : null,
+            s => rowOf.TryGetValue(s, out var r) ? r.Host.Profile : "");
         SaveLayoutIfSessionsMoved();
 
         int hostsLive = hosts.Count(h => !h.HasExited);
@@ -1445,11 +1457,12 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             var provider = row.Provider;
             string sessionId = row.LiveSessionId;
             bool hasTranscript = SessionScanner.HasConversation(row.TranscriptPath);
+            string launcher = ClaudeProfiles.CommandFor(host.Profile);
             string cmd = provider == SessionProvider.Codex
                 ? HostManager.ResumeCodexCommand(sessionId, _app.Settings.CodexFlags)
                 : hasTranscript
-                    ? HostManager.ResumeClaudeCommand(sessionId, _app.Settings.ResumeFlags)
-                    : HostManager.NewClaudeCommand(sessionId, null, _app.Settings.ResumeFlags);
+                    ? HostManager.ResumeClaudeCommand(sessionId, _app.Settings.ResumeFlags, launcher)
+                    : HostManager.NewClaudeCommand(sessionId, null, _app.Settings.ResumeFlags, launcher: launcher);
 
             if (!host.HasExited)
             {
@@ -1463,7 +1476,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
                 }
             }
 
-            var next = HostManager.Spawn(sessionId, provider, cmd, host.Cwd, host.Title);
+            var next = HostManager.Spawn(sessionId, provider, cmd, host.Cwd, host.Title, profile: host.Profile);
             _successors[next.Id] = inherit;
             Deck.ReplaceHost(host.Id, next);
             HostManager.Forget(host);

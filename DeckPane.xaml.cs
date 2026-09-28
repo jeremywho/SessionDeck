@@ -37,7 +37,7 @@ internal partial class DeckPane : UserControl
         public Brush GlyphBrush =>
             Application.Current.TryFindResource(View.Host.Provider == "Codex" ? "CodexMarkBrush" : "ClaudeMarkBrush") as Brush ?? Brushes.Gray;
         public Visibility ExitedVisibility => View.Exited ? Visibility.Visible : Visibility.Collapsed;
-        public string Tooltip => $"{StripMark(View.Title)}\n{View.Host.Cwd}\n{View.Host.Provider} · session {View.Host.SessionId}\nhost pid {View.Host.HostPid} · child pid {View.Host.ChildPid}";
+        public string Tooltip => $"{StripMark(View.Title)}\n{View.Host.Cwd}\n{View.Host.Provider}{(View.Host.Profile.Length > 0 ? " as " + View.Host.Profile : "")} · session {View.Host.SessionId}\nhost pid {View.Host.HostPid} · child pid {View.Host.ChildPid}";
 
         bool _active;
         /// <summary>The tab its group is showing.</summary>
@@ -90,6 +90,20 @@ internal partial class DeckPane : UserControl
     {
         if (sender is FrameworkElement { ContextMenu: { } menu }) { menu.PlacementTarget = (UIElement)sender; Dispatcher.BeginInvoke(() => menu.IsOpen = true); }
         e.Handled = true;
+    }
+
+    /// <summary>One "New Claude session as …" item per pinned account found on disk, refreshed each time the menu opens.</summary>
+    void NewInGroup_MenuOpening(object sender, ContextMenuEventArgs e)
+    {
+        if (sender is not FrameworkElement { ContextMenu: { } menu, Tag: var group }) return;
+        foreach (var stale in menu.Items.OfType<MenuItem>().Where(m => m.Tag is ClaudeProfile).ToList()) menu.Items.Remove(stale);
+        int at = 1;
+        foreach (var p in ClaudeProfiles.Discover())
+        {
+            var item = new MenuItem { Header = $"New Claude session as {p.Name}", Tag = p, ToolTip = p.ScriptPath };
+            item.Click += (_, _) => { if (group is DeckGroup<DeckTab> g && Groups.Contains(g)) { _model.Focused = Groups.IndexOf(g); Mark(); } NewSessionRequested?.Invoke("profile:" + p.Name); };
+            menu.Items.Insert(at++, item);
+        }
     }
     void NewClaudeMenu_Click(object sender, RoutedEventArgs e) => RequestNew(sender, "claude");
     void NewCodexMenu_Click(object sender, RoutedEventArgs e) => RequestNew(sender, "codex");

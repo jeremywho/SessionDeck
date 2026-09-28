@@ -31,6 +31,9 @@ internal sealed class HostSpec
 
     /// <summary>The tab's name until the CLI sets a title of its own: the name the session had before a restart or resume.</summary>
     public string Title { get; set; } = "";
+
+    /// <summary>The Claude account profile the session runs as (see <see cref="ClaudeProfiles"/>); empty for the default login.</summary>
+    public string Profile { get; set; } = "";
 }
 
 /// <summary>
@@ -62,6 +65,9 @@ internal sealed class HostRecord
 
     /// <summary>The stamped copy this host (and its hook forwarders) run from; the app must not prune it while the host lives.</summary>
     public string HostBin { get; set; } = "";
+
+    /// <summary>The Claude account profile the session runs as; a restart or resume must launch it the same way.</summary>
+    public string Profile { get; set; } = "";
 
     /// <summary>The current turn armed something that will wake the session by itself.</summary>
     public bool Pending { get; set; }
@@ -174,6 +180,7 @@ internal static class HostProgram
             HostPid = self.Id,
             HostStartTicks = self.StartTime.ToUniversalTime().Ticks,
             HostBin = Path.GetDirectoryName(Environment.ProcessPath ?? "") ?? "",
+            Profile = spec.Profile,
             Protocol = 3,
             ChildPid = _pty.Pid,
             Port = port,

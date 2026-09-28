@@ -16,9 +16,9 @@ internal static class HostManager
 
     /// <summary>The claude launch for a brand-new session with a preassigned id, so the transcript
     /// is known before the first byte is written.</summary>
-    public static string NewClaudeCommand(string sessionId, string? name, string extraFlags, string model = "", string effort = "")
+    public static string NewClaudeCommand(string sessionId, string? name, string extraFlags, string model = "", string effort = "", string launcher = "")
     {
-        string cmd = $"claude --session-id {sessionId}";
+        string cmd = $"{ClaudeExe(launcher)} --session-id {sessionId}";
         if (!string.IsNullOrWhiteSpace(name)) cmd += $" --name \"{name.Replace("\"", "\\\"")}\"";
         if (!string.IsNullOrWhiteSpace(model)) cmd += $" --model \"{model.Trim()}\"";
         if (!string.IsNullOrWhiteSpace(effort)) cmd += $" --effort {effort.Trim()}";
@@ -26,12 +26,15 @@ internal static class HostManager
         return cmd + ClaudeHookArgs;
     }
 
-    public static string ResumeClaudeCommand(string sessionId, string extraFlags)
+    public static string ResumeClaudeCommand(string sessionId, string extraFlags, string launcher = "")
     {
-        string cmd = $"claude --resume {sessionId}";
+        string cmd = $"{ClaudeExe(launcher)} --resume {sessionId}";
         if (!string.IsNullOrWhiteSpace(extraFlags)) cmd += " " + extraFlags.Trim();
         return cmd + ClaudeHookArgs;
     }
+
+    /// <summary>Plain <c>claude</c>, or a profile's launcher standing in for it (see <see cref="ClaudeProfiles"/>).</summary>
+    static string ClaudeExe(string launcher) => string.IsNullOrWhiteSpace(launcher) ? "claude" : launcher.Trim();
 
     public static string NewCodexCommand(string extraFlags, string model = "", string effort = "")
     {
@@ -62,13 +65,13 @@ internal static class HostManager
             ? $"\"{SessionLauncher.ResolvePowerShell()}\" -NoLogo"
             : $"\"{SessionLauncher.ResolvePowerShell()}\" -NoLogo -NoExit -Command \"{cmd.Replace("\"", "\\\"")}\"";
 
-    public static HostRecord Spawn(string sessionId, SessionProvider provider, string command, string cwd, string? title, string initialPrompt = "") =>
-        Spawn(sessionId, provider.ToString(), command, cwd, title, initialPrompt);
+    public static HostRecord Spawn(string sessionId, SessionProvider provider, string command, string cwd, string? title, string initialPrompt = "", string profile = "") =>
+        Spawn(sessionId, provider.ToString(), command, cwd, title, initialPrompt, profile);
 
     /// <summary>A pane with just a shell in it: nothing launched, no hooks, no session id.</summary>
     public static HostRecord SpawnShell(string cwd) => Spawn("", "Shell", "", cwd, "Terminal");
 
-    public static HostRecord Spawn(string sessionId, string provider, string command, string cwd, string? title, string initialPrompt = "")
+    public static HostRecord Spawn(string sessionId, string provider, string command, string cwd, string? title, string initialPrompt = "", string profile = "")
     {
         Directory.CreateDirectory(HostsDir);
         string id = Guid.NewGuid().ToString("N")[..12];
@@ -82,6 +85,7 @@ internal static class HostManager
             HostsDir = HostsDir,
             InitialPrompt = initialPrompt ?? "",
             Title = title ?? "",
+            Profile = profile ?? "",
         };
 
         var psi = new ProcessStartInfo(HostExe())

@@ -14,6 +14,9 @@ internal sealed class SavedSession
     /// <summary>Unix ms of the session's last status change while settled; orders it in its group after a resume. 0 = unknown.</summary>
     public long LastChanged { get; set; }
 
+    /// <summary>The Claude account profile to resume under (see <see cref="ClaudeProfiles"/>); empty for the default login.</summary>
+    public string Profile { get; set; } = "";
+
     [JsonExtensionData]
     public Dictionary<string, System.Text.Json.JsonElement>? Unknown { get; set; }
 

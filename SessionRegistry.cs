@@ -66,7 +66,7 @@ internal static class SessionRegistry
 
     /// <summary>Rewrite the file when anything about the live interactive set changes (not just the
     /// id-set — a rename or cwd change must persist too), plus a periodic checkpoint for LastSeen.</summary>
-    public static void Snapshot(IReadOnlyList<SessionInfo> liveInteractive, Func<SessionInfo, DateTime?>? settledAt = null)
+    public static void Snapshot(IReadOnlyList<SessionInfo> liveInteractive, Func<SessionInfo, DateTime?>? settledAt = null, Func<SessionInfo, string>? profileOf = null)
     {
         if (Frozen) return;
 
@@ -74,10 +74,11 @@ internal static class SessionRegistry
         foreach (var s in liveInteractive)
             if (settledAt?.Invoke(s) is DateTime at && at > DateTime.MinValue)
                 settled[s.SessionId] = new DateTimeOffset(at).ToUnixTimeMilliseconds();
+        string Profile(SessionInfo s) => profileOf?.Invoke(s) ?? "";
 
         var parts = new List<string>(liveInteractive.Count);
         foreach (var s in liveInteractive)
-            parts.Add($"{s.SessionId}|{s.DisplayName}|{s.Cwd}|{s.Model}|{(int)s.Provider}|{settled.GetValueOrDefault(s.SessionId)}");
+            parts.Add($"{s.SessionId}|{s.DisplayName}|{s.Cwd}|{s.Model}|{(int)s.Provider}|{settled.GetValueOrDefault(s.SessionId)}|{Profile(s)}");
         parts.Sort(StringComparer.Ordinal);
         string sig = string.Join("\n", parts);
 
@@ -91,7 +92,7 @@ internal static class SessionRegistry
         var saved = liveInteractive.Select(s => new SavedSession
         {
             Id = s.SessionId, Cwd = s.Cwd, Name = s.DisplayName, Model = s.Model, LastSeen = now,
-            Provider = s.Provider, LastChanged = settled.GetValueOrDefault(s.SessionId),
+            Provider = s.Provider, LastChanged = settled.GetValueOrDefault(s.SessionId), Profile = Profile(s),
         }).ToList();
 
         try { AtomicFile.Write(FilePath, JsonSerializer.Serialize(saved, new JsonSerializerOptions { WriteIndented = true })); }
