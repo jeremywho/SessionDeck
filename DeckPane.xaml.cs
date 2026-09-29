@@ -122,6 +122,7 @@ internal partial class DeckPane : UserControl
         _browser = new DeckBrowser(_dark) { Margin = new Thickness(3, 0, 6, 6) };
         _browser.Message += Route;
         _browser.Ready += ReopenAll;
+        _browser.PageMessage += (type, root) => RoutePage(type, root);
         Body.Children.Add(_browser);
         Loaded += (_, _) => _browser.Start();
     }
@@ -141,22 +142,7 @@ internal partial class DeckPane : UserControl
 
     void Route(string hostId, string type, JsonElement root)
     {
-        if (type == "fractions")
-        {
-            var fracs = root.GetProperty("fracs").EnumerateArray().Select(f => f.GetDouble()).ToList();
-            for (int i = 0; i < Groups.Count && i < fracs.Count; i++) Groups[i].Fraction = fracs[i];
-            BuildStrips();
-            LayoutChanged?.Invoke();
-            return;
-        }
-        if (type == "dropSpacer")
-        {
-            int from = root.GetProperty("index").GetInt32();
-            int gi = Math.Clamp(root.GetProperty("group").GetInt32(), 0, Math.Max(0, Groups.Count - 1));
-            if (from >= 0 && from < Groups.Count && Groups[from].IsSpacer
-                && _model.MoveGroupTo(Groups[from], root.GetProperty("side").GetString() == "left" ? gi : gi + 1)) Changed();
-            return;
-        }
+        if (RoutePage(type, root)) return;
         var tab = FindByHost(hostId);
         if (tab == null) return;
         if (type == "dropTab")
@@ -177,6 +163,31 @@ internal partial class DeckPane : UserControl
             return;
         }
         tab.View.OnMessage(type, root);
+    }
+
+    /// <summary>Messages about columns rather than one terminal. They arrive with or without a host id.</summary>
+    bool RoutePage(string type, JsonElement root)
+    {
+        switch (type)
+        {
+            case "fractions":
+            {
+                var fracs = root.GetProperty("fracs").EnumerateArray().Select(f => f.GetDouble()).ToList();
+                for (int i = 0; i < Groups.Count && i < fracs.Count; i++) Groups[i].Fraction = fracs[i];
+                BuildStrips();
+                LayoutChanged?.Invoke();
+                return true;
+            }
+            case "dropSpacer":
+            {
+                int from = root.GetProperty("index").GetInt32();
+                int gi = Math.Clamp(root.GetProperty("group").GetInt32(), 0, Math.Max(0, Groups.Count - 1));
+                if (from >= 0 && from < Groups.Count && Groups[from].IsSpacer
+                    && _model.MoveGroupTo(Groups[from], root.GetProperty("side").GetString() == "left" ? gi : gi + 1)) Changed();
+                return true;
+            }
+        }
+        return false;
     }
 
     /// <summary>The page has (re)loaded: hand it every open tab again and lay the columns out.</summary>

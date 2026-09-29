@@ -43,6 +43,9 @@ internal sealed class DeckBrowser : Grid
     /// <summary>The page is (re)loaded and listening. Callers re-open their terminals here.</summary>
     public event Action? Ready;
 
+    /// <summary>A message about the page as a whole (column drops, divider moves, the PR column), not one terminal.</summary>
+    public event Action<string, JsonElement>? PageMessage;
+
     public DeckBrowser(bool dark)
     {
         _dark = dark;
@@ -137,10 +140,18 @@ internal sealed class DeckBrowser : Grid
                     Send(new { type = "paste", id = root.GetProperty("id").GetString(), text = pasted });
                     return;
             }
-            if (root.TryGetProperty("id", out var id) && id.GetString() is { Length: > 0 } hostId)
-                Message?.Invoke(hostId, type, root);
+            Dispatch(root, Message, PageMessage);
         }
         catch (Exception ex) { App.LogError(ex); }
+    }
+
+    internal static void Dispatch(JsonElement root, Action<string, string, JsonElement>? host, Action<string, JsonElement>? page)
+    {
+        string type = root.TryGetProperty("type", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString() ?? "" : "";
+        if (root.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String && id.GetString() is { Length: > 0 } hostId)
+            host?.Invoke(hostId, type, root);
+        else
+            page?.Invoke(type, root);
     }
 
     static void OpenOutside(string? uri)
