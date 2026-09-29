@@ -208,7 +208,11 @@ internal partial class DeckPane : UserControl
         foreach (var t in _model.AllTabs) Tabs.Add(t);
     }
 
-    /// <summary>One strip per group, widths as star shares matching the page's columns, a hairline between.</summary>
+    /// <summary>
+    /// One strip per group. The columns are pure star shares, the same proportions the page uses for
+    /// its percent widths, and each hairline sits on the first pixel of its column exactly where the
+    /// page draws its divider. A pixel column of its own for the line would shift every boundary.
+    /// </summary>
     void BuildStrips()
     {
         StripGrid.Children.Clear();
@@ -217,17 +221,17 @@ internal partial class DeckPane : UserControl
         var spacerTemplate = (DataTemplate)FindResource("SpacerStripTemplate");
         for (int i = 0; i < Groups.Count; i++)
         {
-            if (i > 0)
-            {
-                StripGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1) });
-                var line = new Border { Background = (Brush)FindResource("Border2Brush"), Width = 1 };
-                Grid.SetColumn(line, StripGrid.ColumnDefinitions.Count - 1);
-                StripGrid.Children.Add(line);
-            }
             StripGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Math.Max(0.05, Groups[i].Fraction), GridUnitType.Star) });
             var strip = new ContentPresenter { Content = Groups[i], ContentTemplate = Groups[i].IsSpacer ? spacerTemplate : template };
-            Grid.SetColumn(strip, StripGrid.ColumnDefinitions.Count - 1);
+            if (i > 0) strip.Margin = new Thickness(1, 0, 0, 0);
+            Grid.SetColumn(strip, i);
             StripGrid.Children.Add(strip);
+        }
+        for (int i = 1; i < Groups.Count; i++)
+        {
+            var line = new Border { Background = (Brush)FindResource("Border2Brush"), Width = 1, HorizontalAlignment = HorizontalAlignment.Left };
+            Grid.SetColumn(line, i);
+            StripGrid.Children.Add(line);
         }
     }
 
