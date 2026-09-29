@@ -39,7 +39,7 @@ public class DeckModelTests
 
     /// <summary>Columns as "a b* c | d e* | f*" (a spacer is "_"), then the focused column and the widths.</summary>
     static string Describe(DeckModel<Tab> m) =>
-        string.Join(" | ", m.Groups.Select(g => g.IsSpacer ? "_" : string.Join(" ", g.Tabs.Select(t => t.Host.Id + (g.Active == t ? "*" : "")))))
+        string.Join(" | ", m.Groups.Select(g => g.IsPrPane ? "PR" : g.IsSpacer ? "_" : string.Join(" ", g.Tabs.Select(t => t.Host.Id + (g.Active == t ? "*" : "")))))
         + $" @{m.Focused} " + string.Join("/", m.Groups.Select(g => g.Fraction.ToString("0.00")));
 
     const string Original = "a b* c | d e* | f* @1 0.50/0.30/0.20";
@@ -445,5 +445,143 @@ public class DeckModelTests
         for (int i = 0; i < items.Length; i++)
             foreach (var rest in Permutations(items.Where((_, j) => j != i).ToArray()))
                 yield return new[] { items[i] }.Concat(rest).ToArray();
+    }
+
+    [Fact]
+    public void Introducing_the_PR_column_puts_it_rightmost_with_half_the_last_tab_column()
+    {
+        var m = Arranged(out _);
+        Assert.NotNull(m.IntroducePrPane());
+        Assert.Equal("a b* c | d e* | f* | PR @1 0.50/0.30/0.10/0.10", Describe(m));
+    }
+
+    [Fact]
+    public void There_is_only_ever_one_PR_column()
+    {
+        var m = Arranged(out _);
+        m.IntroducePrPane();
+        Assert.Null(m.AddPrPane(0));
+        Assert.Null(m.IntroducePrPane());
+        Assert.Single(m.Groups, g => g.IsPrPane);
+    }
+
+    [Fact]
+    public void Adding_the_PR_column_beside_a_column_takes_half_its_width()
+    {
+        var m = Arranged(out _);
+        m.AddPrPane(1);
+        Assert.Equal("a b* c | PR | d e* | f* @2 0.25/0.25/0.30/0.20", Describe(m));
+    }
+
+    [Fact]
+    public void A_new_tab_never_lands_in_the_PR_column_even_when_it_has_focus()
+    {
+        var m = Arranged(out _);
+        m.IntroducePrPane();
+        m.Focused = 3;
+        m.Add(new Tab(H("g")), activate: true);
+        Assert.Equal("a b c g* | d e* | f* | PR @0 0.50/0.30/0.10/0.10", Describe(m));
+    }
+
+    [Fact]
+    public void A_tab_cannot_be_moved_into_the_PR_column()
+    {
+        var m = Arranged(out _);
+        var pr = m.IntroducePrPane()!;
+        Assert.False(m.MoveTo(m.AllTabs.First(t => t.Host.Id == "e"), pr, 0));
+        Assert.Equal("a b* c | d e* | f* | PR @1 0.50/0.30/0.10/0.10", Describe(m));
+    }
+
+    [Fact]
+    public void The_PR_column_moves_like_a_spacer()
+    {
+        var m = Arranged(out _);
+        var pr = m.IntroducePrPane()!;
+        Assert.True(m.MoveGroupTo(pr, 0));
+        Assert.Equal("PR | a b* c | d e* | f* @2 0.10/0.50/0.30/0.10", Describe(m));
+    }
+
+    [Fact]
+    public void Removing_the_PR_column_gives_its_width_to_the_column_on_its_left()
+    {
+        var m = Arranged(out _);
+        m.IntroducePrPane();
+        Assert.True(m.RemovePrPane());
+        Assert.Equal(Original, Describe(m));
+        Assert.False(m.RemovePrPane());
+    }
+
+    [Fact]
+    public void Emptying_the_column_beside_the_PR_column_keeps_the_PR_column()
+    {
+        var m = Arranged(out _);
+        m.IntroducePrPane();
+        m.Close(m.AllTabs.First(t => t.Host.Id == "f"));
+        Assert.Equal("a b* c | d e* | PR @1 0.50/0.40/0.10", Describe(m));
+    }
+
+    [Fact]
+    public void The_PR_column_on_an_empty_deck_leaves_room_for_the_first_tab()
+    {
+        var m = NewModel();
+        m.IntroducePrPane();
+        m.Add(new Tab(H("a")), activate: true);
+        Assert.Equal("PR | a* @1 1.00/1.00", Describe(m));
+    }
+
+    [Fact]
+    public void The_PR_column_survives_a_save_and_restore_in_place()
+    {
+        var m = Arranged(out var hosts);
+        m.AddPrPane(1);
+        var back = NewModel();
+        back.Restore(m.Snapshot(h => h.SessionId, _ => true), hosts, h => new Tab(h));
+        Assert.Equal(Describe(m), Describe(back));
+    }
+
+    [Fact]
+    public void The_PR_column_survives_a_restore_under_new_host_ids()
+    {
+        var m = Arranged(out var hosts);
+        m.AddPrPane(1);
+        var saved = m.Snapshot(h => h.SessionId, _ => true);
+        var back = NewModel();
+        back.Restore(saved, hosts.Select(h => H(h.Id + "2", h.SessionId)).ToList(), h => new Tab(h));
+        Assert.Equal(Renamed(Describe(m), AllIds), Describe(back));
+    }
+
+    [Fact]
+    public void Restarting_every_tab_keeps_the_PR_column_where_it_was()
+    {
+        var m = Arranged(out _);
+        m.AddPrPane(1);
+        string before = Describe(m);
+        foreach (var id in AllIds) Restart(m, id);
+        Assert.Equal(Renamed(before, AllIds), Describe(m));
+    }
+
+    [Fact]
+    public void The_PR_column_is_saved_as_a_spacer_so_an_older_build_keeps_the_slot()
+    {
+        var m = Arranged(out _);
+        m.IntroducePrPane();
+        var json = System.Text.Json.JsonSerializer.Serialize(m.Snapshot(h => h.SessionId, _ => true));
+        var cols = System.Text.Json.JsonDocument.Parse(json).RootElement.GetProperty("Columns");
+        Assert.True(cols[3].GetProperty("Spacer").GetBoolean());
+        Assert.Equal("prs", cols[3].GetProperty("Panel").GetString());
+        Assert.False(cols[0].GetProperty("Spacer").GetBoolean());
+        Assert.Equal("", cols[0].GetProperty("Panel").GetString());
+    }
+
+    [Fact]
+    public void A_saved_layout_with_two_PR_columns_restores_one_and_a_spacer()
+    {
+        var layout = ThreeColumns();
+        layout.Columns.Insert(1, new DeckColumn { Spacer = true, Panel = "prs", Fraction = 0.1 });
+        layout.Columns.Add(new DeckColumn { Spacer = true, Panel = "prs", Fraction = 0.1 });
+        layout.Focused = 2;
+        var m = NewModel();
+        m.Restore(layout, AllIds.Select(id => H(id)).ToList(), h => new Tab(h));
+        Assert.Equal("a b* c | PR | d e* | f* | _ @2 0.50/0.10/0.30/0.20/0.10", Describe(m));
     }
 }

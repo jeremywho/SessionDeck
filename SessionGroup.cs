@@ -97,6 +97,10 @@ internal sealed class DeckColumn
     /// <summary>An empty column kept on purpose; see <see cref="DeckGroup{TTab}.IsSpacer"/>.</summary>
     public bool Spacer { get; set; }
 
+    /// <summary>"prs" for the pull requests column, which is also saved with <see cref="Spacer"/> set so a build that predates it keeps the slot.</summary>
+    public string Panel { get; set; } = "";
+    public const string PrPanel = "prs";
+
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? Unknown { get; set; }
 }

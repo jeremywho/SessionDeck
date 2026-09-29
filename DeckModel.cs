@@ -12,6 +12,11 @@ internal sealed class DeckGroup<TTab> where TTab : class
 
     /// <summary>An empty column kept on purpose, to push the others sideways. Never removed for being empty; a tab dropped in makes it a session column.</summary>
     public bool IsSpacer { get; set; }
+
+    /// <summary>The pull requests column: holds no tabs, is never removed for being empty, and never takes a tab.</summary>
+    public bool IsPrPane { get; set; }
+
+    public bool HoldsTabs => !IsSpacer && !IsPrPane;
 }
 
 /// <summary>
@@ -32,6 +37,7 @@ internal sealed class DeckModel<TTab> where TTab : class
     public int Focused { get; set; }
 
     public DeckGroup<TTab>? FocusedGroup => Groups.Count == 0 ? null : Groups[Math.Clamp(Focused, 0, Groups.Count - 1)];
+    public DeckGroup<TTab>? PrPane => Groups.FirstOrDefault(g => g.IsPrPane);
     public DeckGroup<TTab>? GroupOf(TTab tab) => Groups.FirstOrDefault(g => g.Tabs.Contains(tab));
     public IEnumerable<TTab> AllTabs => Groups.SelectMany(g => g.Tabs);
     public TTab? FindByHost(string hostId) => AllTabs.FirstOrDefault(t => _host(t).Id == hostId);
@@ -54,11 +60,11 @@ internal sealed class DeckModel<TTab> where TTab : class
         if (activate || group.Active == null) { group.Active = tab; Focused = Groups.IndexOf(group); }
     }
 
-    /// <summary>The focused column, unless it is a spacer: then the first session column, made if there is none.</summary>
+    /// <summary>The focused column when it holds tabs, else the first column that does, made if there is none.</summary>
     DeckGroup<TTab> LandingGroup()
     {
-        if (FocusedGroup is { IsSpacer: false } focused) return focused;
-        var g = Groups.FirstOrDefault(x => !x.IsSpacer);
+        if (FocusedGroup is { HoldsTabs: true } focused) return focused;
+        var g = Groups.FirstOrDefault(x => x.HoldsTabs);
         if (g == null) { g = new DeckGroup<TTab>(); Groups.Add(g); }
         return g;
     }
@@ -66,14 +72,43 @@ internal sealed class DeckModel<TTab> where TTab : class
     /// <summary>Insert an empty spacer column at <paramref name="at"/>, taking half the width of the column to its left (or right, at the far left).</summary>
     public DeckGroup<TTab> AddSpacer(int at)
     {
+        var spacer = InsertEmpty(at);
+        spacer.IsSpacer = true;
+        return spacer;
+    }
+
+    /// <summary>Insert the pull requests column at <paramref name="at"/> the way a spacer is inserted. Null when one exists.</summary>
+    public DeckGroup<TTab>? AddPrPane(int at)
+    {
+        if (PrPane != null) return null;
+        var pane = InsertEmpty(at);
+        pane.IsPrPane = true;
+        return pane;
+    }
+
+    /// <summary>First-launch placement: rightmost, taking half the width of the rightmost tab column. Null when one exists.</summary>
+    public DeckGroup<TTab>? IntroducePrPane()
+    {
+        if (PrPane != null) return null;
+        var donor = Groups.LastOrDefault(g => g.HoldsTabs);
+        var pane = new DeckGroup<TTab> { IsPrPane = true, Fraction = donor == null ? 1 : donor.Fraction / 2 };
+        if (donor != null) donor.Fraction /= 2;
+        var focused = FocusedGroup;
+        Groups.Add(pane);
+        if (focused != null) Focused = Groups.IndexOf(focused);
+        return pane;
+    }
+
+    DeckGroup<TTab> InsertEmpty(int at)
+    {
         at = Math.Clamp(at, 0, Groups.Count);
         var neighbour = Groups.Count == 0 ? null : Groups[Math.Clamp(at - 1, 0, Groups.Count - 1)];
-        var spacer = new DeckGroup<TTab> { IsSpacer = true, Fraction = neighbour == null ? 1 : neighbour.Fraction / 2 };
+        var column = new DeckGroup<TTab> { Fraction = neighbour == null ? 1 : neighbour.Fraction / 2 };
         if (neighbour != null) neighbour.Fraction /= 2;
         var focused = FocusedGroup;
-        Groups.Insert(at, spacer);
+        Groups.Insert(at, column);
         if (focused != null) Focused = Groups.IndexOf(focused);
-        return spacer;
+        return column;
     }
 
     /// <summary>Swap the column with its neighbour <paramref name="delta"/> places over. Focus stays on the same column.</summary>
@@ -102,14 +137,18 @@ internal sealed class DeckModel<TTab> where TTab : class
     }
 
     /// <summary>Take a spacer out; its width joins the column to its left (or right, at the far left).</summary>
-    public bool RemoveSpacer(DeckGroup<TTab> spacer)
+    public bool RemoveSpacer(DeckGroup<TTab> spacer) => spacer.IsSpacer && RemoveEmpty(spacer);
+
+    public bool RemovePrPane() => PrPane is { } pane && RemoveEmpty(pane);
+
+    bool RemoveEmpty(DeckGroup<TTab> column)
     {
-        int i = Groups.IndexOf(spacer);
-        if (i < 0 || !spacer.IsSpacer) return false;
+        int i = Groups.IndexOf(column);
+        if (i < 0 || column.HoldsTabs) return false;
         var focused = FocusedGroup;
         Groups.RemoveAt(i);
-        if (Groups.Count > 0) Groups[Math.Max(0, i - 1)].Fraction += spacer.Fraction;
-        Focused = focused != null && focused != spacer ? Groups.IndexOf(focused) : Math.Clamp(Focused, 0, Math.Max(0, Groups.Count - 1));
+        if (Groups.Count > 0) Groups[Math.Max(0, i - 1)].Fraction += column.Fraction;
+        Focused = focused != null && focused != column ? Groups.IndexOf(focused) : Math.Clamp(Focused, 0, Math.Max(0, Groups.Count - 1));
         return true;
     }
 
@@ -146,6 +185,7 @@ internal sealed class DeckModel<TTab> where TTab : class
 
     public bool MoveTo(TTab tab, DeckGroup<TTab> to, int index)
     {
+        if (to.IsPrPane) return false;
         var from = GroupOf(tab);
         if (from == null) return false;
         if (from == to)
@@ -180,7 +220,7 @@ internal sealed class DeckModel<TTab> where TTab : class
     {
         from.Tabs.Remove(tab);
         if (from.Active == tab) from.Active = from.Tabs.LastOrDefault();
-        if (from.Tabs.Count == 0 && !from.IsSpacer && Groups.Count > 1)
+        if (from.Tabs.Count == 0 && from.HoldsTabs && Groups.Count > 1)
         {
             int i = Groups.IndexOf(from);
             var focused = FocusedGroup;
@@ -236,7 +276,8 @@ internal sealed class DeckModel<TTab> where TTab : class
                 Sessions = g.Tabs.Select(t => sessionOf(_host(t))).ToList(),
                 Active = g.Active is { } a ? _host(a).Id : "",
                 Fraction = g.Fraction,
-                Spacer = g.IsSpacer,
+                Spacer = g.IsSpacer || g.IsPrPane,
+                Panel = g.IsPrPane ? DeckColumn.PrPanel : "",
             }).ToList(),
             ClosedHosts = closed.Select(h => h.Id).ToList(),
             ClosedSessions = closed.Select(sessionOf).ToList(),
@@ -275,8 +316,9 @@ internal sealed class DeckModel<TTab> where TTab : class
                 g.Tabs.Add(tab);
                 if (col.Hosts[i] == col.Active) g.Active = tab;
             }
-            g.IsSpacer = col.Spacer && g.Tabs.Count == 0;
-            if (g.Tabs.Count == 0 && !g.IsSpacer) continue;
+            g.IsPrPane = col.Panel == DeckColumn.PrPanel && g.Tabs.Count == 0 && !Groups.Any(x => x.IsPrPane);
+            g.IsSpacer = col.Spacer && g.Tabs.Count == 0 && !g.IsPrPane;
+            if (g.Tabs.Count == 0 && g.HoldsTabs) continue;
             if (g.Tabs.Count > 0) g.Active ??= g.Tabs[^1];
             Groups.Add(g);
             if (c == layout.Focused) focused = g;
@@ -292,7 +334,7 @@ internal sealed class DeckModel<TTab> where TTab : class
         var rest = hosts.Where(h => !placed.Contains(h.Id)).ToList();
         if (rest.Count > 0)
         {
-            var last = Groups.LastOrDefault(g => !g.IsSpacer);
+            var last = Groups.LastOrDefault(g => g.HoldsTabs);
             if (last == null) { last = new DeckGroup<TTab>(); Groups.Add(last); }
             foreach (var host in rest) last.Tabs.Add(tabFor(host));
             last.Active ??= last.Tabs[^1];
