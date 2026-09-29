@@ -7,6 +7,25 @@ internal sealed record GhResult(int ExitCode, string Stdout, string Stderr, bool
 
 internal static class GhCli
 {
+    static volatile string _exe = "gh";
+
+    internal static string? FindOnPath(string? pathValue, Func<string, bool> exists)
+    {
+        foreach (var dir in (pathValue ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            string candidate;
+            try { candidate = System.IO.Path.Combine(Environment.ExpandEnvironmentVariables(dir), "gh.exe"); }
+            catch (ArgumentException) { continue; }
+            if (exists(candidate)) return candidate;
+        }
+        return null;
+    }
+
+    /// <summary>The process PATH is fixed at launch, so gh installed since then is only found through the registry's PATH.</summary>
+    static string? FromRegistryPath() =>
+        FindOnPath(Environment.GetEnvironmentVariable("Path", EnvironmentVariableTarget.Machine) + ";"
+                 + Environment.GetEnvironmentVariable("Path", EnvironmentVariableTarget.User), System.IO.File.Exists);
+
     public static Task<GhResult> RunAsync(IReadOnlyList<string> args, TimeSpan? timeout)
     {
         var psi = StartInfo();
@@ -21,7 +40,7 @@ internal static class GhCli
         return Run(psi, timeout);
     }
 
-    static ProcessStartInfo StartInfo() => new("gh")
+    static ProcessStartInfo StartInfo() => new(_exe)
     {
         RedirectStandardOutput = true,
         RedirectStandardError = true,
@@ -33,9 +52,13 @@ internal static class GhCli
 
     static async Task<GhResult> Run(ProcessStartInfo psi, TimeSpan? timeout)
     {
-        Process? p;
-        try { p = Process.Start(psi); }
-        catch (System.ComponentModel.Win32Exception) { return new GhResult(-1, "", "", NotFound: true); }
+        var p = Start(psi);
+        if (p == null && FromRegistryPath() is { } full && !string.Equals(full, psi.FileName, StringComparison.OrdinalIgnoreCase))
+        {
+            _exe = full;
+            psi.FileName = full;
+            p = Start(psi);
+        }
         if (p == null) return new GhResult(-1, "", "", NotFound: true);
         using (p)
         {
@@ -51,5 +74,11 @@ internal static class GhCli
             }
             return new GhResult(p.ExitCode, await stdout, await stderr);
         }
+    }
+
+    static Process? Start(ProcessStartInfo psi)
+    {
+        try { return Process.Start(psi); }
+        catch (System.ComponentModel.Win32Exception) { return null; }
     }
 }
