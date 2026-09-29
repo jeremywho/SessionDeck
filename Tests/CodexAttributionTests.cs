@@ -287,4 +287,26 @@ public class CodexFlagDefaultTests
         Assert.Equal("codex resume 019f --dangerously-bypass-approvals-and-sandbox",
             SessionLauncher.ResumeCommand(saved, new Settings().CodexFlags));
     }
+
+    [Fact]
+    public void A_folded_thread_is_kept_on_its_owner()
+    {
+        var owner = new SessionInfo { Provider = SessionProvider.Claude, SessionId = "c1", Kind = "interactive", Cwd = @"C:\work", Status = "busy" };
+        var exec = new SessionInfo { Provider = SessionProvider.Codex, SessionId = "x1", Kind = "exec", Cwd = @"C:\work" };
+        var rows = CodexAttribution.Fold(new[] { owner }, new[] { exec });
+        Assert.Same(owner, Assert.Single(rows));
+        Assert.Same(exec, Assert.Single(owner.FoldedThreads));
+    }
+
+    [Fact]
+    public void A_thread_with_no_owner_is_handed_back_when_asked()
+    {
+        var owner = new SessionInfo { Provider = SessionProvider.Claude, SessionId = "c1", Kind = "interactive", Cwd = @"C:\Users\x" };
+        var exec = new SessionInfo { Provider = SessionProvider.Codex, SessionId = "x1", Kind = "exec", Cwd = @"D:\Repos\.worktrees\web\feat" };
+        var unowned = new List<SessionInfo>();
+        var rows = CodexAttribution.Fold(new[] { owner }, new[] { exec }, unowned: unowned);
+        Assert.Same(owner, Assert.Single(rows));
+        Assert.Same(exec, Assert.Single(unowned));
+        Assert.Empty(owner.FoldedThreads);
+    }
 }

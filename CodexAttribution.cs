@@ -24,10 +24,11 @@ internal static class CodexAttribution
     /// <para>A headless thread never earns a row. Attributed, it becomes a badge on its parent;
     /// unattributable, it is dropped entirely. That's deliberate: the list is for sessions you can act
     /// on, and a row you can't click into is worse than absent — it takes up space, pushes down the
-    /// session that's actually waiting, and offers nothing to do about it.</para>
+    /// session that's actually waiting, and offers nothing to do about it. Callers that want them
+    /// anyway (the pull requests pane lists them as agents) pass <paramref name="unowned"/>.</para>
     /// </summary>
     public static List<SessionInfo> Fold(IReadOnlyList<SessionInfo> claude, IReadOnlyList<SessionInfo> codex,
-                                         IReadOnlyDictionary<int, int>? parents = null)
+                                         IReadOnlyDictionary<int, int>? parents = null, List<SessionInfo>? unowned = null)
     {
         // Only sessions you could actually sit in are candidate parents — a headless session can't
         // own another, and folding onto one would just hide work behind something else hidden.
@@ -39,7 +40,8 @@ internal static class CodexAttribution
             if (!IsHeadless(s)) { rows.Add(s); continue; }
 
             var owner = OwnerOf(s, owners, parents);
-            if (owner != null) owner.BackgroundTasks++;   // no owner -> not shown at all
+            if (owner != null) { owner.BackgroundTasks++; owner.FoldedThreads.Add(s); }
+            else unowned?.Add(s);
         }
         return rows;
     }

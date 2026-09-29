@@ -31,6 +31,9 @@ internal sealed class SessionInfo
     /// runs) — rolled onto the parent row by <see cref="CodexAttribution"/> instead of listed on their
     /// own, since there's no terminal to click into.</summary>
     public int BackgroundTasks;
+
+    /// <summary>The headless threads counted in <see cref="BackgroundTasks"/>, kept so their transcripts can be read.</summary>
+    public List<SessionInfo> FoldedThreads = new();
     /// <summary>Claude background tasks (a shell run in the background, a monitor, a loop) whose output
     /// file was written in the last little while: work of the session's own, going on while it holds.</summary>
     public int BackgroundWork;
