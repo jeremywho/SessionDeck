@@ -5,6 +5,26 @@ namespace SessionDeck;
 
 internal static class Native
 {
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern Microsoft.Win32.SafeHandles.SafeFileHandle CreateFileW(string lpFileName, uint dwDesiredAccess, uint dwShareMode, IntPtr lpSecurityAttributes, uint dwCreationDisposition, uint dwFlagsAndAttributes, IntPtr hTemplateFile);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern uint GetFinalPathNameByHandleW(Microsoft.Win32.SafeHandles.SafeFileHandle hFile, StringBuilder lpszFilePath, uint cchFilePath, uint dwFlags);
+
+    /// <summary>The path with every junction and symbolic link resolved, or null when it cannot be opened.</summary>
+    public static string? FinalPath(string path)
+    {
+        const uint shareAll = 7, openExisting = 3, backupSemantics = 0x02000000;
+        using var h = CreateFileW(path, 0, shareAll, IntPtr.Zero, openExisting, backupSemantics, IntPtr.Zero);
+        if (h.IsInvalid) return null;
+        var sb = new StringBuilder(1024);
+        uint n = GetFinalPathNameByHandleW(h, sb, (uint)sb.Capacity, 0);
+        if (n == 0 || n >= sb.Capacity) return null;
+        string s = sb.ToString();
+        if (s.StartsWith(@"\\?\UNC\", StringComparison.Ordinal)) return @"\\" + s[8..];
+        return s.StartsWith(@"\\?\", StringComparison.Ordinal) ? s[4..] : s;
+    }
+
     [DllImport("user32.dll")] public static extern uint GetGuiResources(IntPtr hProcess, uint uiFlags);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr hWnd);
