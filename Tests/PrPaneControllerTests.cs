@@ -37,6 +37,15 @@ public class PrPaneControllerTests
     }
 
     [Fact]
+    public void A_refetch_of_the_same_data_does_not_change_the_signature()
+    {
+        var t = new DateTime(2026, 9, 29, 12, 0, 0, DateTimeKind.Utc);
+        var board = new Board("ok", "", Array.Empty<string>(), t, 150, 0, Array.Empty<BoardSection>());
+        Assert.Equal(PrPaneController.Signature(board), PrPaneController.Signature(board with { FetchedAt = t.AddMinutes(1), Error = "timeout" }));
+        Assert.NotEqual(PrPaneController.Signature(board), PrPaneController.Signature(board with { Total = 3 }));
+    }
+
+    [Fact]
     public void An_unowned_codex_thread_is_named_by_its_kind_and_is_not_clickable()
     {
         var v = PrPaneController.DescribeUnowned(new SessionInfo { Provider = SessionProvider.Codex, SessionId = "01a0e8d7-7a54", Kind = "exec" });

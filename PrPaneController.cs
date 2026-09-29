@@ -40,6 +40,7 @@ internal sealed class PrPaneController
     IReadOnlyDictionary<string, LocalState> _local = new Dictionary<string, LocalState>();
     IReadOnlyList<AgentLink> _links = Array.Empty<AgentLink>();
     string _posted = "";
+    string _postedFetch = "";
 
     public PrPaneController(DeckPane deck, Settings settings, Func<IReadOnlyList<SessionSource>> sessions, Func<string, AgentView?> describe, Action<string> focus)
     {
@@ -74,6 +75,9 @@ internal sealed class PrPaneController
     }
 
     internal static bool PastMinGap(DateTime lastStartUtc, DateTime nowUtc) => nowUtc - lastStartUtc >= MinGap;
+
+    /// <summary>What decides a re-render: everything but when it was fetched and the last error, which the page updates in place.</summary>
+    internal static string Signature(Board board) => JsonSerializer.Serialize(board with { FetchedAt = null, Error = "" }, BoardJson);
 
     internal static string StateToken(SessionState state) => state switch
     {
@@ -152,12 +156,21 @@ internal sealed class PrPaneController
     void Publish()
     {
         var board = PrBoardBuilder.Build(_shown, _error, _worktrees, _local, _links, _describe,
-            new HashSet<string>(_settings.PrExpandedSeries, StringComparer.Ordinal), DateTime.UtcNow);
-        string json = JsonSerializer.Serialize(board, BoardJson);
-        if (json == _posted) return;
-        _posted = json;
-        using var doc = JsonDocument.Parse(json);
-        _deck.PostToPage(new { type = "prs", board = doc.RootElement.Clone() });
+            new HashSet<string>(_settings.PrExpandedSeries, StringComparer.Ordinal));
+        string signature = Signature(board);
+        string fetch = $"{board.FetchedAt:o}|{board.Error}";
+        if (signature != _posted)
+        {
+            _posted = signature;
+            _postedFetch = fetch;
+            using var doc = JsonDocument.Parse(JsonSerializer.Serialize(board, BoardJson));
+            _deck.PostToPage(new { type = "prs", board = doc.RootElement.Clone() });
+        }
+        else if (fetch != _postedFetch)
+        {
+            _postedFetch = fetch;
+            _deck.PostToPage(new { type = "prsFetched", fetchedAt = board.FetchedAt, error = board.Error });
+        }
     }
 
     void OnPageMessage(string type, JsonElement root)

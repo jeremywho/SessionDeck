@@ -527,6 +527,7 @@
         case 'kill': { const p = panes.get(m.id); if (p) send(p, { type: 'kill' }); break; }
         case 'theme': dark = !!m.dark; look = lookFrom(m.look || {}); applyLook(); break;
         case 'prs': PrPane.render(m.board); break;
+        case 'prsFetched': PrPane.fetched(m.fetchedAt, m.error); break;
       }
     });
   }

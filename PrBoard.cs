@@ -6,12 +6,14 @@ internal sealed record AgentView(string Name, string Provider, string State, boo
 
 internal sealed record BoardAgent(string SessionId, string Name, string Provider, string State, bool ViaCodex, bool Clickable, string Tip);
 
+internal sealed record BoardCheck(string Name, string State, DateTime? StartedAt);
+
 internal sealed record BoardRow
 {
     public string Key { get; init; } = "";
     public int Depth { get; init; }
     public string Ci { get; init; } = "none";
-    public string CiTip { get; init; } = "";
+    public IReadOnlyList<BoardCheck> Checks { get; init; } = Array.Empty<BoardCheck>();
     public string Repo { get; init; } = "";
     public int Number { get; init; }
     public string Title { get; init; } = "";
@@ -20,7 +22,8 @@ internal sealed record BoardRow
     public string ActionTip { get; init; } = "";
     public int Band { get; init; }
     public IReadOnlyList<BoardAgent> Agents { get; init; } = Array.Empty<BoardAgent>();
-    public string Age { get; init; } = "";
+    public DateTime CreatedAt { get; init; }
+    public DateTime? LastCommitAt { get; init; }
     public string Local { get; init; } = "";
     public string LocalTip { get; init; } = "";
     public string Marker { get; init; } = "";
@@ -42,7 +45,7 @@ internal static class PrBoardBuilder
     sealed record Item(bool Draft, int Band, string Repo, int Number, List<BoardRow> Rows);
 
     public static Board Build(PrSnapshot? shown, string error, IReadOnlyList<Worktree> worktrees, IReadOnlyDictionary<string, LocalState> local,
-                              IReadOnlyList<AgentLink> links, Func<string, AgentView?> describe, IReadOnlySet<string> expanded, DateTime nowUtc)
+                              IReadOnlyList<AgentLink> links, Func<string, AgentView?> describe, IReadOnlySet<string> expanded)
     {
         if (shown == null) return new Board("loading", "", Array.Empty<string>(), null, StaleAfterSeconds, 0, Array.Empty<BoardSection>());
         string status = shown.Status switch
@@ -108,7 +111,7 @@ internal static class PrBoardBuilder
                 Key = $"{p.Repo.ToLowerInvariant()}#{p.Number}",
                 Depth = depth,
                 Ci = CiToken(p.Ci),
-                CiTip = CiTip(p, nowUtc),
+                Checks = p.Checks.Where(c => c.State != "success").Select(c => new BoardCheck(c.Name, c.State, c.StartedAt)).ToList(),
                 Repo = p.Repo,
                 Number = p.Number,
                 Title = p.Title,
@@ -117,7 +120,8 @@ internal static class PrBoardBuilder
                 ActionTip = string.Join("\n", actions.Select(a => Label(a, p, parent))),
                 Band = Band(actions[0]),
                 Agents = AgentsFor(p.Key),
-                Age = $"opened {Span(nowUtc - p.CreatedAt)} ago" + (p.LastCommitAt is { } lc ? $", last commit {Span(nowUtc - lc)} ago" : ""),
+                CreatedAt = p.CreatedAt,
+                LastCommitAt = p.LastCommitAt,
                 Local = localText,
                 LocalTip = localTip,
                 Marker = depth > 0 && p.IsDraft != rootDraft ? (p.IsDraft ? "draft" : "live") : "",
@@ -156,7 +160,6 @@ internal static class PrBoardBuilder
         {
             Key = "series:" + key,
             Ci = worst.Ci,
-            CiTip = string.Join("\n", members.Where(m => m.Ci != "success").Select(m => $"#{m.Number}: {m.CiTip.Replace("\n", "; ")}")),
             Repo = members[0].Repo,
             Number = members[0].Number,
             Title = title,
@@ -164,7 +167,8 @@ internal static class PrBoardBuilder
             ActionTip = string.Join("\n", members.Select(m => $"#{m.Number}: {m.Action}")),
             Band = urgent.Band,
             Agents = members.SelectMany(m => m.Agents).GroupBy(a => a.SessionId).Select(g => g.First()).ToList(),
-            Age = members[0].Age,
+            CreatedAt = members[0].CreatedAt,
+            LastCommitAt = members[0].LastCommitAt,
             Local = withLocal.Count == 0 ? "" : withLocal.Count == 1 ? "1 with local changes" : $"{withLocal.Count} with local changes",
             LocalTip = string.Join("\n", withLocal.Select(m => $"#{m.Number}: {m.Local}")),
             SeriesCount = members.Count,
@@ -243,17 +247,4 @@ internal static class PrBoardBuilder
 
     static int CiRank(string ci) => ci switch { "failure" => 3, "pending" => 2, "none" => 1, _ => 0 };
 
-    static string CiTip(PullRequest p, DateTime nowUtc)
-    {
-        var lines = p.Checks.Where(c => c.State == "failure").Select(c => $"Failed: {c.Name}")
-            .Concat(p.Checks.Where(c => c.State == "pending").Select(c => c.StartedAt is { } s ? $"Running {Minutes(nowUtc - s)}: {c.Name}" : $"Queued: {c.Name}"))
-            .ToList();
-        if (lines.Count > 0) return string.Join("\n", lines);
-        return p.Ci switch { CiState.Success => "All checks passed", CiState.None => "No checks", _ => "" };
-    }
-
-    static string Minutes(TimeSpan t) => t.TotalMinutes < 60 ? $"{Math.Max(1, (int)t.TotalMinutes)}m" : Span(t);
-
-    static string Span(TimeSpan t) =>
-        t.TotalHours < 1 ? $"{Math.Max(1, (int)t.TotalMinutes)}m" : t.TotalHours < 48 ? $"{(int)t.TotalHours}h" : $"{(int)t.TotalDays}d";
 }

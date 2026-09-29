@@ -21,7 +21,7 @@ public class PrBoardTests
         IReadOnlyList<AgentLink>? links = null, Func<string, AgentView?>? describe = null, HashSet<string>? expanded = null) =>
         PrBoardBuilder.Build(new PrSnapshot(PrSourceStatus.Ok, prs.ToList(), Array.Empty<string>(), "", Now), "",
             trees ?? Array.Empty<Worktree>(), local ?? new Dictionary<string, LocalState>(), links ?? Array.Empty<AgentLink>(),
-            describe ?? (_ => null), expanded ?? new HashSet<string>(), Now);
+            describe ?? (_ => null), expanded ?? new HashSet<string>());
 
     static IReadOnlyList<BoardRow> Rows(Board b, string section) => b.Sections.Single(s => s.Name == section).Rows;
     static BoardRow Only(params PullRequest[] prs) => Build(prs).Sections.SelectMany(s => s.Rows).Single();
@@ -141,16 +141,37 @@ public class PrBoardTests
     }
 
     [Fact]
-    public void Ages_say_when_it_opened_and_when_it_last_changed() => Assert.Equal("opened 3d ago, last commit 24h ago", Only(Pr(1)).Age);
+    public void A_row_carries_when_it_opened_and_when_it_last_changed()
+    {
+        var row = Only(Pr(1));
+        Assert.Equal((Now.AddDays(-3), (DateTime?)Now.AddDays(-1)), (row.CreatedAt, row.LastCommitAt));
+    }
+
+    [Fact]
+    public void A_row_carries_its_failing_and_running_checks_for_the_tooltip()
+    {
+        var started = Now.AddMinutes(-3);
+        var row = Only(Pr(1, ci: CiState.Failure, checks: new[] { Failing("build"), new CheckInfo("lint", "pending", started, ""), new CheckInfo("ok", "success", null, "") }));
+        Assert.Equal(new[] { ("build", "failure", (DateTime?)null), ("lint", "pending", (DateTime?)started) }, row.Checks.Select(c => (c.Name, c.State, c.StartedAt)));
+    }
 
     [Fact]
     public void No_snapshot_yet_is_loading_and_a_failure_keeps_its_status()
     {
         var none = new Dictionary<string, LocalState>();
-        Assert.Equal("loading", PrBoardBuilder.Build(null, "", Array.Empty<Worktree>(), none, Array.Empty<AgentLink>(), _ => null, new HashSet<string>(), Now).Status);
+        Assert.Equal("loading", PrBoardBuilder.Build(null, "", Array.Empty<Worktree>(), none, Array.Empty<AgentLink>(), _ => null, new HashSet<string>()).Status);
         var failed = new PrSnapshot(PrSourceStatus.NotAuthenticated, Array.Empty<PullRequest>(), Array.Empty<string>(), "run gh auth login", Now);
-        var b = PrBoardBuilder.Build(failed, "", Array.Empty<Worktree>(), none, Array.Empty<AgentLink>(), _ => null, new HashSet<string>(), Now);
+        var b = PrBoardBuilder.Build(failed, "", Array.Empty<Worktree>(), none, Array.Empty<AgentLink>(), _ => null, new HashSet<string>());
         Assert.Equal(("gh-auth", "run gh auth login", 0), (b.Status, b.Error, b.Total));
+    }
+
+    [Fact]
+    public void The_same_data_fetched_minutes_later_gives_the_same_board()
+    {
+        var pr = Pr(1, ci: CiState.Pending, checks: new[] { new CheckInfo("build", "pending", Now.AddMinutes(-3), "") }) with { LastCommitAt = Now.AddMinutes(-20) };
+        Board At(DateTime fetched) => PrBoardBuilder.Build(new PrSnapshot(PrSourceStatus.Ok, new[] { pr }, Array.Empty<string>(), "", fetched), "",
+            Array.Empty<Worktree>(), new Dictionary<string, LocalState>(), Array.Empty<AgentLink>(), _ => null, new HashSet<string>());
+        Assert.Equal(PrPaneController.Signature(At(Now)), PrPaneController.Signature(At(Now.AddMinutes(7))));
     }
 
     [Fact]

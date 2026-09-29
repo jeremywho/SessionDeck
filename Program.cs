@@ -78,7 +78,7 @@ internal static class Program
                     ? new AgentView(s.DisplayName, s.Provider.ToString(), PrPaneController.StateToken(s.ApiError ? SessionState.Error : SessionStateMap.FromStatus(s.Status)))
                     : unownedById.TryGetValue(id, out var u) ? PrPaneController.DescribeUnowned(u) : null;
             var board = PrBoardBuilder.Build(snap, "", worktrees, local, links, Describe,
-                new HashSet<string>(settings.PrExpandedSeries, StringComparer.Ordinal), DateTime.UtcNow);
+                new HashSet<string>(settings.PrExpandedSeries, StringComparer.Ordinal));
             System.IO.File.WriteAllText(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "sessiondeck-prs.json"),
                 System.Text.Json.JsonSerializer.Serialize(board, new System.Text.Json.JsonSerializerOptions(PrPaneController.BoardJson) { WriteIndented = true }));
             return;

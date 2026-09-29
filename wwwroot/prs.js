@@ -1,5 +1,6 @@
 (() => {
   let el = null, post = () => {}, board = null;
+  const rowsByKey = new Map();
   const STATE_WORDS = { working: 'working', awaiting: 'awaiting input', idle: 'idle', error: 'error', scheduled: 'scheduled' };
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -7,6 +8,24 @@
     if (!iso) return '';
     const s = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 1000));
     return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.floor(s / 60)}m ago` : `${Math.floor(s / 3600)}h ago`;
+  }
+
+  function span(iso) {
+    const m = Math.max(1, Math.floor((Date.now() - Date.parse(iso)) / 60000));
+    return m < 60 ? `${m}m` : m < 48 * 60 ? `${Math.floor(m / 60)}h` : `${Math.floor(m / 1440)}d`;
+  }
+
+  function ageText(created, commit) {
+    return `opened ${span(created)} ago` + (commit ? `, last commit ${span(commit)} ago` : '');
+  }
+
+  function ciTip(r) {
+    if (r.seriesCount > 0)
+      return r.members.filter(m => m.ci !== 'success').map(m => `#${m.number}: ${ciTip(m).replace(/\n/g, '; ')}`).join('\n');
+    const lines = r.checks.filter(c => c.state === 'failure').map(c => `Failed: ${c.name}`)
+      .concat(r.checks.filter(c => c.state === 'pending').map(c => c.startedAt ? `Running ${span(c.startedAt)}: ${c.name}` : `Queued: ${c.name}`));
+    if (lines.length) return lines.join('\n');
+    return r.ci === 'success' ? 'All checks passed' : r.ci === 'none' ? 'No checks' : '';
   }
 
   function isStale() {
@@ -28,6 +47,7 @@
   }
 
   function row(r) {
+    rowsByKey.set(r.key, r);
     const series = r.seriesCount > 0;
     const title = series
       ? `<a class="prs-title" href="#" data-series="${esc(r.key.slice('series:'.length))}" title="${r.expanded ? 'Hide' : 'Show'} the ${r.seriesCount} pull requests">${esc(r.title)}</a><span class="prs-muted">${r.seriesCount} PRs</span>`
@@ -36,8 +56,8 @@
     const local = r.local ? `<span class="prs-local" title="${esc(r.localTip)}">${esc(r.local)}</span>` : '';
     const html =
       `<div class="prs-row" style="--depth:${r.depth}">` +
-        `<div class="prs-line1"><span class="prs-ci ${esc(r.ci)}" title="${esc(r.ciTip)}"></span>${title}${marker}<span class="prs-repo">${esc(r.repo.split('/').pop())}</span></div>` +
-        `<div class="prs-line2"><span class="prs-action band${r.band}" title="${esc(r.actionTip)}">${esc(r.action)}</span>${r.agents.map(agent).join('')}${local}<span class="prs-age">${esc(r.age)}</span></div>` +
+        `<div class="prs-line1"><span class="prs-ci ${esc(r.ci)}" data-key="${esc(r.key)}" title="${esc(ciTip(r))}"></span>${title}${marker}<span class="prs-repo">${esc(r.repo.split('/').pop())}</span></div>` +
+        `<div class="prs-line2"><span class="prs-action band${r.band}" title="${esc(r.actionTip)}">${esc(r.action)}</span>${r.agents.map(agent).join('')}${local}<span class="prs-age" data-created="${esc(r.createdAt)}" data-commit="${esc(r.lastCommitAt || '')}">${esc(ageText(r.createdAt, r.lastCommitAt))}</span></div>` +
       `</div>`;
     return html + (series && r.expanded ? r.members.map(row).join('') : '');
   }
@@ -61,17 +81,39 @@
   function render(b) {
     board = b || { status: 'loading' };
     if (!el) return;
+    rowsByKey.clear();
     const top = el.scrollTop;
     const warnings = (board.warnings || []).map(w => `<div class="prs-warning">${esc(w)}</div>`).join('');
     el.innerHTML = (board.status === 'ok' ? header() : '') + warnings + body(board);
     el.scrollTop = top;
   }
 
+  function setText(node, text) {
+    if (node.textContent !== text) node.textContent = text;
+  }
+
   function tick() {
-    if (!el || !board || !board.fetchedAt) return;
-    for (const s of el.querySelectorAll('[data-ago]')) s.textContent = ago(s.dataset.ago);
+    if (!el || !board) return;
+    for (const s of el.querySelectorAll('[data-ago]')) setText(s, ago(s.dataset.ago));
+    for (const s of el.querySelectorAll('.prs-age')) setText(s, ageText(s.dataset.created, s.dataset.commit));
+    for (const d of el.querySelectorAll('.prs-ci[data-key]')) {
+      const r = rowsByKey.get(d.dataset.key);
+      if (r && d.title !== ciTip(r)) d.title = ciTip(r);
+    }
     const u = el.querySelector('.prs-updated');
     if (u) u.classList.toggle('stale', isStale());
+  }
+
+  function fetched(fetchedAt, error) {
+    if (!board) return;
+    board.fetchedAt = fetchedAt;
+    board.error = error;
+    const u = el && el.querySelector('.prs-updated');
+    if (!u) return;
+    const a = u.querySelector('[data-ago]');
+    if (a) { a.dataset.ago = fetchedAt; setText(a, ago(fetchedAt)); }
+    if (error) u.title = error; else u.removeAttribute('title');
+    u.classList.toggle('stale', isStale());
   }
 
   function mount(target, poster) {
@@ -90,5 +132,5 @@
     render(board);
   }
 
-  window.PrPane = { mount, render };
+  window.PrPane = { mount, render, fetched };
 })();
