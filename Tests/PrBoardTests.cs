@@ -18,10 +18,18 @@ public class PrBoardTests
     };
 
     static Board Build(IEnumerable<PullRequest> prs, IReadOnlyList<Worktree>? trees = null, Dictionary<string, LocalState>? local = null,
-        IReadOnlyList<AgentLink>? links = null, Func<string, AgentView?>? describe = null, HashSet<string>? expanded = null) =>
+        IReadOnlyList<AgentLink>? links = null, Func<string, AgentView?>? describe = null, HashSet<string>? expanded = null,
+        HashSet<string>? collapsed = null) =>
         PrBoardBuilder.Build(new PrSnapshot(PrSourceStatus.Ok, prs.ToList(), Array.Empty<string>(), "", Now), "",
             trees ?? Array.Empty<Worktree>(), local ?? new Dictionary<string, LocalState>(), links ?? Array.Empty<AgentLink>(),
-            describe ?? (_ => null), expanded ?? new HashSet<string>());
+            describe ?? (_ => null), expanded ?? new HashSet<string>(), collapsed ?? new HashSet<string>());
+
+    [Fact]
+    public void A_collapsed_section_is_marked_and_keeps_its_count()
+    {
+        var board = Build(new[] { Pr(1), Pr(2, draft: true), Pr(3, draft: true) }, collapsed: new HashSet<string> { "Draft" });
+        Assert.Equal(new[] { ("Live", 1, false), ("Draft", 2, true) }, board.Sections.Select(s => (s.Name, s.Count, s.Collapsed)));
+    }
 
     static IReadOnlyList<BoardRow> Rows(Board b, string section) => b.Sections.Single(s => s.Name == section).Rows;
     static BoardRow Only(params PullRequest[] prs) => Build(prs).Sections.SelectMany(s => s.Rows).Single();

@@ -75,7 +75,9 @@
     }
     if (b.total === 0) return note('No open pull requests', false);
     return b.sections.map(s =>
-      `<div class="prs-section">${esc(s.name)}<span class="prs-section-count">${s.count}</span></div>` + s.rows.map(row).join('')).join('');
+      `<div class="prs-section"><a href="#" data-section="${esc(s.name)}" title="${s.collapsed ? 'Show' : 'Hide'} the ${esc(s.name.toLowerCase())} pull requests">${esc(s.name)}</a>` +
+      `<span class="prs-section-count">${s.count}${s.collapsed ? ' hidden' : ''}</span></div>` +
+      (s.collapsed ? '' : s.rows.map(row).join(''))).join('');
   }
 
   function render(b) {
@@ -120,12 +122,13 @@
     el = target;
     post = poster;
     el.addEventListener('click', ev => {
-      const t = ev.target.closest('[data-url],[data-session],[data-series],[data-refresh]');
+      const t = ev.target.closest('[data-url],[data-session],[data-series],[data-section],[data-refresh]');
       if (!t) return;
       ev.preventDefault();
       if (t.hasAttribute('data-refresh')) post({ type: 'prRefresh' });
       else if (t.dataset.session) post({ type: 'focusSession', sessionId: t.dataset.session });
       else if (t.dataset.series) post({ type: 'prToggleSeries', key: t.dataset.series });
+      else if (t.dataset.section) post({ type: 'prToggleSection', name: t.dataset.section });
       else if (t.dataset.url) post({ type: 'open', uri: t.dataset.url });
     });
     setInterval(tick, 10000);

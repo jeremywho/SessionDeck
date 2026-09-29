@@ -86,4 +86,11 @@ public class SettingsRoundTripTests
         Assert.Equal(new[] { @"C:\Repos", @"C:\Data\Repos", @"E:\src" }, back.PrRepoRoots);
         Assert.Equal(new[] { "acme/web|Sweep" }, back.PrExpandedSeries);
     }
+
+    [Fact]
+    public void Collapsed_pull_request_sections_survive_a_save_and_load()
+    {
+        var s = new Settings { PrCollapsedSections = { "Draft" } };
+        Assert.Equal(new[] { "Draft" }, JsonSerializer.Deserialize<Settings>(JsonSerializer.Serialize(s))!.PrCollapsedSections);
+    }
 }

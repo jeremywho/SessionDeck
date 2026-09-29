@@ -32,7 +32,7 @@ internal sealed record BoardRow
     public IReadOnlyList<BoardRow> Members { get; init; } = Array.Empty<BoardRow>();
 }
 
-internal sealed record BoardSection(string Name, int Count, IReadOnlyList<BoardRow> Rows);
+internal sealed record BoardSection(string Name, int Count, IReadOnlyList<BoardRow> Rows, bool Collapsed = false);
 
 internal sealed record Board(string Status, string Error, IReadOnlyList<string> Warnings, DateTime? FetchedAt, int StaleAfterSeconds, int Total,
                              IReadOnlyList<BoardSection> Sections);
@@ -45,7 +45,8 @@ internal static class PrBoardBuilder
     sealed record Item(bool Draft, int Band, string Repo, int Number, List<BoardRow> Rows);
 
     public static Board Build(PrSnapshot? shown, string error, IReadOnlyList<Worktree> worktrees, IReadOnlyDictionary<string, LocalState> local,
-                              IReadOnlyList<AgentLink> links, Func<string, AgentView?> describe, IReadOnlySet<string> expanded)
+                              IReadOnlyList<AgentLink> links, Func<string, AgentView?> describe, IReadOnlySet<string> expanded,
+                              IReadOnlySet<string>? collapsed = null)
     {
         if (shown == null) return new Board("loading", "", Array.Empty<string>(), null, StaleAfterSeconds, 0, Array.Empty<BoardSection>());
         string status = shown.Status switch
@@ -89,7 +90,8 @@ internal static class PrBoardBuilder
         {
             var mine = items.Where(i => i.Draft == draft).OrderBy(i => i.Band).ThenBy(i => i.Repo, StringComparer.Ordinal).ThenBy(i => i.Number).ToList();
             if (mine.Count == 0) continue;
-            sections.Add(new BoardSection(name, mine.Sum(i => i.Rows.Sum(r => Math.Max(1, r.SeriesCount))), mine.SelectMany(i => i.Rows).ToList()));
+            sections.Add(new BoardSection(name, mine.Sum(i => i.Rows.Sum(r => Math.Max(1, r.SeriesCount))), mine.SelectMany(i => i.Rows).ToList(),
+                collapsed?.Contains(name) == true));
         }
         return new Board(status, error.Length > 0 ? error : shown.Error, shown.Warnings, shown.FetchedAt, StaleAfterSeconds, prs.Count, sections);
 

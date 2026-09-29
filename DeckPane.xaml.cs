@@ -203,6 +203,7 @@ internal partial class DeckPane : UserControl
             }
             case "prRefresh":
             case "prToggleSeries":
+            case "prToggleSection":
             case "focusSession":
                 PrMessage?.Invoke(type, root);
                 return true;

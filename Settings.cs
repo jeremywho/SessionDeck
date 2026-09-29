@@ -53,6 +53,7 @@ internal sealed class Settings
     public bool PrPaneIntroduced { get; set; }                               // the pull requests column was added once on first launch; removing it afterwards sticks
     public List<string> PrRepoRoots { get; set; } = new() { @"C:\Repos", @"C:\Data\Repos" };   // folders whose direct children are git clones the pull requests pane looks in
     public List<string> PrExpandedSeries { get; set; } = new();              // "owner/repo|title" of the pull request series shown expanded
+    public List<string> PrCollapsedSections { get; set; } = new();           // "Live" / "Draft" sections of the pull requests column the user has collapsed
 
     /// <summary>
     /// Settings this build does not know, kept as written. An older build saving the file (it does so

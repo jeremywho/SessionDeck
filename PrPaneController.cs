@@ -156,7 +156,8 @@ internal sealed class PrPaneController
     void Publish()
     {
         var board = PrBoardBuilder.Build(_shown, _error, _worktrees, _local, _links, _describe,
-            new HashSet<string>(_settings.PrExpandedSeries, StringComparer.Ordinal));
+            new HashSet<string>(_settings.PrExpandedSeries, StringComparer.Ordinal),
+            new HashSet<string>(_settings.PrCollapsedSections, StringComparer.Ordinal));
         string signature = Signature(board);
         string fetch = $"{board.FetchedAt:o}|{board.Error}";
         if (signature != _posted)
@@ -183,6 +184,12 @@ internal sealed class PrPaneController
                 break;
             case "focusSession":
                 if (Str(root, "sessionId") is { Length: > 0 } id) _focus(id);
+                break;
+            case "prToggleSection":
+                if (Str(root, "name") is not { Length: > 0 } section) break;
+                if (!_settings.PrCollapsedSections.Remove(section)) _settings.PrCollapsedSections.Add(section);
+                _settings.Save();
+                Publish();
                 break;
             case "prToggleSeries":
                 if (Str(root, "key") is not { Length: > 0 } key) break;
