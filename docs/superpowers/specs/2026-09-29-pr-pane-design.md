@@ -1,6 +1,6 @@
 # Pull requests pane — design
 
-Date: 2026-09-29 · Branch: `pr-pane` · Status: approved in conversation, spec awaiting review
+Date: 2026-09-29. Branch: `pr-pane`. Status: approved, amended 2026-09-29 for the UI rules.
 
 ## Goal
 
@@ -29,9 +29,11 @@ needs next, and which live local Claude Code / Codex sessions are working on it.
   layout has no PR column, one is inserted as the rightmost column taking half the width of the
   rightmost session column, and `Settings.PrPaneIntroduced` is set. Removing the column afterwards
   sticks: it is never re-added automatically.
-- Its strip shows `Pull requests`, the open count, `updated <age>`, and a refresh button. The strip
-  is dragged to move the column, and its context menu offers Move left, Move right and Remove, the
-  same operations and wiring as a spacer strip.
+- Its strip shows `Pull requests`. The strip is dragged to move the column, and its context menu
+  offers Refresh now, Move left, Move right and Remove (the move and drag wiring is the spacer
+  strip's). The pane's own first line shows the open count and `Updated <age> ago`. There is no
+  refresh button on that line, because a button would share a line with text, and no F5 shortcut,
+  because F5 in WebView2 reloads the whole deck page and redraws every terminal.
 - A tab dropped onto the PR column does not enter it: a drop on its left or right half makes a new
   column on that side; a drop on its middle is treated as a drop on its nearer half.
 - Width, position and existence are user-arranged state and are saved with the deck layout (see
@@ -41,14 +43,16 @@ needs next, and which live local Claude Code / Codex sessions are working on it.
 
 ### Grouping and order
 
-- Two sections, **Live** and **Draft**, each headed with its count.
+- Two sections, **Live** and **Draft**, each headed by its name with its count beside it in muted
+  text (no parentheses).
 - **Stacks:** a PR whose base branch is another open PR's head branch in the same repository is
   that PR's child. Children render directly under their parent, indented, at any depth. A stack is
   placed in the section of its root; a child whose draft state differs from the root's carries a
   `draft` / `live` marker.
 - **Series:** two or more PRs in the same repository with identical titles that are not part of a
-  stack collapse into one row showing `×N`. The row's CI is the worst member's, its next action is
-  the most urgent member's, and its agents are the union. The row expands to show its members.
+  stack collapse into one row showing the title and `N PRs` in muted text. The row's CI is the
+  worst member's, its next action is the most urgent member's, and its agents are the union.
+  Clicking the series title shows or hides its members.
   Which series are expanded is saved (`Settings.PrExpandedSeries`, keyed `owner/repo|title`,
   pruned when the series no longer exists).
 - **Order within a section** is by attention band, then repository, then PR number ascending. It
@@ -68,10 +72,15 @@ needs next, and which live local Claude Code / Codex sessions are working on it.
 |---|---|
 | CI | Dot: green (`SUCCESS`), yellow (`PENDING` / `EXPECTED`), red (`FAILURE` / `ERROR`), grey (no checks). Tooltip lists failing checks by name and pending checks with time since they started. |
 | PR | `#N` and title, with the repository name muted. Click opens the PR in the browser. |
-| Next action | One chip: the first match in the list below. Its tooltip lists every match. |
-| Agents | One pill per attributed live session (see *Agents*). |
-| Age | `open 12d · last commit 3d`. |
-| Local | `uncommitted` and/or `N unpushed` when the PR's local worktree has them; tooltip names the worktree path. Empty when there is no local worktree. |
+| Next action | The first match in the list below, as text coloured by band (red, amber, muted, green; text colour only, no background). Its tooltip lists every match. |
+| Agents | Each attributed live session's name followed by its state as text (see *Agents*). |
+| Age | `opened 12d ago, last commit 3d ago`. |
+| Local | `uncommitted changes` and/or `N unpushed commits` when the PR's local worktree has them; tooltip names the worktree path. Empty when there is no local worktree. |
+
+**Visual rules.** None of: middle-dot separators, pill chips, icons or emoji, all-caps or small-caps
+labels, parenthesised counts, text smaller than 12px, backgrounds that are a slightly darker shade of
+their own surface, a divider after the last row, or a button sharing a line with text. Numbers use
+tabular figures, not a monospace font.
 
 ### Next action (first match wins)
 
@@ -83,22 +92,27 @@ needs next, and which live local Claude Code / Codex sessions are working on it.
 6. **Waiting on #parent** — the PR is a stack child.
 7. **CI running** — rollup `PENDING` or `EXPECTED`.
 8. **Merge state unknown** — `mergeable` still `UNKNOWN` after the retry (see *GitHub*).
-9. Drafts: **Draft, all green**. Live PRs: **Needs review** when `reviewDecision == REVIEW_REQUIRED`,
-   otherwise **Ready to merge**.
+9. Drafts: **Draft, all green**, or **Draft, no checks** when it has none. Live PRs: **Needs
+   review** when `reviewDecision == REVIEW_REQUIRED` or `mergeStateStatus == BLOCKED`, otherwise
+   **Ready to merge**.
 
 ## Agents
 
-A pill means: this live session has recently worked on this PR.
+A session listed on a row means: this live session has recently worked on this PR.
 
 **Which sessions.** Every live session the existing scan produces, both the deck's own and
-sessions in other terminals, Claude and Codex. Headless Codex threads that
-`CodexAttribution.Fold` rolls onto a Claude session contribute their evidence to that Claude
-session; `Fold` is extended to keep the folded threads' rollout paths on the owner
-(`SessionInfo.FoldedTranscripts`).
+sessions in other terminals, Claude and Codex. Headless threads that `CodexAttribution.Fold` rolls
+onto a Claude session contribute their evidence to that Claude session; `Fold` is extended to keep
+the folded threads on the owner (`SessionInfo.FoldedThreads`). A folded Claude `bg` session's
+evidence counts as the owner's own; a folded Codex thread's evidence is marked as Codex's.
+A headless thread `Fold` cannot place (a `codex exec` started inside a worktree by a session
+sitting in the home folder is the common case) is today hidden entirely. `Fold` is extended to
+hand those back as unowned, and each becomes an agent of its own, named `Codex exec <id>` (or its
+kind), not clickable because it has no terminal.
 
 **Evidence.** From each session's transcript, the inputs of its last 100 tool calls:
 
-- Claude: `assistant` records' `tool_use` blocks, input serialized to text. Plus the same from each
+- Claude: `assistant` records' `tool_use` blocks, the string values of the input joined. Plus the same from each
   subagent transcript under `projects/<slug>/<sessionId>/subagents/agent-*.jsonl` written in the
   last 2 hours; their evidence belongs to the parent session.
 - Codex: `response_item` payloads of type `custom_tool_call` (`input`) and `function_call`
@@ -110,16 +124,22 @@ compared case-insensitively, so `C:\\Repos\\…`, `C://Repos//…` and `D:/Repos
 
 - a path inside a local worktree whose checked-out branch is an open PR's head branch (see
   *Worktrees*; junctioned paths such as `C:\Repos` → `D:\Repos` resolve to the same worktree);
-- `github.com/<owner>/<repo>/pull/<n>` for an open PR;
+- `github.com/<owner>/<repo>/pull/<n>` or `repos/<owner>/<repo>/pulls/<n>` (also `/issues/<n>`,
+  which the API uses for PR conversation comments) for an open PR;
 - `gh pr <verb> <n>` with `--repo` / `-R <owner>/<repo>` naming an open PR. Without a repo it counts
   only when exactly one open PR has that number.
 
-**Threshold.** A session is attributed to a PR when it has at least 3 hits for it within that
-window. Pills are ordered by the time of their most recent hit, newest first.
+A hit is counted once per tool call per PR. Of two worktree paths where one contains the other, the
+longer match wins. A worktree path matches only as a whole path segment and only after a drive
+(`c:/…`) or a Git Bash drive (`/c/…`), so `…/feat-x` does not match `…/feat-x-old`.
 
-**Pill.** Provider mark, session display name, and state (Working / Awaiting / Idle, from the same
-state mapping the session list uses). A `via codex` tag marks attribution that came only from
-folded Codex threads. The tooltip states the evidence, e.g. `41 tool calls in …/<worktree>`.
+**Threshold.** A session is attributed to a PR when it has at least 3 hits for it within that
+window. Sessions are ordered by the time of their most recent hit, newest first.
+
+**Display.** The session's display name, then its state as text: working, awaiting input, idle,
+error, or scheduled (the session list's state mapping). `via Codex` follows when the attribution
+came only from folded Codex threads. The tooltip states the evidence, e.g.
+`41 tool calls in <worktree folder>`.
 
 **Click.** A deck session activates its tab (the list's existing "Show tab" path). A session in
 another terminal is focused with `WindowActivator.Activate`.
@@ -139,8 +159,10 @@ takes 1 s or more.
   on the canonical path, so a second clone of the same repository that reports the same worktrees
   adds nothing.
 - **Local state,** for worktrees whose branch is an open PR's head branch only:
-  - `git -C <wt> status --porcelain` non-empty → `uncommitted`;
-  - `git -C <wt> rev-list --count <headRefOid>..HEAD` > 0 → `N unpushed`. When the PR's head
+  - `git -C <wt> status --porcelain` non-empty → `uncommitted changes`. Every git call runs with
+    `GIT_OPTIONAL_LOCKS=0`, so a status refresh never takes `index.lock` from under an agent
+    working in that worktree;
+  - `git -C <wt> rev-list --count <headRefOid>..HEAD` > 0 → `N unpushed commits`. When the PR's head
     commit is not present locally (`git cat-file -e` fails), unpushed is reported as unknown and
     shown as nothing.
 - **Cadence:** every 2 minutes, and immediately for a PR whose head commit changed. Git calls run
@@ -158,8 +180,9 @@ takes 1 s or more.
   __typename ... on CheckRun{name status conclusion startedAt detailsUrl}
   ... on StatusContext{context state createdAt targetUrl}}}}}}}`.
 - **Cadence:** every 60 s while the window is visible, every 5 minutes while hidden in the tray,
-  immediately when the window is shown or refresh is clicked. All callers go through one
-  `SingleFlight` with a 15 s minimum gap between calls.
+  immediately when the window is shown or refresh is chosen. All callers go through one
+  `SingleFlight`; the timer and window-show calls also keep a 15 s minimum gap, and a refresh the
+  user chose always runs.
 - **Mergeability is lazy.** GitHub returns `mergeable: UNKNOWN` until it has computed it. PRs that
   come back `UNKNOWN` are re-read once, about 3 s later, with `nodes(ids: [...])`.
 - **`gh` invocation** reuses the pattern in `Updater.Gh` (both pipes drained concurrently, no
@@ -167,10 +190,11 @@ takes 1 s or more.
 
 ## Failure behaviour
 
-- **`gh` not found:** the column body says so, with the install link.
-- **Not authenticated:** the column body shows `gh auth login` to run.
+- **`gh` not found:** the column body says so, with the install link, and a Refresh button on its
+  own line below the message.
+- **Not authenticated:** the column body shows `gh auth login` to run, and the same Refresh button.
 - **Call fails** (network, rate limit, non-zero exit): the last good board stays. The strip's
-  `updated <age>` turns amber after 150 s visible (two and a half missed polls; the same rule the
+  `Updated <age> ago` text turns amber after 150 s visible (two and a half missed polls; the same rule the
   usage bar uses) and the tooltip carries the error.
 - **Partial GraphQL errors** (for example an organization that requires SSO authorization): the PRs
   that came back are shown, plus one warning line naming the organization.
@@ -186,7 +210,11 @@ takes 1 s or more.
   board's value signature changes, so an unchanged refresh does not re-render (and does not close
   an open tooltip). Updated-age text ticks in the page itself.
 - Page → app messages: `open` (existing, for PR and check links), `focusSession {sessionId}`,
-  `prRefresh`, `prToggleSeries {key}`.
+  `prRefresh` (the Refresh button in failure states), `prToggleSeries {key}`.
+  The strip's Refresh now menu item calls the controller directly.
+- `DeckBrowser` today passes a page message on only when it names a terminal (`id`), which already
+  drops `dropSpacer` and, between two terminal-less columns, `fractions`. Messages without an `id`
+  are routed to a page-level handler instead; the PR column's drag and messages depend on it.
 - Colours follow the deck's dark/light theme and look. No repeating animations of any kind: the
   project measured small status animations keeping the compositor above one core.
 
@@ -245,13 +273,17 @@ Unit tests (xUnit, `Tests/`):
   snapshot → restore round trip; an old build's view of the saved column (a spacer); the
   model-level transitions in the list above.
 
+A headless dump, `SessionDeck.exe --prs`, runs the whole pipeline once and writes the board to
+`%TEMP%\sessiondeck-prs.json`; `tools/pr-pane-check.ps1` compares it with `gh search prs` and can
+assert a named session is attributed to a named PR.
+
 Live verification, on an isolated instance (`SD_DATA_DIR` set to a temp directory,
 `SD_NO_INSTALL=1`) so the user's settings are untouched:
 
 - The PR column appears on first launch; a screenshot shows it.
 - Its Live/Draft counts and PR numbers match `gh search prs --author=@me --state=open` run at the
   same time.
-- A session known to be working in a PR's worktree shows as that PR's pill, and clicking it
+- A session known to be working in a PR's worktree is listed on that PR's row, and clicking its name
   activates that session's tab.
 - With `gh` removed from `PATH`, the column shows the not-found message.
 - The app-level transitions from *Persistence* are rehearsed and the PR column's position and width
