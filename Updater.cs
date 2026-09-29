@@ -159,24 +159,10 @@ internal static class Updater
     {
         try
         {
-            var psi = new ProcessStartInfo("gh", args)
-            {
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            };
-            using var p = Process.Start(psi);
-            if (p == null) return null;
-            // Both pipes are redirected, so both must be drained concurrently: reading stdout to
-            // completion first deadlocks if gh fills the (~4KB) stderr pipe buffer while we're
-            // not reading it — gh blocks writing stderr, we block waiting for stdout EOF.
-            var stdout = p.StandardOutput.ReadToEndAsync();
-            var stderr = p.StandardError.ReadToEndAsync();
-            await Task.WhenAll(stdout, stderr, p.WaitForExitAsync());
-            return p.ExitCode == 0 ? stdout.Result : null;
+            var r = await GhCli.RunAsync(args, timeout: null);
+            return r.ExitCode == 0 && !r.NotFound ? r.Stdout : null;
         }
-        catch { return null; }   // gh not installed / not on PATH
+        catch { return null; }
     }
 
     static void TryDelete(string path) { try { if (File.Exists(path)) File.Delete(path); } catch { } }
