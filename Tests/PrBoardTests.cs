@@ -95,6 +95,14 @@ public class PrBoardTests
         Assert.All(Build(new[] { Pr(1, repo: "acme/x", head: "feat"), Pr(2, repo: "acme/y", @base: "feat") }).Sections.Single().Rows, r => Assert.Equal(0, r.Depth));
 
     [Fact]
+    public void A_pull_request_from_a_fork_is_never_a_parent()
+    {
+        var rows = Rows(Build(new[] { Pr(1, head: "main") with { IsCrossRepository = true, HeadRepo = "me/web" }, Pr(2, @base: "main") }), "Live");
+        Assert.All(rows, r => Assert.Equal(0, r.Depth));
+        Assert.DoesNotContain(rows, r => r.Action.StartsWith("Waiting on", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Identical_titles_collapse_into_one_series_row()
     {
         var prs = new[] { Pr(10, title: "Sweep"), Pr(11, title: "Sweep", ci: CiState.Failure, checks: new[] { Failing("build") }), Pr(12, title: "Other") };

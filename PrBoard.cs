@@ -180,7 +180,7 @@ internal static class PrBoardBuilder
     static Dictionary<PullRequest, PullRequest> Parents(IReadOnlyList<PullRequest> prs)
     {
         var byHead = new Dictionary<(string, string), PullRequest>();
-        foreach (var p in prs) byHead.TryAdd((p.Repo.ToLowerInvariant(), p.HeadRef), p);
+        foreach (var p in prs.Where(p => !p.IsCrossRepository)) byHead.TryAdd((p.Repo.ToLowerInvariant(), p.HeadRef), p);
         var raw = new Dictionary<PullRequest, PullRequest>();
         foreach (var p in prs)
             if (byHead.TryGetValue((p.Repo.ToLowerInvariant(), p.BaseRef), out var parent) && !ReferenceEquals(parent, p)) raw[p] = parent;

@@ -27,6 +27,8 @@ internal sealed record PullRequest
     public string BaseRef { get; init; } = "";
     public string HeadRef { get; init; } = "";
     public string HeadOid { get; init; } = "";
+    public bool IsCrossRepository { get; init; }
+    public string HeadRepo { get; init; } = "";
     public string Mergeable { get; init; } = "";
     public string MergeState { get; init; } = "";
     public string ReviewDecision { get; init; } = "";
@@ -52,6 +54,7 @@ internal static class PrSource
                 id number title url isDraft createdAt
                 repository { nameWithOwner }
                 baseRefName headRefName headRefOid
+                isCrossRepository headRepository { nameWithOwner }
                 mergeable mergeStateStatus reviewDecision
                 reviewThreads(first: 100) { nodes { isResolved } }
                 commits(last: 1) { nodes { commit { committedDate statusCheckRollup { state contexts(first: 100) { nodes {
@@ -176,6 +179,8 @@ internal static class PrSource
             BaseRef = Str(n, "baseRefName"),
             HeadRef = Str(n, "headRefName"),
             HeadOid = Str(n, "headRefOid"),
+            IsCrossRepository = n.TryGetProperty("isCrossRepository", out var x) && x.ValueKind == JsonValueKind.True,
+            HeadRepo = Obj(n, "headRepository", out var head) ? Str(head, "nameWithOwner") : "",
             Mergeable = Str(n, "mergeable"),
             MergeState = Str(n, "mergeStateStatus"),
             ReviewDecision = Str(n, "reviewDecision"),

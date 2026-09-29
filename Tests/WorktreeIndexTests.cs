@@ -85,6 +85,20 @@ public class WorktreeIndexTests
         Assert.Equal(new LocalState(false, null), WorktreeIndex.ReadLocalState(@"C:\wt", "abc", (_, a) => a[0] switch { "status" => "", "cat-file" => null, _ => "5" }));
 
     [Fact]
+    public void A_fork_pull_request_matches_the_worktree_in_the_fork_clone()
+    {
+        var pr = new PullRequest { Repo = "acme/web", HeadRef = "feat", IsCrossRepository = true, HeadRepo = "me/web" };
+        Assert.True(new Worktree("me/web", "feat", @"C:\wt", @"D:\wt").Matches(pr));
+        Assert.False(new Worktree("acme/web", "feat", @"C:\wt2", @"D:\wt2").Matches(pr));
+        Assert.False(new Worktree("acme/web", "feat", @"C:\wt3", @"D:\wt3").Matches(pr with { HeadRepo = "" }));
+    }
+
+    [Fact]
+    public void The_repositories_to_look_in_are_the_base_for_branch_prs_and_the_fork_for_fork_prs() =>
+        Assert.Equal(new[] { "acme/api", "me/web" },
+            WorktreeIndex.ReposOf(new[] { new PullRequest { Repo = "acme/api" }, new PullRequest { Repo = "acme/web", IsCrossRepository = true, HeadRepo = "me/web" } }).Order());
+
+    [Fact]
     public void A_worktree_matches_its_pr_by_repository_and_head_branch()
     {
         var w = new Worktree("acme/web", "feat", @"C:\wt", @"D:\wt");

@@ -7,7 +7,8 @@ namespace SessionDeck;
 
 internal sealed record Worktree(string Repo, string Branch, string Path, string CanonicalPath)
 {
-    public bool Matches(PullRequest pr) => string.Equals(Repo, pr.Repo, StringComparison.OrdinalIgnoreCase) && Branch == pr.HeadRef;
+    public bool Matches(PullRequest pr) =>
+        WorktreeIndex.HeadRepoOf(pr) is { Length: > 0 } head && string.Equals(Repo, head, StringComparison.OrdinalIgnoreCase) && Branch == pr.HeadRef;
 }
 
 internal sealed record LocalState(bool Uncommitted, int? Unpushed);
@@ -118,11 +119,16 @@ internal static class WorktreeIndex
         return new LocalState(dirty, unpushed);
     }
 
+    /// <summary>The repository whose clone holds the PR's head branch: its own for a branch PR, the fork for a fork PR ("" when the fork is gone).</summary>
+    public static string HeadRepoOf(PullRequest pr) => pr.IsCrossRepository ? pr.HeadRepo : pr.Repo;
+
+    public static HashSet<string> ReposOf(IEnumerable<PullRequest> prs) =>
+        new(prs.Select(HeadRepoOf).Where(r => r.Length > 0), StringComparer.OrdinalIgnoreCase);
+
     /// <summary>Worktrees of the repositories these PRs live in, and the local state of each PR's own worktree, keyed by canonical path.</summary>
     public static (List<Worktree> Worktrees, Dictionary<string, LocalState> Local) Scan(IReadOnlyList<PullRequest> prs, IEnumerable<string> roots)
     {
-        var repos = new HashSet<string>(prs.Select(p => p.Repo), StringComparer.OrdinalIgnoreCase);
-        var worktrees = Build(FindClones(roots), repos, clone => GitCli.Run(clone, new[] { "worktree", "list", "--porcelain" }), Canonical);
+        var worktrees = Build(FindClones(roots), ReposOf(prs), clone => GitCli.Run(clone, new[] { "worktree", "list", "--porcelain" }), Canonical);
         var local = new Dictionary<string, LocalState>(StringComparer.OrdinalIgnoreCase);
         foreach (var pr in prs)
             if (worktrees.FirstOrDefault(w => w.Matches(pr)) is { } w && !local.ContainsKey(w.CanonicalPath))

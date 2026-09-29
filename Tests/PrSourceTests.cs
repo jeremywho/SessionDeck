@@ -10,6 +10,7 @@ public class PrSourceTests
         {"data":{"search":{"pageInfo":{"hasNextPage":false,"endCursor":"Y3Vyc29yOjM="},"nodes":[
          {"id":"PR_a1","number":101,"title":"Add the widget","url":"https://github.com/acme/web/pull/101","isDraft":false,"createdAt":"2026-09-20T10:00:00Z",
           "repository":{"nameWithOwner":"acme/web"},"baseRefName":"main","headRefName":"widget","headRefOid":"aaa111",
+          "isCrossRepository":false,"headRepository":{"nameWithOwner":"acme/web"},
           "mergeable":"MERGEABLE","mergeStateStatus":"BLOCKED","reviewDecision":"REVIEW_REQUIRED",
           "reviewThreads":{"nodes":[{"isResolved":true},{"isResolved":false}]},
           "commits":{"nodes":[{"commit":{"committedDate":"2026-09-28T09:00:00Z","statusCheckRollup":{"state":"FAILURE","contexts":{"nodes":[
@@ -18,6 +19,7 @@ public class PrSourceTests
             {"__typename":"StatusContext","context":"ci/external","state":"SUCCESS","createdAt":"2026-09-28T09:03:00Z","targetUrl":"https://ci.example/s/3"}]}}}}]}},
          {"id":"PR_a2","number":102,"title":"Widget follow-up","url":"https://github.com/acme/web/pull/102","isDraft":true,"createdAt":"2026-09-21T10:00:00Z",
           "repository":{"nameWithOwner":"acme/web"},"baseRefName":"widget","headRefName":"widget-2","headRefOid":"bbb222",
+          "isCrossRepository":true,"headRepository":{"nameWithOwner":"me/web"},
           "mergeable":"UNKNOWN","mergeStateStatus":"UNKNOWN","reviewDecision":null,
           "reviewThreads":{"nodes":[]},
           "commits":{"nodes":[{"commit":{"committedDate":"2026-09-22T09:00:00Z","statusCheckRollup":null}}]}},
@@ -50,6 +52,8 @@ public class PrSourceTests
         var b = page.Prs[1];
         Assert.Equal((true, "UNKNOWN", "", CiState.None, 0, 0), (b.IsDraft, b.Mergeable, b.ReviewDecision, b.Ci, b.Checks.Count, b.OpenThreads));
         Assert.Equal(PrKey.Of("ACME/web", 101), a.Key);
+        Assert.Equal((false, "acme/web", true, "me/web"), (a.IsCrossRepository, a.HeadRepo, b.IsCrossRepository, b.HeadRepo));
+        Assert.Contains("isCrossRepository headRepository { nameWithOwner }", PrSource.Query);
     }
 
     [Fact]
