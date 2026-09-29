@@ -80,6 +80,7 @@
                 <Separator/>
                 <MenuItem Header="Add spacer column to the left" Click="AddSpacerLeftMenu_Click" Tag="{Binding}"/>
                 <MenuItem Header="Add spacer column to the right" Click="AddSpacerMenu_Click" Tag="{Binding}"/>
+                <MenuItem Header="Add pull requests column to the right" x:Uid="AddPrPane" Click="AddPrPaneMenu_Click" Tag="{Binding}"/>
               </ContextMenu>
             </ui:Button.ContextMenu>
           </ui:Button>
@@ -156,6 +157,26 @@
             <MenuItem Header="Remove spacer" Click="SpacerRemove_Click" Tag="{Binding}"/>
           </ContextMenu>
         </Border.ContextMenu>
+      </Border>
+    </DataTemplate>
+
+    <!-- MinHeight 38 keeps this strip level with the session list header, like the tab strips. -->
+    <DataTemplate x:Key="PrStripTemplate">
+      <Border Background="Transparent" MinHeight="38" Padding="12,0,6,0" AllowDrop="True" DragOver="Strip_DragOver" Drop="PrStrip_Drop" Cursor="SizeAll"
+              Tag="{Binding}" AutomationProperties.AutomationId="PrStrip"
+              MouseLeftButtonDown="Spacer_MouseLeftButtonDown" MouseMove="Spacer_MouseMove"
+              ToolTip="Pull requests: drag to move this column, right-click to refresh or remove it">
+        <Border.ContextMenu>
+          <ContextMenu>
+            <MenuItem Header="Refresh now" Click="PrRefreshMenu_Click" Tag="{Binding}"/>
+            <Separator/>
+            <MenuItem Header="Move left" Click="SpacerMoveLeft_Click" Tag="{Binding}"/>
+            <MenuItem Header="Move right" Click="SpacerMoveRight_Click" Tag="{Binding}"/>
+            <Separator/>
+            <MenuItem Header="Remove pull requests column" Click="PrRemoveMenu_Click" Tag="{Binding}"/>
+          </ContextMenu>
+        </Border.ContextMenu>
+        <TextBlock Text="Pull requests" FontSize="12.5" VerticalAlignment="Center" Foreground="{DynamicResource Fg2Brush}"/>
       </Border>
     </DataTemplate>
   </UserControl.Resources>

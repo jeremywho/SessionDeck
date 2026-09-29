@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <title>terminal</title>
 <link rel="stylesheet" href="xterm.css">
+<link rel="stylesheet" href="prs.css">
 <style>
   html { color-scheme: dark; }
   html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: transparent; }
@@ -36,11 +37,13 @@
 </head>
 <body>
 <div id="dropzone"></div>
+<div id="prs" class="pane prs"></div>
 <div id="empty">No session open.<br>Click a hosted row on the left, or start one with the buttons.<br><br>Ctrl+Tab cycles tabs · Ctrl+W closes · drag tabs to reorder</div>
 <script src="xterm.js"></script>
 <script src="addon-fit.js"></script>
 <script src="addon-unicode11.js"></script>
 <script src="addon-web-links.js"></script>
+<script src="prs.js"></script>
 <script>
 (() => {
   const q = new URLSearchParams(location.search);
@@ -110,6 +113,11 @@
   function setSurface() {
     document.documentElement.style.setProperty('--bg', hexToRgba(baseOf().background, look.opacity / 100));
     document.documentElement.style.setProperty('--fg3', dark ? '#8a8d93' : '#6b6f78');
+    const vars = dark
+      ? { '--fg': '#e8e9eb', '--fg2': '#b8bbc2', '--pr-red': '#f2555a', '--pr-amber': '#e5b84f', '--pr-green': '#5bc46b', '--pr-blue': '#7fb3ff', '--pr-line': 'rgba(138, 141, 147, 0.22)', '--pr-line-strong': 'rgba(138, 141, 147, 0.5)' }
+      : { '--fg': '#1a1c1f', '--fg2': '#3c4043', '--pr-red': '#c62828', '--pr-amber': '#9a6b00', '--pr-green': '#2e7d32', '--pr-blue': '#1e5bc6', '--pr-line': 'rgba(0, 0, 0, 0.12)', '--pr-line-strong': 'rgba(0, 0, 0, 0.35)' };
+    for (const [k, v] of Object.entries(vars)) document.documentElement.style.setProperty(k, v);
+    document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
   }
   setSurface();
 
@@ -143,6 +151,19 @@
   let groups = [];
   let focused = 0;
   const dividers = [];
+
+  const prsEl = document.getElementById('prs');
+  PrPane.mount(prsEl, post);
+  function placePrs() {
+    const total = groups.reduce((a, g) => a + g.frac, 0) || 1;
+    let x = 0, shown = false;
+    for (let i = 0; i < groups.length; i++) {
+      const w = groups[i].frac / total * 100;
+      if (groups[i].kind === 'prs') { place(prsEl, i, x, w); shown = true; }
+      x += w;
+    }
+    prsEl.classList.toggle('shown', shown);
+  }
 
   function send(p, obj) {
     if (p.ws && p.ws.readyState === WebSocket.OPEN) p.ws.send(JSON.stringify(obj));
@@ -285,7 +306,8 @@
       if (i < n - 1) dividers[i].style.left = `${x}%`;
     }
     placeFillers();
-    empty.classList.toggle('hidden', shownIds.size > 0);
+    placePrs();
+    empty.classList.toggle('hidden', shownIds.size > 0 || groups.some(g => g.kind === 'prs'));
     const f = groups[focused] && groups[focused].id ? panes.get(groups[focused].id) : null;
     document.title = f ? `terminal port=${f.port}` : 'terminal';
   }
@@ -304,7 +326,7 @@
     let x = 0, used = 0;
     for (let i = 0; i < groups.length; i++) {
       const w = groups[i].frac / total * 100;
-      if (!groups[i].id) {
+      if (!groups[i].id && groups[i].kind !== 'prs') {
         if (used >= fillers.length) {
           const el = document.createElement('div');
           el.className = 'pane filler shown';
@@ -335,6 +357,7 @@
       if (k === i && i < n - 1) dividers[i].style.left = `${x}%`;
     }
     placeFillers();
+    placePrs();
   }
 
   function focusGroup(i) {
@@ -416,6 +439,10 @@
     for (let i = 0; i < groups.length; i++) {
       const w = groups[i].frac / total * width;
       if (clientX <= x + w || i === groups.length - 1) {
+        if (groups[i].kind === 'prs') {
+          const mid = x + w / 2;
+          return clientX < mid ? { group: i, side: 'left', left: x, right: mid } : { group: i, side: 'right', left: mid, right: x + w };
+        }
         const edge = Math.min(w * 0.25, 160);
         if (clientX < x + edge) return { group: i, side: 'left', left: x, right: x + edge };
         if (clientX > x + w - edge) return { group: i, side: 'right', left: x + w - edge, right: x + w };
@@ -482,7 +509,7 @@
       switch (m.type) {
         case 'open': open(m.id, m.port, m.token); break;
         case 'layout':
-          groups = m.groups.map(g => ({ id: g.id || null, frac: Number(g.frac) || 1 }));
+          groups = m.groups.map(g => ({ id: g.id || null, frac: Number(g.frac) || 1, kind: g.kind || 'tabs' }));
           focused = Math.min(m.focused ?? focused, Math.max(0, groups.length - 1));
           layout();
           break;
@@ -499,6 +526,7 @@
         case 'fit': for (const p of panes.values()) p.fit.fit(); break;
         case 'kill': { const p = panes.get(m.id); if (p) send(p, { type: 'kill' }); break; }
         case 'theme': dark = !!m.dark; look = lookFrom(m.look || {}); applyLook(); break;
+        case 'prs': PrPane.render(m.board); break;
       }
     });
   }

@@ -79,6 +79,18 @@ internal partial class DeckPane : UserControl
     /// <summary>A column's "+" asked for a new session there: "claude", "codex" or "shell". The column is focused first.</summary>
     public event Action<string>? NewSessionRequested;
 
+    /// <summary>A pull requests message: prRefresh, prToggleSeries or focusSession.</summary>
+    public event Action<string, JsonElement>? PrMessage;
+
+    /// <summary>The page reloaded; anything it showed besides terminals has to be sent again.</summary>
+    public event Action? PageReloaded;
+
+    public bool HasPrPane => _model.PrPane != null;
+
+    public void IntroducePrPane() { if (_model.IntroducePrPane() != null) Changed(); }
+
+    public void PostToPage(object message) => _browser.Post(message);
+
     void RequestNew(object sender, string kind)
     {
         if (sender is FrameworkElement { Tag: DeckGroup<DeckTab> g } && Groups.Contains(g)) { _model.Focused = Groups.IndexOf(g); Mark(); }
@@ -92,6 +104,7 @@ internal partial class DeckPane : UserControl
         if (sender is FrameworkElement { ContextMenu: { } menu } fe)
         {
             AddProfileItems(fe, menu);
+            ShowPrPaneItem(menu);
             menu.PlacementTarget = fe;
             Dispatcher.BeginInvoke(() => menu.IsOpen = true);
         }
@@ -148,7 +161,9 @@ internal partial class DeckPane : UserControl
         if (type == "dropTab")
         {
             int gi = Math.Clamp(root.GetProperty("group").GetInt32(), 0, Math.Max(0, Groups.Count - 1));
-            switch (root.GetProperty("side").GetString())
+            string side = root.GetProperty("side").GetString() ?? "";
+            if (Groups.Count > 0 && Groups[gi].IsPrPane && side is not ("left" or "right")) side = "right";
+            switch (side)
             {
                 case "left": SplitAt(tab, gi, gi); break;
                 case "right": SplitAt(tab, gi + 1, gi); break;
@@ -182,10 +197,15 @@ internal partial class DeckPane : UserControl
             {
                 int from = root.GetProperty("index").GetInt32();
                 int gi = Math.Clamp(root.GetProperty("group").GetInt32(), 0, Math.Max(0, Groups.Count - 1));
-                if (from >= 0 && from < Groups.Count && Groups[from].IsSpacer
+                if (from >= 0 && from < Groups.Count && !Groups[from].HoldsTabs
                     && _model.MoveGroupTo(Groups[from], root.GetProperty("side").GetString() == "left" ? gi : gi + 1)) Changed();
                 return true;
             }
+            case "prRefresh":
+            case "prToggleSeries":
+            case "focusSession":
+                PrMessage?.Invoke(type, root);
+                return true;
         }
         return false;
     }
@@ -195,6 +215,7 @@ internal partial class DeckPane : UserControl
     {
         foreach (var t in Tabs) t.View.Open();
         SendLayout();
+        PageReloaded?.Invoke();
     }
 
     // ---------------- layout: model → strips + page ----------------
@@ -204,7 +225,7 @@ internal partial class DeckPane : UserControl
         _browser.Post(new
         {
             type = "layout",
-            groups = Groups.Select(g => new { id = g.Active?.View.Host.Id, frac = g.Fraction }).ToArray(),
+            groups = Groups.Select(g => new { id = g.Active?.View.Host.Id, frac = g.Fraction, kind = g.IsPrPane ? "prs" : g.IsSpacer ? "spacer" : "tabs" }).ToArray(),
             focused = _model.Focused,
         });
     }
@@ -236,10 +257,11 @@ internal partial class DeckPane : UserControl
         StripGrid.ColumnDefinitions.Clear();
         var template = (DataTemplate)FindResource("GroupStripTemplate");
         var spacerTemplate = (DataTemplate)FindResource("SpacerStripTemplate");
+        var prTemplate = (DataTemplate)FindResource("PrStripTemplate");
         for (int i = 0; i < Groups.Count; i++)
         {
             StripGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Math.Max(0.05, Groups[i].Fraction), GridUnitType.Star) });
-            var strip = new ContentPresenter { Content = Groups[i], ContentTemplate = Groups[i].IsSpacer ? spacerTemplate : template };
+            var strip = new ContentPresenter { Content = Groups[i], ContentTemplate = Groups[i].IsPrPane ? prTemplate : Groups[i].IsSpacer ? spacerTemplate : template };
             if (i > 0) strip.Margin = new Thickness(1, 0, 0, 0);
             Grid.SetColumn(strip, i);
             StripGrid.Children.Add(strip);
@@ -523,6 +545,40 @@ internal partial class DeckPane : UserControl
     void SpacerMoveLeft_Click(object sender, RoutedEventArgs e) { if (GroupTag(sender) is { } g && _model.MoveGroup(g, -1)) Changed(); }
     void SpacerMoveRight_Click(object sender, RoutedEventArgs e) { if (GroupTag(sender) is { } g && _model.MoveGroup(g, 1)) Changed(); }
     void SpacerRemove_Click(object sender, RoutedEventArgs e) { if (GroupTag(sender) is { } g && _model.RemoveSpacer(g)) { Changed(); FocusedGroup?.Active?.View.FocusTerminal(); } }
+
+    void ShowPrPaneItem(ContextMenu menu)
+    {
+        foreach (var item in menu.Items.OfType<MenuItem>().Where(m => m.Uid == "AddPrPane"))
+            item.Visibility = _model.PrPane == null ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    void AddPrPaneMenu_Click(object sender, RoutedEventArgs e)
+    {
+        var beside = GroupTag(sender);
+        int at = beside != null && Groups.Contains(beside) ? Groups.IndexOf(beside) + 1 : Groups.Count;
+        if (_model.AddPrPane(at) != null) Changed();
+    }
+
+    void PrRemoveMenu_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_model.RemovePrPane()) return;
+        Changed();
+        FocusedGroup?.Active?.View.FocusTerminal();
+    }
+
+    void PrRefreshMenu_Click(object sender, RoutedEventArgs e) => PrMessage?.Invoke("prRefresh", default);
+
+    /// <summary>A tab dropped on the PR strip opens a column on that side of it; a column dropped there lands on that side.</summary>
+    void PrStrip_Drop(object sender, DragEventArgs e)
+    {
+        if (GroupOfStrip(sender) is { IsPrPane: true } pr && Groups.Contains(pr))
+        {
+            bool after = RightHalf(sender, e);
+            if (e.Data.GetData(typeof(DeckGroup<DeckTab>)) is DeckGroup<DeckTab> column) DropSpacerOn(column, pr, after);
+            else if (e.Data.GetData(typeof(DeckTab)) is DeckTab dragged) SplitAt(dragged, Groups.IndexOf(pr) + (after ? 1 : 0), Groups.IndexOf(pr));
+        }
+        e.Handled = true;
+    }
 
     const string SpacerDragPrefix = "sessiondeck-spacer:";
     Point _spacerDragStart;

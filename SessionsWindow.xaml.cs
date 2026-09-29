@@ -697,6 +697,13 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         PerformanceLog.Write($"reattach hosts={hosts.Count} ids={string.Join(",", hosts.Select(h => h.Id))} columns={_app.Settings.Deck.Columns.Count}");
         Deck.Restore(_app.Settings.Deck, hosts);
         _deckRestored = true;
+        if (!_app.Settings.PrPaneIntroduced)
+        {
+            _app.Settings.PrPaneIntroduced = true;
+            Deck.IntroducePrPane();
+            _app.Settings.Deck = Deck.LayoutFor(SessionOf, HostManager.IsAlive);
+            _app.Settings.Save();
+        }
     }
 
     static string HomeDir => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);

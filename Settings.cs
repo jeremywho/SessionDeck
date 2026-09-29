@@ -50,6 +50,7 @@ internal sealed class Settings
     public const string RowOrderName = "Name";
     public List<SessionGroup> SessionGroups { get; set; } = new();          // named, collapsible sets of sessions in the list; members are session ids
     public DeckLayout Deck { get; set; } = new();                            // the tab columns as last laid out, rebuilt on reattach
+    public bool PrPaneIntroduced { get; set; }                               // the pull requests column was added once on first launch; removing it afterwards sticks
 
     /// <summary>
     /// Settings this build does not know, kept as written. An older build saving the file (it does so

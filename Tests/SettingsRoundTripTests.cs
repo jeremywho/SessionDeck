@@ -68,4 +68,13 @@ public class SettingsRoundTripTests
         Assert.Equal("[1,2]", doc.RootElement.GetProperty("FutureThing").GetProperty("a").GetRawText());
         Assert.True(doc.RootElement.GetProperty("FutureFlag").GetBoolean());
     }
+
+    [Fact]
+    public void Pull_request_pane_settings_survive_a_save_and_load()
+    {
+        var s = new Settings { PrPaneIntroduced = true };
+        var back = JsonSerializer.Deserialize<Settings>(JsonSerializer.Serialize(s))!;
+        Assert.True(back.PrPaneIntroduced);
+        Assert.False(new Settings().PrPaneIntroduced);
+    }
 }

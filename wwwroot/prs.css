@@ -1,0 +1,2 @@
+.pane.prs { overflow-y: auto; overflow-x: hidden; padding: 8px 14px 16px 14px; font: 13px "Segoe UI Variable Text", "Segoe UI", sans-serif; color: var(--fg); font-variant-numeric: tabular-nums; scrollbar-width: thin; }
+.prs-note { color: var(--fg2); line-height: 1.6; padding: 16px 0; }
