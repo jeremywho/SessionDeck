@@ -101,6 +101,14 @@ The four columns above are the default. **Right-click any column header** to sho
 (raw Status, PID, Id, context tokens, Last Tool, CWD, Version). Column visibility, order, and width
 are all remembered.
 
+## Pull requests column
+A deck column listing your open pull requests (the `gh` user's), split into Live and Draft: CI
+state, conflicts, what each needs next, how long it has been open, unpushed or uncommitted work in
+its local worktree, and which live Claude and Codex sessions are working on it (click a session to
+jump to its tab). Stacked PRs nest under the PR they build on; PRs with identical titles collapse
+into one row. It is added once on first launch; remove it from its strip's menu, or add it back
+from any column's `+` menu. It needs the GitHub CLI signed in (`gh auth login`) and only reads.
+
 ## Docking
 Right-click the tray icon → **Dock to** → an edge or corner, and the window **snaps there on the
 monitor it's currently on** (multi-monitor aware). Edges become a full-height sidebar (pair with the
