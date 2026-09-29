@@ -86,16 +86,22 @@ internal partial class DeckPane : UserControl
     }
 
     void NewInGroup_Click(object sender, RoutedEventArgs e) => RequestNew(sender, "claude");
+    /// <summary>Opened from code, which raises no ContextMenuOpening, so the account items are added right here.</summary>
     void NewInGroup_RightClick(object sender, MouseButtonEventArgs e)
     {
-        if (sender is FrameworkElement { ContextMenu: { } menu }) { menu.PlacementTarget = (UIElement)sender; Dispatcher.BeginInvoke(() => menu.IsOpen = true); }
+        if (sender is FrameworkElement { ContextMenu: { } menu } fe)
+        {
+            AddProfileItems(fe, menu);
+            menu.PlacementTarget = fe;
+            Dispatcher.BeginInvoke(() => menu.IsOpen = true);
+        }
         e.Handled = true;
     }
 
     /// <summary>One "New Claude session as …" item per pinned account found on disk, refreshed each time the menu opens.</summary>
-    void NewInGroup_MenuOpening(object sender, ContextMenuEventArgs e)
+    void AddProfileItems(FrameworkElement plus, ContextMenu menu)
     {
-        if (sender is not FrameworkElement { ContextMenu: { } menu, Tag: var group }) return;
+        var group = plus.Tag;
         foreach (var stale in menu.Items.OfType<MenuItem>().Where(m => m.Tag is ClaudeProfile).ToList()) menu.Items.Remove(stale);
         int at = 1;
         foreach (var p in ClaudeProfiles.Discover())
