@@ -26,6 +26,8 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     public ObservableCollection<SessionRow> Rows { get; } = new();
     readonly Dictionary<string, SessionRow> _rowsById = new();
     volatile SessionInfo[] _externalSnapshot = Array.Empty<SessionInfo>();
+    volatile SessionInfo[] _unownedSnapshot = Array.Empty<SessionInfo>();
+    PrPaneController? _prs;
     public ObservableCollection<UsageMeter> Meters { get; } = new();
     List<UsageMeter>? _liveMeters;      // last successful API fetch; null until one lands
     DateTime _liveAt;                   // when that fetch succeeded
@@ -63,6 +65,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         IsVisibleChanged += (_, _) =>
         {
             _windowVisible = IsVisible;
+            _prs?.OnVisibilityChanged(IsVisible);
             DwmDiagnostics.Mark("window-visible", IsVisible.ToString());
         };
 
@@ -137,6 +140,9 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             var row = Rows.FirstOrDefault(r => r.Host.Id == tab.View.Host.Id);
             if (row != null) _ = RestartSession(row);
         };
+        _prs = new PrPaneController(Deck, _app.Settings,
+            () => PrPaneController.SourcesFrom(_sessionsSnapshot.Concat(_externalSnapshot).Concat(_unownedSnapshot)),
+            DescribeSession, FocusSession);
         if (!DwmDiagnosticOptions.DisableBackgroundWork)
         {
             _timer.Start();
@@ -146,6 +152,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
                 StartDesktopResolver();
             StartUsagePolling();
             StartAccountWatcher();
+            _prs.Start();
         }
         else DwmDiagnostics.Mark("background-work", "disabled; one initial discovery pass only");
 
@@ -167,6 +174,26 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
 
     /// <summary>The conversation a host runs now: the row follows /resume and /clear, the tab's own record does not.</summary>
     string SessionOf(Host.HostRecord h) => _rowsById.TryGetValue(h.Id, out var row) ? row.LiveSessionId : h.SessionId;
+
+    AgentView? DescribeSession(string sessionId)
+    {
+        var row = Rows.FirstOrDefault(r => string.Equals(r.LiveSessionId, sessionId, StringComparison.OrdinalIgnoreCase));
+        if (row != null) return new AgentView(row.Name, row.Info.Provider.ToString(), PrPaneController.StateToken(row.State));
+        if (_externalSnapshot.FirstOrDefault(s => string.Equals(s.SessionId, sessionId, StringComparison.OrdinalIgnoreCase)) is { } external)
+            return new AgentView(external.DisplayName, external.Provider.ToString(),
+                PrPaneController.StateToken(external.ApiError ? SessionState.Error : SessionStateMap.FromStatus(external.Status)));
+        return _unownedSnapshot.FirstOrDefault(s => string.Equals(s.SessionId, sessionId, StringComparison.OrdinalIgnoreCase)) is { } unowned
+            ? PrPaneController.DescribeUnowned(unowned) : null;
+    }
+
+    /// <summary>A deck session shows its tab; a session in another terminal gets that window focused; anything else is gone and nothing happens.</summary>
+    void FocusSession(string sessionId)
+    {
+        var row = Rows.FirstOrDefault(r => string.Equals(r.LiveSessionId, sessionId, StringComparison.OrdinalIgnoreCase));
+        if (row != null) { Deck.Open(row.Host); return; }
+        if (_externalSnapshot.FirstOrDefault(s => string.Equals(s.SessionId, sessionId, StringComparison.OrdinalIgnoreCase)) is { } external)
+            WindowActivator.Activate(external);
+    }
 
     /// <summary>A session id changing under a host changes what the saved layout must name, though no tab moved.</summary>
     void SaveLayoutIfSessionsMoved()
@@ -836,7 +863,8 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
                 var parents = Native.BuildParentMap();
                 long processesMs = phase.ElapsedMilliseconds;
                 phase.Restart();
-                var found = CodexAttribution.Fold(claude, codex, parents);
+                var unowned = new List<SessionInfo>();
+                var found = CodexAttribution.Fold(claude, codex, parents, unowned);
                 long attributionMs = phase.ElapsedMilliseconds;
                 phase.Restart();
                 var hosts = HostManager.Discover();
@@ -855,10 +883,12 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
                     ClaudeDiscovered: claude.Count,
                     CodexDiscovered: codex.Count,
                     ClaudeRows: found.Count(s => s.Provider == SessionProvider.Claude),
-                    CodexRows: found.Count(s => s.Provider == SessionProvider.Codex));
+                    CodexRows: found.Count(s => s.Provider == SessionProvider.Codex),
+                    Unowned: unowned);
             });
             var apply = Stopwatch.StartNew();
             var changes = ApplyRefresh(scan.Sessions, scan.Hosts, scan.Parents);
+            _unownedSnapshot = scan.Unowned.ToArray();
             apply.Stop();
             RestartUpdatedIdleSessions();
             ApplyGroups();

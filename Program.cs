@@ -57,6 +57,33 @@ internal static class Program
             return;
         }
 
+        // Headless diagnostic: build the pull requests board once and dump it (verification / CLI use).
+        if (args.Length > 0 && args[0] == "--prs")
+        {
+            var settings = Settings.Load();
+            var snap = PrSource.FetchAsync(a => GhCli.RunAsync(a, TimeSpan.FromSeconds(60)), DateTime.UtcNow, TimeSpan.FromSeconds(3)).GetAwaiter().GetResult();
+            var (worktrees, local) = snap.Status == PrSourceStatus.Ok
+                ? WorktreeIndex.Scan(snap.Prs, settings.PrRepoRoots)
+                : (new List<Worktree>(), new Dictionary<string, LocalState>());
+            CodexScanner.Probe();
+            var unowned = new List<SessionInfo>();
+            var sessions = CodexAttribution.Fold(SessionScanner.Scan(), CodexScanner.Scan(), Native.BuildParentMap(), unowned);
+            var links = PrAttribution.Attribute(PrPaneController.SourcesFrom(sessions.Concat(unowned)), PrTargets.From(snap.Prs, worktrees), new ToolCallCache(), DateTime.UtcNow);
+            var byId = sessions.Where(s => s.SessionId.Length > 0).GroupBy(s => s.SessionId, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+            var unownedById = unowned.Where(s => s.SessionId.Length > 0).GroupBy(s => s.SessionId, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+            AgentView? Describe(string id) =>
+                byId.TryGetValue(id, out var s)
+                    ? new AgentView(s.DisplayName, s.Provider.ToString(), PrPaneController.StateToken(s.ApiError ? SessionState.Error : SessionStateMap.FromStatus(s.Status)))
+                    : unownedById.TryGetValue(id, out var u) ? PrPaneController.DescribeUnowned(u) : null;
+            var board = PrBoardBuilder.Build(snap, "", worktrees, local, links, Describe,
+                new HashSet<string>(settings.PrExpandedSeries, StringComparer.Ordinal), DateTime.UtcNow);
+            System.IO.File.WriteAllText(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "sessiondeck-prs.json"),
+                System.Text.Json.JsonSerializer.Serialize(board, new System.Text.Json.JsonSerializerOptions(PrPaneController.BoardJson) { WriteIndented = true }));
+            return;
+        }
+
         // Headless diagnostic: which terminal window each session maps to.
         if (args.Length > 0 && args[0] == "--windows")
         {

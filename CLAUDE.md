@@ -4,11 +4,12 @@ Windows system-tray app (**.NET 10, WPF + [WPF-UI](https://github.com/lepoco/wpf
 lists live local Claude Code **and Codex CLI** sessions, read from `~/.claude/` and `~/.codex/` on
 disk. `README.md` is the user-facing feature tour; this file is for working *on* the code.
 
-**One exception to "all local".** In direct-login mode, the footer's plan-usage meters come from a
+**Two exceptions to "all local".** In direct-login mode, the footer's plan-usage meters come from a
 network call (`UsageApi` → `GET api.anthropic.com/api/oauth/usage`, bearer token read from
 `~/.claude/.credentials.json`). CPA mode reads the selected account and meters from the sanitized
-loopback dashboard instead. Everything else is still pure disk reads. See *Usage bar* below before
-adding anything else that touches the network or credentials.
+loopback dashboard instead. The pull requests pane reads GitHub through `gh` (see *Pull requests
+pane*). Everything else is still pure disk reads. See *Usage bar* below before adding anything else
+that touches the network or credentials.
 
 ## Build, run, verify
 ```
@@ -159,6 +160,22 @@ The second footer bar: signed-in address on the left, one fill-behind pill per p
 - Layout: the meters are docked **before** the account label (DockPanel allocates in child order), and
   the address trims before the state note does. Both orderings were bugs first — at the 460px minimum
   width there is not room for everything.
+
+## Pull requests pane (`PrPaneController.cs`, `PrSource.cs`, `WorktreeIndex.cs`, `PrAttribution.cs`, `PrBoard.cs`)
+A deck column kind (`DeckGroup.IsPrPane`, saved as a spacer with `Panel: "prs"`) showing the `gh`
+user's open PRs. Design: `docs/superpowers/specs/2026-09-29-pr-pane-design.md`.
+- **Network:** `gh api graphql` only, through `GhCli`, never on the dispatcher; every 60 s while
+  visible, 5 min hidden, on show and on "Refresh now". Read-only on GitHub.
+- **Mergeability is lazy on GitHub's side:** `UNKNOWN` PRs are re-read once ~3 s later.
+- **Git runs with `GIT_OPTIONAL_LOCKS=0`** so a status refresh never takes `index.lock` from an
+  agent working in that worktree.
+- **Attribution is a heuristic:** 3+ tool calls touching a PR's worktree path, link or `gh pr`
+  number among a live session's last 100 (plus recent subagents and folded threads). Registry `cwd`
+  is useless for this: every session registers the folder it was started in. Headless threads
+  `Fold` cannot place are handed back as unowned and listed as not-clickable agents.
+- **`--prs`** dumps the board to `%TEMP%\sessiondeck-prs.json`; `tools/pr-pane-check.ps1` compares
+  it with `gh search prs`. Use it before theorising about a wrong row.
+- **Page messages without a terminal `id`** go to `DeckBrowser.PageMessage` → `DeckPane.RoutePage`.
 
 ## Status → display state (`SessionState.cs`)
 `busy`→Working · `waiting`→Awaiting · `idle`→Completed (green ✓) · `shell`→Working · default→Idle.

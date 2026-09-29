@@ -51,6 +51,8 @@ internal sealed class Settings
     public List<SessionGroup> SessionGroups { get; set; } = new();          // named, collapsible sets of sessions in the list; members are session ids
     public DeckLayout Deck { get; set; } = new();                            // the tab columns as last laid out, rebuilt on reattach
     public bool PrPaneIntroduced { get; set; }                               // the pull requests column was added once on first launch; removing it afterwards sticks
+    public List<string> PrRepoRoots { get; set; } = new() { @"C:\Repos", @"C:\Data\Repos" };   // folders whose direct children are git clones the pull requests pane looks in
+    public List<string> PrExpandedSeries { get; set; } = new();              // "owner/repo|title" of the pull request series shown expanded
 
     /// <summary>
     /// Settings this build does not know, kept as written. An older build saving the file (it does so

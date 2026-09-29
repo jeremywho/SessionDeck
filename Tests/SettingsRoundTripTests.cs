@@ -77,4 +77,13 @@ public class SettingsRoundTripTests
         Assert.True(back.PrPaneIntroduced);
         Assert.False(new Settings().PrPaneIntroduced);
     }
+
+    [Fact]
+    public void Pull_request_roots_and_expanded_series_survive_a_save_and_load()
+    {
+        var s = new Settings { PrRepoRoots = { @"E:\src" }, PrExpandedSeries = { "acme/web|Sweep" } };
+        var back = JsonSerializer.Deserialize<Settings>(JsonSerializer.Serialize(s))!;
+        Assert.Equal(new[] { @"C:\Repos", @"C:\Data\Repos", @"E:\src" }, back.PrRepoRoots);
+        Assert.Equal(new[] { "acme/web|Sweep" }, back.PrExpandedSeries);
+    }
 }
