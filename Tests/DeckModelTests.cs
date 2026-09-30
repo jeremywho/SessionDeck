@@ -39,7 +39,7 @@ public class DeckModelTests
 
     /// <summary>Columns as "a b* c | d e* | f*" (a spacer is "_"), then the focused column and the widths.</summary>
     static string Describe(DeckModel<Tab> m) =>
-        string.Join(" | ", m.Groups.Select(g => g.IsPrPane ? "PR" : g.IsSpacer ? "_" : string.Join(" ", g.Tabs.Select(t => t.Host.Id + (g.Active == t ? "*" : "")))))
+        string.Join(" | ", m.Groups.Select(g => (g.IsUnpinned ? "~" : "") + (g.IsPrPane ? "PR" : g.IsSpacer ? "_" : string.Join(" ", g.Tabs.Select(t => t.Host.Id + (g.Active == t ? "*" : ""))))))
         + $" @{m.Focused} " + string.Join("/", m.Groups.Select(g => g.Fraction.ToString("0.00")));
 
     const string Original = "a b* c | d e* | f* @1 0.50/0.30/0.20";
@@ -583,5 +583,117 @@ public class DeckModelTests
         var m = NewModel();
         m.Restore(layout, AllIds.Select(id => H(id)).ToList(), h => new Tab(h));
         Assert.Equal("a b* c | PR | d e* | f* | _ @2 0.50/0.10/0.30/0.20/0.10", Describe(m));
+    }
+
+    [Fact]
+    public void Unpinning_a_column_keeps_its_place_and_width_and_moves_focus_to_a_pinned_neighbour()
+    {
+        var m = Arranged(out _);
+        Assert.True(m.Unpin(m.Groups[1]));
+        Assert.Equal("a b* c | ~d e* | f* @0 0.50/0.30/0.20", Describe(m));
+        Assert.Equal(new[] { m.Groups[0], m.Groups[2] }, m.Pinned);
+    }
+
+    [Fact]
+    public void Pinning_puts_the_column_back_as_it_was()
+    {
+        var m = Arranged(out _);
+        m.Unpin(m.Groups[1]);
+        Assert.True(m.Pin(m.Groups[1]));
+        Assert.Equal("a b* c | d e* | f* @0 0.50/0.30/0.20", Describe(m));
+        Assert.False(m.Pin(m.Groups[1]));
+    }
+
+    [Fact]
+    public void Unpinned_columns_line_up_in_the_order_they_were_unpinned()
+    {
+        var m = Arranged(out _);
+        var f = m.Groups[2];
+        var a = m.Groups[0];
+        m.Unpin(f);
+        m.Unpin(a);
+        Assert.Equal(new[] { f, a }, m.Unpinned);
+    }
+
+    [Fact]
+    public void A_spacer_cannot_be_unpinned_and_the_PR_column_can()
+    {
+        var m = Arranged(out _);
+        var spacer = m.AddSpacer(1);
+        Assert.False(m.Unpin(spacer));
+        Assert.True(m.Unpin(m.IntroducePrPane()!));
+    }
+
+    [Fact]
+    public void A_new_tab_never_lands_in_an_unpinned_column_even_when_it_has_focus()
+    {
+        var m = Arranged(out _);
+        m.Unpin(m.Groups[1]);
+        m.Focused = 1;
+        m.Add(new Tab(H("g")), activate: true);
+        Assert.Equal("a b c g* | ~d e* | f* @0 0.50/0.30/0.20", Describe(m));
+    }
+
+    [Fact]
+    public void Closing_the_last_tab_of_an_unpinned_column_leaves_the_pinned_widths_alone()
+    {
+        var m = Arranged(out _);
+        m.Unpin(m.Groups[2]);
+        m.Close(m.AllTabs.First(t => t.Host.Id == "f"));
+        Assert.Equal("a b* c | d e* @1 0.50/0.30", Describe(m));
+    }
+
+    [Fact]
+    public void Closing_the_last_tab_of_a_pinned_column_gives_its_width_to_a_pinned_neighbour()
+    {
+        var m = Arranged(out _);
+        m.Unpin(m.Groups[1]);
+        m.Close(m.AllTabs.First(t => t.Host.Id == "f"));
+        Assert.Equal("a b* c | ~d e* @0 0.70/0.30", Describe(m));
+    }
+
+    [Fact]
+    public void A_column_added_beside_an_unpinned_one_takes_its_width_from_a_pinned_neighbour()
+    {
+        var m = Arranged(out _);
+        m.Unpin(m.Groups[1]);
+        m.AddSpacer(2);
+        Assert.Equal("a b* c | ~d e* | _ | f* @0 0.25/0.30/0.25/0.20", Describe(m));
+    }
+
+    [Fact]
+    public void Unpinned_columns_and_their_order_survive_a_save_and_restore_under_new_host_ids()
+    {
+        var m = Arranged(out var hosts);
+        m.Unpin(m.Groups[2]);
+        m.Unpin(m.Groups[0]);
+        var saved = m.Snapshot(h => h.SessionId, _ => true);
+        var back = NewModel();
+        back.Restore(saved, hosts.Select(h => H(h.Id + "2", h.SessionId)).ToList(), h => new Tab(h));
+        Assert.Equal(Renamed(Describe(m), AllIds), Describe(back));
+        Assert.Equal(new[] { back.Groups[2], back.Groups[0] }, back.Unpinned);
+    }
+
+    [Fact]
+    public void Closing_a_slide_out_hands_focus_back_to_a_pinned_column()
+    {
+        var m = Arranged(out _);
+        m.Unpin(m.Groups[2]);
+        m.Activate(m.AllTabs.First(t => t.Host.Id == "f"));
+        Assert.Equal(2, m.Focused);
+        Assert.True(m.FocusPinned());
+        Assert.Equal(1, m.Focused);
+        Assert.False(m.FocusPinned());
+    }
+
+    [Fact]
+    public void Hosts_nothing_claims_on_restore_join_the_last_pinned_column()
+    {
+        var layout = ThreeColumns();
+        layout.Columns[2].Unpinned = true;
+        layout.Columns[2].UnpinOrder = 1;
+        var m = NewModel();
+        m.Restore(layout, AllIds.Append("g").Select(id => H(id)).ToList(), h => new Tab(h));
+        Assert.Equal("a b* c | d e* g | ~f* @1 0.50/0.30/0.20", Describe(m));
     }
 }

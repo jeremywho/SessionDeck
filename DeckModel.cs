@@ -17,6 +17,10 @@ internal sealed class DeckGroup<TTab> where TTab : class
     public bool IsPrPane { get; set; }
 
     public bool HoldsTabs => !IsSpacer && !IsPrPane;
+
+    /// <summary>Hidden to the deck's right edge. It keeps its place in the list and its width, so pinning it back restores both.</summary>
+    public bool IsUnpinned { get; set; }
+    public int UnpinOrder { get; set; }
 }
 
 /// <summary>
@@ -38,6 +42,48 @@ internal sealed class DeckModel<TTab> where TTab : class
 
     public DeckGroup<TTab>? FocusedGroup => Groups.Count == 0 ? null : Groups[Math.Clamp(Focused, 0, Groups.Count - 1)];
     public DeckGroup<TTab>? PrPane => Groups.FirstOrDefault(g => g.IsPrPane);
+
+    /// <summary>The columns laid out side by side. Every column index the page sends or receives is an index into this list.</summary>
+    public List<DeckGroup<TTab>> Pinned => Groups.Where(g => !g.IsUnpinned).ToList();
+
+    public List<DeckGroup<TTab>> Unpinned => Groups.Where(g => g.IsUnpinned).OrderBy(g => g.UnpinOrder).ToList();
+
+    /// <summary>Hide the column to the deck's right edge, last in line. A spacer has nothing to show, so it cannot be unpinned.</summary>
+    public bool Unpin(DeckGroup<TTab> group)
+    {
+        if (group.IsUnpinned || group.IsSpacer || !Groups.Contains(group)) return false;
+        group.UnpinOrder = Groups.Where(g => g.IsUnpinned).Select(g => g.UnpinOrder).DefaultIfEmpty(0).Max() + 1;
+        group.IsUnpinned = true;
+        if (FocusedGroup == group) Focused = NearestPinned(Groups.IndexOf(group));
+        return true;
+    }
+
+    public bool Pin(DeckGroup<TTab> group)
+    {
+        if (!group.IsUnpinned || !Groups.Contains(group)) return false;
+        group.IsUnpinned = false;
+        group.UnpinOrder = 0;
+        return true;
+    }
+
+    /// <summary>A closed slide-out must not keep focus: move it to the nearest pinned column. False when focus was already pinned.</summary>
+    public bool FocusPinned()
+    {
+        if (FocusedGroup is not { IsUnpinned: true }) return false;
+        Focused = NearestPinned(Focused);
+        return true;
+    }
+
+    int NearestPinned(int i)
+    {
+        for (int k = i - 1; k >= 0; k--) if (!Groups[k].IsUnpinned) return k;
+        for (int k = i + 1; k < Groups.Count; k++) if (!Groups[k].IsUnpinned) return k;
+        return Math.Clamp(i, 0, Math.Max(0, Groups.Count - 1));
+    }
+
+    /// <summary>The pinned column to the left of <paramref name="at"/>, else the first pinned one after it.</summary>
+    DeckGroup<TTab>? PinnedNeighbour(int at) =>
+        Groups.Take(at).LastOrDefault(g => !g.IsUnpinned) ?? Groups.Skip(at).FirstOrDefault(g => !g.IsUnpinned);
     public DeckGroup<TTab>? GroupOf(TTab tab) => Groups.FirstOrDefault(g => g.Tabs.Contains(tab));
     public IEnumerable<TTab> AllTabs => Groups.SelectMany(g => g.Tabs);
     public TTab? FindByHost(string hostId) => AllTabs.FirstOrDefault(t => _host(t).Id == hostId);
@@ -63,8 +109,8 @@ internal sealed class DeckModel<TTab> where TTab : class
     /// <summary>The focused column when it holds tabs, else the first column that does, made if there is none.</summary>
     DeckGroup<TTab> LandingGroup()
     {
-        if (FocusedGroup is { HoldsTabs: true } focused) return focused;
-        var g = Groups.FirstOrDefault(x => x.HoldsTabs);
+        if (FocusedGroup is { HoldsTabs: true, IsUnpinned: false } focused) return focused;
+        var g = Groups.FirstOrDefault(x => x.HoldsTabs && !x.IsUnpinned);
         if (g == null) { g = new DeckGroup<TTab>(); Groups.Add(g); }
         return g;
     }
@@ -90,7 +136,7 @@ internal sealed class DeckModel<TTab> where TTab : class
     public DeckGroup<TTab>? IntroducePrPane()
     {
         if (PrPane != null) return null;
-        var donor = Groups.LastOrDefault(g => g.HoldsTabs);
+        var donor = Groups.LastOrDefault(g => g.HoldsTabs && !g.IsUnpinned);
         var pane = new DeckGroup<TTab> { IsPrPane = true, Fraction = donor == null ? 1 : donor.Fraction / 2 };
         if (donor != null) donor.Fraction /= 2;
         var focused = FocusedGroup;
@@ -102,7 +148,7 @@ internal sealed class DeckModel<TTab> where TTab : class
     DeckGroup<TTab> InsertEmpty(int at)
     {
         at = Math.Clamp(at, 0, Groups.Count);
-        var neighbour = Groups.Count == 0 ? null : Groups[Math.Clamp(at - 1, 0, Groups.Count - 1)];
+        var neighbour = PinnedNeighbour(at);
         var column = new DeckGroup<TTab> { Fraction = neighbour == null ? 1 : neighbour.Fraction / 2 };
         if (neighbour != null) neighbour.Fraction /= 2;
         var focused = FocusedGroup;
@@ -147,7 +193,7 @@ internal sealed class DeckModel<TTab> where TTab : class
         if (i < 0 || column.HoldsTabs) return false;
         var focused = FocusedGroup;
         Groups.RemoveAt(i);
-        if (Groups.Count > 0) Groups[Math.Max(0, i - 1)].Fraction += column.Fraction;
+        if (!column.IsUnpinned && PinnedNeighbour(i) is { } heir) heir.Fraction += column.Fraction;
         Focused = focused != null && focused != column ? Groups.IndexOf(focused) : Math.Clamp(Focused, 0, Math.Max(0, Groups.Count - 1));
         return true;
     }
@@ -225,7 +271,7 @@ internal sealed class DeckModel<TTab> where TTab : class
             int i = Groups.IndexOf(from);
             var focused = FocusedGroup;
             Groups.RemoveAt(i);
-            Groups[Math.Max(0, i - 1)].Fraction += from.Fraction;
+            if (!from.IsUnpinned && PinnedNeighbour(i) is { } heir) heir.Fraction += from.Fraction;
             Focused = focused != null && focused != from ? Groups.IndexOf(focused) : Math.Clamp(Focused, 0, Groups.Count - 1);
         }
     }
@@ -278,6 +324,8 @@ internal sealed class DeckModel<TTab> where TTab : class
                 Fraction = g.Fraction,
                 Spacer = g.IsSpacer || g.IsPrPane,
                 Panel = g.IsPrPane ? DeckColumn.PrPanel : "",
+                Unpinned = g.IsUnpinned,
+                UnpinOrder = g.UnpinOrder,
             }).ToList(),
             ClosedHosts = closed.Select(h => h.Id).ToList(),
             ClosedSessions = closed.Select(sessionOf).ToList(),
@@ -318,6 +366,8 @@ internal sealed class DeckModel<TTab> where TTab : class
             }
             g.IsPrPane = col.Panel == DeckColumn.PrPanel && g.Tabs.Count == 0 && !Groups.Any(x => x.IsPrPane);
             g.IsSpacer = col.Spacer && g.Tabs.Count == 0 && !g.IsPrPane;
+            g.IsUnpinned = col.Unpinned && !g.IsSpacer;
+            g.UnpinOrder = g.IsUnpinned ? col.UnpinOrder : 0;
             if (g.Tabs.Count == 0 && g.HoldsTabs) continue;
             if (g.Tabs.Count > 0) g.Active ??= g.Tabs[^1];
             Groups.Add(g);
@@ -334,12 +384,13 @@ internal sealed class DeckModel<TTab> where TTab : class
         var rest = hosts.Where(h => !placed.Contains(h.Id)).ToList();
         if (rest.Count > 0)
         {
-            var last = Groups.LastOrDefault(g => g.HoldsTabs);
+            var last = Groups.LastOrDefault(g => g.HoldsTabs && !g.IsUnpinned);
             if (last == null) { last = new DeckGroup<TTab>(); Groups.Add(last); }
             foreach (var host in rest) last.Tabs.Add(tabFor(host));
             last.Active ??= last.Tabs[^1];
         }
         Focused = focused != null ? Groups.IndexOf(focused) : Math.Clamp(layout.Focused, 0, Math.Max(0, Groups.Count - 1));
+        if (FocusedGroup is { IsUnpinned: true }) Focused = NearestPinned(Focused);
 
         HostRecord? BySession(string sessionId) =>
             sessionId.Length > 0 && bySession.TryGetValue(sessionId, out var q) && q.Count > 0 ? q.Dequeue() : null;

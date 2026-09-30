@@ -101,6 +101,10 @@ internal sealed class DeckColumn
     public string Panel { get; set; } = "";
     public const string PrPanel = "prs";
 
+    /// <summary>Hidden to the deck's right edge (auto-hide); keeps its slot and width for when it is pinned back.</summary>
+    public bool Unpinned { get; set; }
+    public int UnpinOrder { get; set; }
+
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? Unknown { get; set; }
 }
