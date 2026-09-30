@@ -86,6 +86,7 @@
                       <MenuItem Header="Restart session (resume on the installed CLI)" Click="RestartMenu_Click" Tag="{Binding}"/>
                       <Separator/>
                       <MenuItem Header="Split right" Click="SplitMenu_Click" Tag="{Binding}"/>
+                      <MenuItem Header="Unpin column" Click="UnpinMenu_Click" Tag="{Binding}"/>
                       <MenuItem Header="Add spacer column to the left" Click="AddSpacerLeftMenu_Click" Tag="{Binding}"/>
                       <MenuItem Header="Add spacer column to the right" Click="AddSpacerMenu_Click" Tag="{Binding}"/>
                       <Separator/>
@@ -137,6 +138,8 @@
                 <MenuItem Header="Add spacer column to the left" Click="AddSpacerLeftMenu_Click" Tag="{Binding}"/>
                 <MenuItem Header="Add spacer column to the right" Click="AddSpacerMenu_Click" Tag="{Binding}"/>
                 <MenuItem Header="Add pull requests column to the right" x:Uid="AddPrPane" Click="AddPrPaneMenu_Click" Tag="{Binding}"/>
+                <Separator/>
+                <MenuItem Header="Unpin this column" Click="UnpinMenu_Click" Tag="{Binding}"/>
               </ContextMenu>
             </ui:Button.ContextMenu>
           </ui:Button>
@@ -174,6 +177,7 @@
             <MenuItem Header="Move left" Click="SpacerMoveLeft_Click" Tag="{Binding}"/>
             <MenuItem Header="Move right" Click="SpacerMoveRight_Click" Tag="{Binding}"/>
             <Separator/>
+            <MenuItem Header="Unpin column" Click="UnpinMenu_Click" Tag="{Binding}"/>
             <MenuItem Header="Remove pull requests column" Click="PrRemoveMenu_Click" Tag="{Binding}"/>
           </ContextMenu>
         </Border.ContextMenu>

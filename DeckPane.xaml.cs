@@ -160,14 +160,17 @@ internal partial class DeckPane : UserControl
         if (tab == null) return;
         if (type == "dropTab")
         {
-            int gi = Math.Clamp(root.GetProperty("group").GetInt32(), 0, Math.Max(0, Groups.Count - 1));
+            var pinned = _model.Pinned;
+            if (pinned.Count == 0) return;
+            var target = pinned[Math.Clamp(root.GetProperty("group").GetInt32(), 0, pinned.Count - 1)];
+            int ti = Groups.IndexOf(target);
             string side = root.GetProperty("side").GetString() ?? "";
-            if (Groups.Count > 0 && Groups[gi].IsPrPane && side is not ("left" or "right")) side = "right";
+            if (target.IsPrPane && side is not ("left" or "right")) side = "right";
             switch (side)
             {
-                case "left": SplitAt(tab, gi, gi); break;
-                case "right": SplitAt(tab, gi + 1, gi); break;
-                default: if (Groups.Count > 0) MoveTo(tab, Groups[gi], Groups[gi].Tabs.Count); break;
+                case "left": SplitAt(tab, ti, ti); break;
+                case "right": SplitAt(tab, ti + 1, ti); break;
+                default: MoveTo(tab, target, target.Tabs.Count); break;
             }
             return;
         }
@@ -188,17 +191,39 @@ internal partial class DeckPane : UserControl
             case "fractions":
             {
                 var fracs = root.GetProperty("fracs").EnumerateArray().Select(f => f.GetDouble()).ToList();
-                for (int i = 0; i < Groups.Count && i < fracs.Count; i++) Groups[i].Fraction = fracs[i];
+                var pinned = _model.Pinned;
+                for (int i = 0; i < pinned.Count && i < fracs.Count; i++) pinned[i].Fraction = fracs[i];
                 BuildStrips();
                 LayoutChanged?.Invoke();
                 return true;
             }
             case "dropSpacer":
             {
+                var pinned = _model.Pinned;
                 int from = root.GetProperty("index").GetInt32();
-                int gi = Math.Clamp(root.GetProperty("group").GetInt32(), 0, Math.Max(0, Groups.Count - 1));
-                if (from >= 0 && from < Groups.Count && !Groups[from].HoldsTabs
-                    && _model.MoveGroupTo(Groups[from], root.GetProperty("side").GetString() == "left" ? gi : gi + 1)) Changed();
+                if (pinned.Count == 0 || from < 0 || from >= pinned.Count || pinned[from].HoldsTabs) return true;
+                int at = Groups.IndexOf(pinned[Math.Clamp(root.GetProperty("group").GetInt32(), 0, pinned.Count - 1)]);
+                if (_model.MoveGroupTo(pinned[from], root.GetProperty("side").GetString() == "left" ? at : at + 1)) Changed();
+                return true;
+            }
+            case "pinGroup":
+            {
+                if (root.TryGetProperty("index", out var pi) && pi.TryGetInt32(out int index) && index >= 0 && index < Groups.Count && _model.Pin(Groups[index]))
+                    Changed();
+                return true;
+            }
+            case "activateTab":
+            {
+                if (root.TryGetProperty("tab", out var t) && t.GetString() is { Length: > 0 } hostId && FindByHost(hostId) is { } tab) Activate(tab);
+                return true;
+            }
+            case "flyoutClosed":
+            {
+                if (!_model.FocusPinned()) return true;
+                Mark();
+                SendLayout();
+                LayoutChanged?.Invoke();
+                FocusedGroup?.Active?.View.FocusTerminal();
                 return true;
             }
             case "prRefresh":
@@ -223,13 +248,30 @@ internal partial class DeckPane : UserControl
 
     void SendLayout()
     {
+        var pinned = _model.Pinned;
+        var unpinned = _model.Unpinned;
         _browser.Post(new
         {
             type = "layout",
-            groups = Groups.Select(g => new { id = g.Active?.View.Host.Id, frac = g.Fraction, kind = g.IsPrPane ? "prs" : g.IsSpacer ? "spacer" : "tabs" }).ToArray(),
-            focused = _model.Focused,
+            groups = pinned.Select(g => new { id = g.Active?.View.Host.Id, frac = g.Fraction, kind = Kind(g) }).ToArray(),
+            focused = FocusedGroup is { } f ? pinned.IndexOf(f) : -1,
+            edge = unpinned.Count > 0 ? EdgeWidth : 0,
+            unpinned = unpinned.Select(g => new
+            {
+                index = Groups.IndexOf(g),
+                kind = Kind(g),
+                id = g.Active?.View.Host.Id,
+                frac = g.Fraction,
+                label = g.IsPrPane ? "Pull requests" : g.Active?.Title ?? "",
+                tabs = g.Tabs.Select(t => new { id = t.View.Host.Id, title = t.Title }).ToArray(),
+            }).ToArray(),
         });
     }
+
+    /// <summary>Width of the deck's right-edge strip that holds unpinned columns; the strips row leaves the same gap so its columns stay over the page's.</summary>
+    const int EdgeWidth = 28;
+
+    static string Kind(DeckGroup<DeckTab> g) => g.IsPrPane ? "prs" : g.IsSpacer ? "spacer" : "tabs";
 
     void Mark()
     {
@@ -259,15 +301,17 @@ internal partial class DeckPane : UserControl
         var template = (DataTemplate)FindResource("GroupStripTemplate");
         var spacerTemplate = (DataTemplate)FindResource("SpacerStripTemplate");
         var prTemplate = (DataTemplate)FindResource("PrStripTemplate");
-        for (int i = 0; i < Groups.Count; i++)
+        var pinned = _model.Pinned;
+        StripGrid.Margin = new Thickness(3, 0, 6 + (_model.Unpinned.Count > 0 ? EdgeWidth : 0), 0);
+        for (int i = 0; i < pinned.Count; i++)
         {
-            StripGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Math.Max(0.05, Groups[i].Fraction), GridUnitType.Star) });
-            var strip = new ContentPresenter { Content = Groups[i], ContentTemplate = Groups[i].IsPrPane ? prTemplate : Groups[i].IsSpacer ? spacerTemplate : template };
+            StripGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Math.Max(0.05, pinned[i].Fraction), GridUnitType.Star) });
+            var strip = new ContentPresenter { Content = pinned[i], ContentTemplate = pinned[i].IsPrPane ? prTemplate : pinned[i].IsSpacer ? spacerTemplate : template };
             if (i > 0) strip.Margin = new Thickness(1, 0, 0, 0);
             Grid.SetColumn(strip, i);
             StripGrid.Children.Add(strip);
         }
-        for (int i = 1; i < Groups.Count; i++)
+        for (int i = 1; i < pinned.Count; i++)
         {
             var line = new Border { Background = (Brush)FindResource("Border2Brush"), Width = 1, HorizontalAlignment = HorizontalAlignment.Left };
             Grid.SetColumn(line, i);
@@ -291,7 +335,12 @@ internal partial class DeckPane : UserControl
     {
         var view = new TerminalView(_browser, host);
         var tab = new DeckTab(view);
-        view.TitleChanged += _ => { tab.Raise(nameof(DeckTab.Title)); tab.Raise(nameof(DeckTab.Tooltip)); };
+        view.TitleChanged += _ =>
+        {
+            tab.Raise(nameof(DeckTab.Title));
+            tab.Raise(nameof(DeckTab.Tooltip));
+            if (GroupOf(tab) is { IsUnpinned: true }) SendLayout();
+        };
         view.ExitedChanged += _ => tab.Raise(nameof(DeckTab.ExitedVisibility));
         return tab;
     }
@@ -367,6 +416,7 @@ internal partial class DeckPane : UserControl
     {
         if (!_model.Activate(tab)) return;
         Changed();
+        if (GroupOf(tab) is { IsUnpinned: true } g) _browser.Post(new { type = "flyout", index = Groups.IndexOf(g) });
         tab.View.FocusTerminal();
     }
 
@@ -569,6 +619,15 @@ internal partial class DeckPane : UserControl
 
     void PrRefreshMenu_Click(object sender, RoutedEventArgs e) => PrMessage?.Invoke("prRefresh", default);
 
+    /// <summary>From a column's menus (Tag = the column) or a tab's menu (Tag = the tab): hide that column to the right edge.</summary>
+    void UnpinMenu_Click(object sender, RoutedEventArgs e)
+    {
+        var group = GroupTag(sender) ?? (TabOf(sender) is { } tab ? GroupOf(tab) : null);
+        if (group == null || !_model.Unpin(group)) return;
+        Changed();
+        FocusedGroup?.Active?.View.FocusTerminal();
+    }
+
     /// <summary>A tab dropped on the PR strip opens a column on that side of it; a column dropped there lands on that side.</summary>
     void PrStrip_Drop(object sender, DragEventArgs e)
     {
@@ -601,7 +660,7 @@ internal partial class DeckPane : UserControl
         _spacerDragCandidate = null;
         if (!Groups.Contains(g)) return;
         var data = new DataObject(typeof(DeckGroup<DeckTab>), g);
-        data.SetText(SpacerDragPrefix + Groups.IndexOf(g));
+        data.SetText(SpacerDragPrefix + _model.Pinned.IndexOf(g));
         DragDrop.DoDragDrop((DependencyObject)sender, data, DragDropEffects.Move);
     }
 
