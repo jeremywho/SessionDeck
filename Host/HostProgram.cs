@@ -501,6 +501,7 @@ internal static class HostProgram
             bool turnStarts = ev is "UserPromptSubmit" or "PreToolUse" && _record.AgentStatus is "idle" or "scheduled" or "waiting" or "";
             if (ev == "SessionStart" || turnStarts) _record.Pending = false;
             if (ev == "PreToolUse" && Hooks.Defers(root)) _record.Pending = true;
+            if (ev == "PreToolUse" && Hooks.StopsLoop(root)) _record.Pending = false;
             string? status = Hooks.StatusFor(ev, root, _record.Pending);
             if (ev == "SessionStart" && _record.AgentStatus == "busy") status = null;
             if (status != null) _record.AgentStatus = status;

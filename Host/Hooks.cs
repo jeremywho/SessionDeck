@@ -79,12 +79,24 @@ internal static class Hooks
     public static bool AsksUser(string tool) => tool == "AskUserQuestion";
 
     /// <summary>
-    /// A tool whose effect outlives the turn and is certain to wake the session later: a scheduled
-    /// wake-up, a cron entry, a monitor. A shell command run in the background is deliberately not
-    /// here: the hooks cannot see it finish, so it would pin the session as scheduled until the next
-    /// prompt; the app watches such commands' output files instead.
+    /// A tool whose effect outlives the turn and is certain to wake the session later, and which
+    /// nothing outside the hooks can see: a scheduled wake-up (unless it stops the loop) or a cron
+    /// entry. A monitor or a background shell command is deliberately not here: each runs as a shell
+    /// under the session's own process, so the app sees it live and sees it end, whereas a hook-set
+    /// flag would pin the session as scheduled until the next prompt even after it finished.
     /// </summary>
-    public static bool Defers(JsonElement root) => ToolName(root) is "ScheduleWakeup" or "CronCreate" or "Monitor";
+    public static bool Defers(JsonElement root) => ToolName(root) switch
+    {
+        "CronCreate" => true,
+        "ScheduleWakeup" => !StopsLoop(root),
+        _ => false,
+    };
+
+    /// <summary>A ScheduleWakeup with <c>stop: true</c> ends the loop; nothing will wake the session after it.</summary>
+    public static bool StopsLoop(JsonElement root) =>
+        ToolName(root) == "ScheduleWakeup"
+        && root.TryGetProperty("tool_input", out var i) && i.ValueKind == JsonValueKind.Object
+        && i.TryGetProperty("stop", out var s) && s.ValueKind == JsonValueKind.True;
 
     static string? NotificationStatus(JsonElement root)
     {

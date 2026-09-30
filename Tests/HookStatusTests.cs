@@ -17,8 +17,11 @@ public class HookStatusTests
 
     [Theory]
     [InlineData("ScheduleWakeup", "{}", true)]
+    [InlineData("ScheduleWakeup", "{\"delaySeconds\": 600, \"noop\": true}", true)]
+    [InlineData("ScheduleWakeup", "{\"stop\": true}", false)]
+    [InlineData("ScheduleWakeup", "{\"stop\": false, \"delaySeconds\": 60}", true)]
     [InlineData("CronCreate", "{}", true)]
-    [InlineData("Monitor", "{}", true)]
+    [InlineData("Monitor", "{}", false)]
     [InlineData("Bash", "{\"run_in_background\": true}", false)]
     [InlineData("Bash", "{\"run_in_background\": false}", false)]
     [InlineData("Bash", "{}", false)]
@@ -26,6 +29,15 @@ public class HookStatusTests
     public void Only_tools_that_wake_the_session_later_defer(string tool, string input, bool expected)
     {
         Assert.Equal(expected, Hooks.Defers(J($"{{\"tool_name\": \"{tool}\", \"tool_input\": {input}}}")));
+    }
+
+    [Fact]
+    public void Stopping_a_loop_releases_the_turn_and_a_monitor_never_held_it()
+    {
+        Assert.True(Hooks.StopsLoop(J("{\"tool_name\": \"ScheduleWakeup\", \"tool_input\": {\"stop\": true}}")));
+        Assert.False(Hooks.StopsLoop(J("{\"tool_name\": \"ScheduleWakeup\", \"tool_input\": {\"delaySeconds\": 60}}")));
+        Assert.False(Hooks.StopsLoop(J("{\"tool_name\": \"Monitor\", \"tool_input\": {\"stop\": true}}")));
+        Assert.Equal("idle", Hooks.StatusFor("Stop", J("{}"), pending: false));
     }
 
     [Fact]
