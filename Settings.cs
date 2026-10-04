@@ -48,6 +48,7 @@ internal sealed class Settings
     public string RowOrder { get; set; } = RowOrderState;                    // State: attention bands, alphabetical inside each | Name: alphabetical, exited last
     public const string RowOrderState = "State";
     public const string RowOrderName = "Name";
+    public Dictionary<string, long>? ReadAt { get; set; }                    // session id -> unix ms it was last in view; null until the first launch with the feature seeds it
     public List<SessionGroup> SessionGroups { get; set; } = new();          // named, collapsible sets of sessions in the list; members are session ids
     public DeckLayout Deck { get; set; } = new();                            // the tab columns as last laid out, rebuilt on reattach
     public bool PrPaneIntroduced { get; set; }                               // the pull requests column was added once on first launch; removing it afterwards sticks

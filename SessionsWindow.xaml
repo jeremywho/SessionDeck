@@ -43,6 +43,10 @@
                 Data="M 7,5 L 13,9 L 7,13 Z" Visibility="Collapsed"/>
           <Ellipse x:Name="Pip" Width="6" Height="6" Fill="{DynamicResource BlueBrush}" Visibility="Collapsed"/>
         </Grid>
+        <!-- Unread: a dot on the glyph's shoulder, like a mail client. Results are waiting that have not been looked at. -->
+        <Ellipse Width="8" Height="8" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="14,0,0,14"
+                 Fill="{DynamicResource FgBrush}" Stroke="{DynamicResource SurfaceBrush}" StrokeThickness="1.5"
+                 Visibility="{Binding IsUnread, Converter={StaticResource BoolToVis}}" IsHitTestVisible="False"/>
       </Grid>
       <DataTemplate.Triggers>
         <DataTrigger Binding="{Binding State}" Value="Completed">
@@ -248,7 +252,17 @@
                         </StackPanel>
                       </Border>
                       <TextBlock Text="{Binding Name}" FontSize="14.5" VerticalAlignment="Center"
-                                 Foreground="{DynamicResource FgBrush}" TextTrimming="CharacterEllipsis"/>
+                                 Foreground="{DynamicResource FgBrush}" TextTrimming="CharacterEllipsis">
+                        <TextBlock.Style>
+                          <Style TargetType="TextBlock">
+                            <Style.Triggers>
+                              <DataTrigger Binding="{Binding IsUnread}" Value="True">
+                                <Setter Property="FontWeight" Value="SemiBold"/>
+                              </DataTrigger>
+                            </Style.Triggers>
+                          </Style>
+                        </TextBlock.Style>
+                      </TextBlock>
                     </DockPanel>
                     <!-- model pill: provider mark + model, plus reasoning effort where the CLI reports
                          one (Codex does; Claude Code doesn't put it in the transcript). The provider

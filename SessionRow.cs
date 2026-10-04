@@ -26,6 +26,7 @@ internal sealed class SessionRow : INotifyPropertyChanged
         SessionId = host.Id;
         _s = s;
         _hosted = true;
+        TrackState();
     }
 
     /// <summary>A row with no real host behind it, for tests of the view-model's own derivations.</summary>
@@ -50,7 +51,7 @@ internal sealed class SessionRow : INotifyPropertyChanged
     public int Update(SessionInfo s, Host.HostRecord? host = null)
     {
         var h = PropertyChanged;
-        if (h == null) { Take(s, host); return 0; }
+        if (h == null) { Take(s, host); TrackState(); return 0; }
 
         // Raise only what actually changed. Every raise re-runs bindings and converters, and three
         // of these are live-sort keys the collection view re-evaluates per raise — so a blanket
@@ -58,6 +59,7 @@ internal sealed class SessionRow : INotifyPropertyChanged
         var before = new object?[Tracked.Length];
         for (int i = 0; i < Tracked.Length; i++) before[i] = Tracked[i].Get(this);
         Take(s, host);
+        TrackState();
         int changed = 0;
         for (int i = 0; i < Tracked.Length; i++)
             if (!Equals(before[i], Tracked[i].Get(this)))
@@ -83,6 +85,7 @@ internal sealed class SessionRow : INotifyPropertyChanged
         (nameof(Status), r => r.Status),
         (nameof(State), r => r.State),
         (nameof(StateTooltip), r => r.StateTooltip),
+        (nameof(IsUnread), r => r.IsUnread),
         (nameof(SortPriority), r => r.SortPriority),
         (nameof(ShortId), r => r.ShortId),
         (nameof(Model), r => r.Model),
@@ -176,10 +179,42 @@ internal sealed class SessionRow : INotifyPropertyChanged
         SessionState.Working => "Working",
         SessionState.Awaiting => "Awaiting you",
         SessionState.Scheduled => "Scheduled",
-        SessionState.Completed => "Completed",
+        SessionState.Completed => IsUnread ? "Unread" : "Completed",
         SessionState.Error => "Error",
         _ => "Idle",
     };
+
+    DateTime _readAt = DateTime.MaxValue;
+    DateTime _stateSince;
+    SessionState _stateFor;
+
+    /// <summary>
+    /// When the row entered its current state. <see cref="LastChanged"/> moves on every hook event,
+    /// the idle notification a minute after a turn included, so it cannot say when the turn ended.
+    /// </summary>
+    public DateTime StateSince => _stateSince;
+
+    void TrackState(bool force = false)
+    {
+        var state = State;
+        if (!force && _stateSince != default && state == _stateFor) return;
+        _stateFor = state;
+        _stateSince = LastChanged;
+    }
+
+    /// <summary>Finished a turn since it was last in view: results are waiting. Set from the window's ledger.</summary>
+    public bool IsUnread => State == SessionState.Completed && !Host.HasExited && _stateSince.ToUniversalTime() > _readAt;
+
+    /// <summary>When the session was last in view (UTC); <see cref="DateTime.MinValue"/> for never. Returns whether the badge changed.</summary>
+    public bool SetReadAt(DateTime readAtUtc)
+    {
+        bool was = IsUnread;
+        _readAt = readAtUtc;
+        if (was == IsUnread) return false;
+        var h = PropertyChanged;
+        if (h != null) foreach (var name in new[] { nameof(IsUnread), nameof(StateTooltip) }) h(this, new PropertyChangedEventArgs(name));
+        return true;
+    }
     public bool ApiError => _s.ApiError;
 
     /// <summary>When the status last changed — secondary sort key (most-recent-first within each group).</summary>
@@ -203,6 +238,7 @@ internal sealed class SessionRow : INotifyPropertyChanged
         if (settledAt == DateTime.MinValue || HasTakenATurn) return;
         if (settledAt.ToUniversalTime() >= Host.StartedAt.ToUniversalTime()) return;
         _held = settledAt;
+        TrackState(force: true);
     }
 
     /// <summary>This row stands for a session restarted out of the row that had <paramref name="groupedAs"/> and <paramref name="lastChanged"/>.</summary>

@@ -125,6 +125,9 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             _app.Settings.Save();
         };
         Deck.LayoutChanged += SaveLayoutSoon;
+        Deck.LayoutChanged += MarkShownRead;
+        IsVisibleChanged += (_, _) => MarkShownRead();
+        StateChanged += (_, _) => MarkShownRead();
         Deck.NewSessionRequested += kind =>
         {
             switch (kind)
@@ -980,6 +983,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             s => rowOf.TryGetValue(s, out var r) && r.State is SessionState.Completed or SessionState.Idle ? r.LastChanged : null,
             s => rowOf.TryGetValue(s, out var r) ? r.Host.Profile : "");
         SaveLayoutIfSessionsMoved();
+        ApplyReadLedger();
 
         int hostsLive = hosts.Count(h => !h.HasExited);
         int external = _externalSnapshot.Count(s => s.Kind != "companion");
@@ -1427,12 +1431,94 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             _rowMenu.Items.Add(restart);
         }
         _rowMenu.Items.Add(new Separator());
+        if (row.IsUnread) _rowMenu.Items.Add(Item("Mark as read", () => MarkRead(row)));
+        if (Rows.Any(r => r.IsUnread)) _rowMenu.Items.Add(Item("Mark all as read", MarkAllRead));
         _rowMenu.Items.Add(GroupSubmenu(row));
         _rowMenu.Items.Add(Item("Copy session id", () => TrySetClipboard(row.Host.SessionId)));
         _rowMenu.Items.Add(Item("Copy folder", () => TrySetClipboard(row.Cwd)));
         _rowMenu.PlacementTarget = SessionsGrid;
         _rowMenu.Placement = PlacementMode.MousePoint;
         Dispatcher.BeginInvoke(() => _rowMenu.IsOpen = true, DispatcherPriority.Input);
+    }
+
+    // ---------------- unread: finished out of sight ----------------
+
+    ReadLedger? _read;
+    static readonly TimeSpan ReadLedgerKeep = TimeSpan.FromDays(30);
+
+    /// <summary>
+    /// The ledger from settings. The first launch with the feature seeds it with every session as
+    /// read, so the badges start from a clean slate rather than flagging everything at once.
+    /// </summary>
+    ReadLedger ReadLedger
+    {
+        get
+        {
+            if (_read != null) return _read;
+            if (_app.Settings.ReadAt == null)
+            {
+                // Seeding needs the rows; a pass before they exist (the window showing, an early layout
+                // event) would seed an empty ledger and badge every hidden session on first launch.
+                if (Rows.Count == 0) return new ReadLedger(new());
+                _app.Settings.ReadAt = new();
+                var seeded = new ReadLedger(_app.Settings.ReadAt);
+                var now = DateTime.UtcNow;
+                foreach (var row in Rows) seeded.MarkRead(row.LiveSessionId, now);
+                SaveSoon();
+            }
+            _read = new ReadLedger(_app.Settings.ReadAt);
+            return _read;
+        }
+    }
+
+    /// <summary>A session whose tab is showing in a visible window is being looked at.</summary>
+    bool IsShown(SessionRow row) =>
+        IsVisible && WindowState != WindowState.Minimized && Deck.FindByHost(row.Host.Id) is { IsActive: true };
+
+    /// <summary>Every refresh: the shown rows are read now, every row learns its badge, and the ledger is kept small.</summary>
+    void ApplyReadLedger()
+    {
+        var ledger = ReadLedger;
+        var now = DateTime.UtcNow;
+        bool changed = false;
+        foreach (var row in Rows)
+        {
+            if (IsShown(row)) changed |= ledger.MarkRead(row.LiveSessionId, now);
+            row.SetReadAt(ReadAtOf(row));
+        }
+        if (ledger.Prune(Rows.Select(r => r.LiveSessionId), now, ReadLedgerKeep) > 0) changed = true;
+        if (changed) SaveSoon();
+    }
+
+    DateTime ReadAtOf(SessionRow row) =>
+        _app.Settings.ReadAt != null && _app.Settings.ReadAt.TryGetValue(row.LiveSessionId, out var ms)
+            ? DateTimeOffset.FromUnixTimeMilliseconds(ms).UtcDateTime
+            : DateTime.MinValue;
+
+    /// <summary>A tab came to the front, or the window came back: whatever is on screen is read.</summary>
+    void MarkShownRead()
+    {
+        if (_rowsById.Count == 0) return;
+        var ledger = ReadLedger;
+        var now = DateTime.UtcNow;
+        bool changed = false;
+        foreach (var row in Rows)
+            if (IsShown(row) && ledger.MarkRead(row.LiveSessionId, now)) { changed = true; row.SetReadAt(now); }
+        if (changed) SaveSoon();
+    }
+
+    void MarkRead(SessionRow row)
+    {
+        var now = DateTime.UtcNow;
+        if (ReadLedger.MarkRead(row.LiveSessionId, now)) { row.SetReadAt(now); SaveSoon(); }
+    }
+
+    void MarkAllRead()
+    {
+        var now = DateTime.UtcNow;
+        bool changed = false;
+        foreach (var row in Rows) if (ReadLedger.MarkRead(row.LiveSessionId, now)) { changed = true; row.SetReadAt(now); }
+        if (changed) SaveSoon();
     }
 
     readonly HashSet<string> _restarting = new();
