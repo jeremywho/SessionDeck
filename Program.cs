@@ -118,15 +118,24 @@ internal static class Program
         }
     }
 
+    /// <summary>
+    /// One instance at a time. A relaunch right behind an exiting instance waits for the mutex
+    /// (longer after an update, which hard-exits); a launch while another instance is up and staying
+    /// up is logged, so a deck that "never appeared" can be read from the performance log.
+    /// </summary>
     static Mutex? AcquireSingleInstance(bool afterUpdate)
     {
-        int retries = afterUpdate ? 80 : 0;   // ~8s of 100ms retries to let the old instance release the mutex
+        int retries = afterUpdate ? 80 : 30;   // 100 ms steps: ~8 s after an update, ~3 s otherwise
         for (int i = 0; ; i++)
         {
             var m = new Mutex(true, Settings.InstanceMutexName, out bool isNew);
             if (isNew) return m;
             m.Dispose();
-            if (i >= retries) return null;     // held and out of retries -> a genuine second instance, exit
+            if (i >= retries)
+            {
+                PerformanceLog.Write($"launch: another instance holds the mutex after {retries / 10} s; exiting (afterUpdate={afterUpdate})");
+                return null;
+            }
             Thread.Sleep(100);
         }
     }

@@ -61,7 +61,9 @@ internal sealed class HostRecord
     public string LastTool { get; set; } = "";
     public DateTime? StatusAt { get; set; }
     public string TranscriptPath { get; set; } = "";
-    public int HookEvents { get; set; }
+
+    /// <summary>Hooks seen by this process; kept out of the file so a hook that changes nothing else writes nothing.</summary>
+    [JsonIgnore] public int HookEvents { get; set; }
 
     /// <summary>The stamped copy this host (and its hook forwarders) run from; the app must not prune it while the host lives.</summary>
     public string HostBin { get; set; } = "";
@@ -307,8 +309,11 @@ internal static class HostProgram
                     string title = s[2..].Trim();
                     if (title.Length > 0 && title != _record.Title)
                     {
+                        // A spinner frame changes only the leading mark; the record on disk keeps the
+                        // name it has, since every write makes the app rescan.
+                        bool renamed = !TitleMarks.SameName(title, _record.Title);
                         _record.Title = title;
-                        WriteRecord();
+                        if (renamed) WriteRecord();
                         Broadcast(true, Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { type = "title", title })));
                     }
                 }
@@ -496,15 +501,19 @@ internal static class HostProgram
         lock (_record)
         {
             _record.HookEvents++;
-            _record.LastEvent = ev;
-            _record.StatusAt = DateTime.UtcNow;
+            // PostToolUse follows a PreToolUse that already said busy and names the tool; recording it
+            // would rewrite the file on every tool call for nothing the app reads.
+            if (ev != "PostToolUse") _record.LastEvent = ev;
             bool turnStarts = ev is "UserPromptSubmit" or "PreToolUse" && _record.AgentStatus is "idle" or "scheduled" or "waiting" or "";
             if (ev == "SessionStart" || turnStarts) _record.Pending = false;
             if (ev == "PreToolUse" && Hooks.Defers(root)) _record.Pending = true;
             if (ev == "PreToolUse" && Hooks.StopsLoop(root)) _record.Pending = false;
             string? status = Hooks.StatusFor(ev, root, _record.Pending);
             if (ev == "SessionStart" && _record.AgentStatus == "busy") status = null;
-            if (status != null) _record.AgentStatus = status;
+            // StatusAt is when the status last changed, not when a hook last spoke: a turn's end keeps
+            // its time through the idle notification a minute later, and an unchanged status is no write.
+            if (status != null && status != _record.AgentStatus) { _record.AgentStatus = status; _record.StatusAt = DateTime.UtcNow; }
+            _record.StatusAt ??= DateTime.UtcNow;
             if (root.TryGetProperty("tool_name", out var t) && t.ValueKind == JsonValueKind.String && ev == "PreToolUse")
                 _record.LastTool = t.GetString() ?? "";
             // Always the latest: /resume or /clear inside the session switches it to another conversation,
@@ -535,14 +544,19 @@ internal static class HostProgram
 
     static Task WriteAscii(NetworkStream s, string text) => s.WriteAsync(Encoding.ASCII.GetBytes(text)).AsTask();
 
+    static string? _lastWritten;
+
+    /// <summary>The record goes to disk only when its content changed: the app rescans on every write.</summary>
     static void WriteRecord()
     {
         try
         {
             lock (_record)
             {
+                string json = JsonSerializer.Serialize(_record, Json);
+                if (!RecordGate.Changed(json, ref _lastWritten)) return;
                 string tmp = _recordPath + ".tmp";
-                File.WriteAllText(tmp, JsonSerializer.Serialize(_record, Json));
+                File.WriteAllText(tmp, json);
                 File.Move(tmp, _recordPath, overwrite: true);
             }
         }

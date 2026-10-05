@@ -24,16 +24,8 @@ internal partial class DeckPane : UserControl
         public string Title => StripMark(View.Title);
         public string Glyph => View.Host.Provider switch { "Codex" => "◆", "Shell" => ">", _ => "✳" };
 
-        /// <summary>Claude titles its own window "✳ …"; the tab already leads with that mark.</summary>
-        internal static string StripMark(string t)
-        {
-            t = t.Trim();
-            foreach (var mark in new[] { "✳", "◆", "✻" })
-                if (t.StartsWith(mark, StringComparison.Ordinal)) return t[mark.Length..].TrimStart();
-            if (t.Contains('\\') && t.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
-                return System.IO.Path.GetFileNameWithoutExtension(t);
-            return t;
-        }
+        /// <summary>Claude titles its own window "✳ …" (a spinner while it works); the tab already leads with a mark.</summary>
+        internal static string StripMark(string t) => TitleMarks.Strip(t);
         public Brush GlyphBrush =>
             Application.Current.TryFindResource(View.Host.Provider == "Codex" ? "CodexMarkBrush" : "ClaudeMarkBrush") as Brush ?? Brushes.Gray;
         public Visibility ExitedVisibility => View.Exited ? Visibility.Visible : Visibility.Collapsed;

@@ -1019,7 +1019,10 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             info.Status = agentStatus;
             info.StatusUpdatedAt = at.ToLocalTime();
         }
-        if (h.LastTool.Length > 0 && (newer || info.LastTool.Length == 0)) info.LastTool = h.LastTool;
+        // The host stamps StatusAt only when the status changes, so mid-turn the two are equal: the
+        // hook still owns the status then, and its tool name is the live one.
+        bool hookOwns = at >= info.StatusUpdatedAt.ToUniversalTime();
+        if (h.LastTool.Length > 0 && (hookOwns || info.LastTool.Length == 0)) info.LastTool = h.LastTool;
         if (info.SessionId.Length == 0 && h.SessionId.Length > 0) info.SessionId = h.SessionId;
         if (info.TranscriptPath.Length == 0 && h.TranscriptPath.Length > 0) info.TranscriptPath = h.TranscriptPath;
     }
