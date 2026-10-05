@@ -43,14 +43,15 @@
                 Data="M 7,5 L 13,9 L 7,13 Z" Visibility="Collapsed"/>
           <Ellipse x:Name="Pip" Width="6" Height="6" Fill="{DynamicResource BlueBrush}" Visibility="Collapsed"/>
         </Grid>
-        <!-- Unread: a dot on the glyph's shoulder, like a mail client. Results are waiting that have not been looked at. -->
-        <Ellipse Width="8" Height="8" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="14,0,0,14"
-                 Fill="{DynamicResource FgBrush}" Stroke="{DynamicResource SurfaceBrush}" StrokeThickness="1.5"
-                 Visibility="{Binding IsUnread, Converter={StaticResource BoolToVis}}" IsHitTestVisible="False"/>
       </Grid>
       <DataTemplate.Triggers>
         <DataTrigger Binding="{Binding State}" Value="Completed">
           <Setter TargetName="Dot" Property="Fill" Value="{DynamicResource GreenBrush}"/>
+          <Setter TargetName="Check" Property="Visibility" Value="Visible"/>
+        </DataTrigger>
+        <!-- Unread: finished out of sight, results waiting. Its own hue, after Completed so it wins. -->
+        <DataTrigger Binding="{Binding IsUnread}" Value="True">
+          <Setter TargetName="Dot" Property="Fill" Value="{DynamicResource UnreadBrush}"/>
           <Setter TargetName="Check" Property="Visibility" Value="Visible"/>
         </DataTrigger>
         <DataTrigger Binding="{Binding State}" Value="Idle">
@@ -215,6 +216,9 @@
               <Setter Property="Cursor" Value="Hand"/>
               <Setter Property="Background" Value="Transparent"/>
               <Style.Triggers>
+                <DataTrigger Binding="{Binding IsUnread}" Value="True">
+                  <Setter Property="Background" Value="{DynamicResource UnreadTintBrush}"/>
+                </DataTrigger>
                 <Trigger Property="IsMouseOver" Value="True">
                   <Setter Property="Background" Value="{DynamicResource RowHoverBrush}"/>
                 </Trigger>
@@ -258,6 +262,7 @@
                             <Style.Triggers>
                               <DataTrigger Binding="{Binding IsUnread}" Value="True">
                                 <Setter Property="FontWeight" Value="SemiBold"/>
+                                <Setter Property="Foreground" Value="{DynamicResource UnreadBrush}"/>
                               </DataTrigger>
                             </Style.Triggers>
                           </Style>

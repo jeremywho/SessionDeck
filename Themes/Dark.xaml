@@ -17,6 +17,9 @@
   <SolidColorBrush x:Key="BlueBrush"         Color="#4F9BF0"/>
   <SolidColorBrush x:Key="SlateBrush"        Color="#828892"/>
   <SolidColorBrush x:Key="RedBrush"          Color="#E2664E"/>
+  <!-- unread: a hue no other state uses, so a glance down the list finds the rows that need a look -->
+  <SolidColorBrush x:Key="UnreadBrush"       Color="#B388FF"/>
+  <SolidColorBrush x:Key="UnreadTintBrush"   Color="#2A2440"/>
   <!-- provider marks: brand hues, tuned per theme so they read on the pill's track color -->
   <SolidColorBrush x:Key="ClaudeMarkBrush"   Color="#E08463"/>
   <SolidColorBrush x:Key="CodexMarkBrush"    Color="#2AC79E"/>
