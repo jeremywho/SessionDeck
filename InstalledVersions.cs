@@ -39,20 +39,26 @@ internal static class InstalledVersions
         if (Interlocked.Exchange(ref _running, 1) == 1) return;
         _ = Task.Run(() =>
         {
-            try
-            {
-                string claude = Query("claude");
-                string codex = Query("codex");
-                bool changed = claude != Claude || codex != Codex;
-                if (claude.Length > 0) Claude = claude;
-                if (codex.Length > 0) Codex = codex;
-                CheckedAt = DateTime.UtcNow;
-                PerformanceLog.Write($"installed-versions claude={Claude} codex={Codex}{(changed ? " changed" : "")}");
-                if (changed) Changed?.Invoke();
-            }
-            catch (Exception ex) { App.LogError(ex); }
+            try { RequeryNow(); }
             finally { Interlocked.Exchange(ref _running, 0); }
         });
+    }
+
+    /// <summary>Query both CLIs on the calling thread; for a caller that must know the answer before going on.</summary>
+    public static void RequeryNow()
+    {
+        try
+        {
+            string claude = Query("claude");
+            string codex = Query("codex");
+            bool changed = claude != Claude || codex != Codex;
+            if (claude.Length > 0) Claude = claude;
+            if (codex.Length > 0) Codex = codex;
+            CheckedAt = DateTime.UtcNow;
+            PerformanceLog.Write($"installed-versions claude={Claude} codex={Codex}{(changed ? " changed" : "")}");
+            if (changed) Changed?.Invoke();
+        }
+        catch (Exception ex) { App.LogError(ex); }
     }
 
     /// <summary>Runs <c>&lt;cli&gt; --version</c> under the same PowerShell the hosts use, so the same profile and PATH apply.</summary>

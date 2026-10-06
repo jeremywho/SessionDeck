@@ -113,7 +113,17 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         // rewrites its registry files on heartbeats; using those events to trigger scans allowed a
         // continuously busy set of sessions to drive nearly eight full scans per second.
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
-        _timer.Tick += (_, _) => { RequestRefresh(); if (DateTime.UtcNow - InstalledVersions.CheckedAt > TimeSpan.FromMinutes(10)) InstalledVersions.Refresh(); };
+        _timer.Tick += (_, _) =>
+        {
+            RequestRefresh();
+            if (DateTime.UtcNow - InstalledVersions.CheckedAt > TimeSpan.FromMinutes(10))
+            {
+                InstalledVersions.Refresh();
+                // Codex only announces a release; the binary stays old until `codex update` runs. Run
+                // it here, so Codex rows become "update installed" the way Claude rows do and restart idle.
+                if (_app.Settings.AutoRestartOnUpdate && CodexUpdater.NeedsUpdate()) _ = CodexUpdater.EnsureCurrentAsync();
+            }
+        };
         InstalledVersions.Changed += () => Dispatcher.BeginInvoke(RequestRefresh);
         InstalledVersions.Refresh();
         _layoutSave.Tick += (_, _) =>
@@ -1591,6 +1601,10 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             var inherit = new Succession(row.GroupedAs, row.LastChanged);
             var provider = row.Provider;
             string sessionId = row.LiveSessionId;
+            // A Codex session resumed on a binary older than the newest release boots into the update
+            // prompt, and taking it there exits the TUI. Update first, then resume onto the result.
+            if (provider == SessionProvider.Codex && !await CodexUpdater.EnsureCurrentAsync())
+                PerformanceLog.Write($"restart host={host.Id}: codex update did not complete; resuming on v{InstalledVersions.Codex}");
             bool hasTranscript = SessionScanner.HasConversation(row.TranscriptPath);
             string launcher = ClaudeProfiles.CommandFor(host.Profile);
             string cmd = provider == SessionProvider.Codex
