@@ -26,6 +26,8 @@
          tiny repeating storyboard keeps the WPF/DWM composition path continuously active. -->
     <DataTemplate x:Key="StatusGlyphTemplate">
       <Grid>
+        <Rectangle Width="3" HorizontalAlignment="Left" VerticalAlignment="Stretch" Fill="{DynamicResource BlueBrush}"
+                   Visibility="{Binding IsFront, Converter={StaticResource BoolToVis}}" IsHitTestVisible="False"/>
         <!-- desktop pip at the far-left edge — only for sessions on another virtual desktop -->
         <Ellipse Width="6" Height="6" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="3,0,0,0"
                  Fill="{Binding DesktopIndex, Converter={StaticResource DesktopColor}}"
@@ -218,6 +220,10 @@
               <Style.Triggers>
                 <DataTrigger Binding="{Binding IsUnread}" Value="True">
                   <Setter Property="Background" Value="{DynamicResource UnreadTintBrush}"/>
+                </DataTrigger>
+                <!-- The session whose tab is in front: tinted, with a bar on its left edge (drawn in the glyph cell). -->
+                <DataTrigger Binding="{Binding IsFront}" Value="True">
+                  <Setter Property="Background" Value="{DynamicResource RowFrontBrush}"/>
                 </DataTrigger>
                 <Trigger Property="IsMouseOver" Value="True">
                   <Setter Property="Background" Value="{DynamicResource RowHoverBrush}"/>

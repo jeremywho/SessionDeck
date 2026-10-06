@@ -202,6 +202,20 @@ internal sealed class SessionRow : INotifyPropertyChanged
         _stateSince = LastChanged;
     }
 
+    bool _front;
+
+    /// <summary>This session's tab is the one in front of the deck: where typing goes. Set by the window from the deck.</summary>
+    public bool IsFront
+    {
+        get => _front;
+        set
+        {
+            if (_front == value) return;
+            _front = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsFront)));
+        }
+    }
+
     /// <summary>Finished a turn since it was last in view: results are waiting. Set from the window's ledger.</summary>
     public bool IsUnread => State == SessionState.Completed && !Host.HasExited && _stateSince.ToUniversalTime() > _readAt;
 

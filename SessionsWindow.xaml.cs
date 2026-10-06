@@ -126,6 +126,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         };
         Deck.LayoutChanged += SaveLayoutSoon;
         Deck.LayoutChanged += MarkShownRead;
+        Deck.LayoutChanged += SyncFrontRow;
         IsVisibleChanged += (_, _) => MarkShownRead();
         StateChanged += (_, _) => MarkShownRead();
         Deck.NewSessionRequested += kind =>
@@ -984,6 +985,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             s => rowOf.TryGetValue(s, out var r) ? r.Host.Profile : "");
         SaveLayoutIfSessionsMoved();
         ApplyReadLedger();
+        SyncFrontRow();
 
         int hostsLive = hosts.Count(h => !h.HasExited);
         int external = _externalSnapshot.Count(s => s.Kind != "companion");
@@ -1497,6 +1499,13 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         _app.Settings.ReadAt != null && _app.Settings.ReadAt.TryGetValue(row.LiveSessionId, out var ms)
             ? DateTimeOffset.FromUnixTimeMilliseconds(ms).UtcDateTime
             : DateTime.MinValue;
+
+    /// <summary>The row of the tab in front of the deck is marked, so a tab switch shows in the list.</summary>
+    void SyncFrontRow()
+    {
+        string front = Deck.Active?.View.Host.Id ?? "";
+        foreach (var row in Rows) row.IsFront = row.Host.Id == front;
+    }
 
     /// <summary>A tab came to the front, or the window came back: whatever is on screen is read.</summary>
     void MarkShownRead()

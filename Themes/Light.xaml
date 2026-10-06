@@ -18,6 +18,7 @@
   <SolidColorBrush x:Key="SlateBrush"        Color="#6C727C"/>
   <SolidColorBrush x:Key="UnreadBrush"       Color="#6E3BD6"/>
   <SolidColorBrush x:Key="UnreadTintBrush"   Color="#EFE8FC"/>
+  <SolidColorBrush x:Key="RowFrontBrush"     Color="#E2ECFA"/>
   <SolidColorBrush x:Key="RedBrush"          Color="#CF4B32"/>
   <!-- provider marks: darker than the dark theme's, or they wash out on the near-white track -->
   <SolidColorBrush x:Key="ClaudeMarkBrush"   Color="#B45430"/>
