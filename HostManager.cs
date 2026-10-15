@@ -203,10 +203,16 @@ internal static class HostManager
     {
         var list = new List<HostRecord>();
         if (!Directory.Exists(HostsDir)) return list;
+        long boot = HostLiveness.BootTicksUtc();
         foreach (var f in Directory.GetFiles(HostsDir, "*.json"))
         {
             var rec = ReadRecord(f);
-            if (rec == null) continue;
+            if (rec == null)
+            {
+                // Unreadable and older than this boot: whatever wrote it died with the previous one.
+                try { if (File.GetLastWriteTimeUtc(f).Ticks < boot) File.Delete(f); } catch { }
+                continue;
+            }
             if (IsAlive(rec)) list.Add(rec);
             else { try { File.Delete(f); } catch { } }
         }
@@ -227,12 +233,11 @@ internal static class HostManager
         using (p)
         {
             try { if (p.HasExited) return false; } catch { }
-            try
-            {
-                long start = p.StartTime.ToUniversalTime().Ticks;
-                return Math.Abs(start - rec.HostStartTicks) < TimeSpan.TicksPerSecond * 2;
-            }
-            catch { return true; }
+            long? start = null;
+            try { start = p.StartTime.ToUniversalTime().Ticks; } catch { }
+            string name = "";
+            try { name = p.ProcessName; } catch { }
+            return HostLiveness.Alive(rec.HostStartTicks, start, name, HostLiveness.BootTicksUtc());
         }
     }
 

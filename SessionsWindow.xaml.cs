@@ -922,12 +922,31 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         }
         catch (Exception ex)
         {
-            // Best-effort: retain the last good snapshot after a transient read failure. Diagnostic
-            // launches still need the reason, otherwise a stalled/failed scanner is indistinguishable
-            // from a quiet one in the correlation log.
             DwmDiagnostics.Mark("refresh-error", ex.GetType().Name + ": " + ex.Message);
+            ReportRefreshFailure(ex);
         }
         finally { System.Threading.Interlocked.Exchange(ref _scanRunning, 0); }
+    }
+
+    DateTime _refreshFailureLoggedAt = DateTime.MinValue;
+    string _refreshFailureLogged = "";
+
+    /// <summary>
+    /// A refresh that dies leaves the list frozen with no sign of it. The first failure, and then one
+    /// every ten minutes while it keeps happening, goes to the error log, and the live label says so.
+    /// </summary>
+    void ReportRefreshFailure(Exception ex)
+    {
+        string key = ex.GetType().Name + ": " + ex.Message;
+        if (key != _refreshFailureLogged || DateTime.UtcNow - _refreshFailureLoggedAt > TimeSpan.FromMinutes(10))
+        {
+            _refreshFailureLogged = key;
+            _refreshFailureLoggedAt = DateTime.UtcNow;
+            App.LogError(ex);
+            PerformanceLog.Write("refresh-error " + key);
+        }
+        LiveLabel.Text = "Refresh failing — see sessiondeck-error.log";
+        LiveLabel.ToolTip = key;
     }
 
     /// <summary>
@@ -940,18 +959,8 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     (int Added, int Removed, int PropertyChanges) ApplyRefresh(List<SessionInfo> live, List<Host.HostRecord> hosts, Dictionary<int, int> parents)
     {
         var claimed = new HashSet<SessionInfo>();
-        var byHost = new List<(Host.HostRecord Host, SessionInfo Info)>();
-        foreach (var h in hosts)
-        {
-            SessionInfo? match = null;
-            if (h.SessionId.Length > 0)
-                match = live.FirstOrDefault(s => string.Equals(s.SessionId, h.SessionId, StringComparison.OrdinalIgnoreCase));
-            match ??= live.FirstOrDefault(s => !claimed.Contains(s) && s.Pid > 0 && DescendsFrom(s.Pid, h.ChildPid, parents));
-            if (match != null) claimed.Add(match);
-            var info = match ?? SessionRow.Placeholder(h);
-            ApplyHookState(h, info);
-            byHost.Add((h, info));
-        }
+        var byHost = HostPairing.Pair(hosts, live, (s, h) => DescendsFrom(s.Pid, h.ChildPid, parents), claimed);
+        foreach (var (h, info) in byHost) ApplyHookState(h, info);
 
         var seen = new HashSet<string>();
         int added = 0;
@@ -987,8 +996,9 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         _externalSnapshot = live.Where(s => !claimed.Contains(s)).ToArray();
         // A CLI that has exited leaves its host alive (the shell wrapper stays open), so hook status is
         // what says the session is really over; otherwise it would be offered for restore next launch.
-        var rowOf = byHost.Where(x => _rowsById.ContainsKey(x.Host.Id))
-            .ToDictionary(x => x.Info, x => _rowsById[x.Host.Id]);
+        var rowOf = new Dictionary<SessionInfo, SessionRow>();
+        foreach (var x in byHost)
+            if (_rowsById.TryGetValue(x.Host.Id, out var r)) rowOf.TryAdd(x.Info, r);
         SessionRegistry.Snapshot(
             byHost.Where(x => !x.Host.HasExited && x.Host.AgentStatus != "ended" && x.Info.SessionId.Length > 0 && IsRestorable(x.Info)).Select(x => x.Info).ToList(),
             s => rowOf.TryGetValue(s, out var r) && r.State is SessionState.Completed or SessionState.Idle ? r.LastChanged : null,
