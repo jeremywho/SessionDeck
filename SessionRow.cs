@@ -75,7 +75,7 @@ internal sealed class SessionRow : INotifyPropertyChanged
     {
         _s = s;
         if (host != null && host.Id == Host.Id) Host = host;
-        if (_held != DateTime.MinValue && HasTakenATurn) _held = DateTime.MinValue;
+        if (_held != DateTime.MinValue && HasTakenATurn) { _held = DateTime.MinValue; _heldPriority = null; }
     }
 
     static readonly (string Name, Func<SessionRow, object?> Get)[] Tracked =
@@ -255,11 +255,19 @@ internal sealed class SessionRow : INotifyPropertyChanged
         TrackState(force: true);
     }
 
-    /// <summary>This row stands for a session restarted out of the row that had <paramref name="groupedAs"/> and <paramref name="lastChanged"/>.</summary>
-    public void Inherit(string groupedAs, DateTime lastChanged)
+    int? _heldPriority;
+
+    /// <summary>
+    /// This row stands for a session restarted out of the row that had <paramref name="groupedAs"/>,
+    /// <paramref name="lastChanged"/> and <paramref name="sortPriority"/>. It keeps that row's place
+    /// in the list until it takes a turn: a restart passes through starting-up states that would
+    /// otherwise bounce the row between bands.
+    /// </summary>
+    public void Inherit(string groupedAs, DateTime lastChanged, int? sortPriority = null)
     {
         GroupedAs = groupedAs;
         Hold(lastChanged);
+        if (_held != DateTime.MinValue && sortPriority is int p) _heldPriority = p;
     }
 
     readonly bool _hosted;
@@ -367,7 +375,7 @@ internal sealed class SessionRow : INotifyPropertyChanged
             return string.Join("\n", lines);
         }
     }
-    public int SortPriority => Host.HasExited ? 8 : State switch
+    public int SortPriority => _heldPriority is int held && _held != DateTime.MinValue ? held : Host.HasExited ? 8 : State switch
     {
         SessionState.Error => 0,      // API error / stuck — top
         SessionState.Awaiting => 1,   // needs your feedback

@@ -976,7 +976,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
                 else
                 {
                     row = new SessionRow(h, s);
-                    if (_successors.Remove(h.Id, out var from)) row.Inherit(from.GroupedAs, from.LastChanged);
+                    if (_successors.Remove(h.Id, out var from)) row.Inherit(from.GroupedAs, from.LastChanged, from.SortPriority);
                     else row.Hold(SessionRegistry.SettledAt(row.LiveSessionId));
                     _rowsById[h.Id] = row;
                     Rows.Add(row);
@@ -1262,8 +1262,10 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         CollectionViewSource.GetDefaultView(Rows).Refresh();
     }
 
-    void MoveToGroup(SessionRow row, string? groupName)
+    /// <summary>Every move is logged with how it happened and announced in the live label, so an unmeant one is noticed and traceable.</summary>
+    void MoveToGroup(SessionRow row, string? groupName, string via = "menu")
     {
+        string from = row.GroupName.Length > 0 ? row.GroupName : "(none)";
         foreach (var g in GroupsSetting) g.Members.Remove(row.GroupKey);
         if (!string.IsNullOrEmpty(groupName))
         {
@@ -1272,6 +1274,9 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             g.Members.Add(row.GroupKey);
         }
         GroupsChanged();
+        string to = string.IsNullOrEmpty(groupName) ? "(none)" : groupName;
+        PerformanceLog.Write($"group-move via={via} session={row.LiveSessionId} name=\"{row.Name}\" from={from} to={to}");
+        LiveLabel.Text = $"Moved \"{row.Name}\" {from} → {to}";
     }
 
     string? PromptGroupName(string title, string initial = "")
@@ -1336,24 +1341,48 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     SessionRow? _rowDragCandidate;
     string? _groupDragCandidate;
 
+    DateTime _rowDragPressedAt;
+
+    /// <summary>
+    /// A drag means it: the pointer has travelled well past a click's wobble and the button has been
+    /// down for a moment. A twitch on a click used to start a drag, and the drop then landed on
+    /// whatever row had sorted under the pointer, moving sessions between groups unasked.
+    /// </summary>
+    const double RowDragDistance = 14;
+    static readonly TimeSpan RowDragHold = TimeSpan.FromMilliseconds(180);
+
     void Grid_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         _rowDragCandidate = RowAt(e.OriginalSource);
         _groupDragCandidate = _rowDragCandidate == null ? HeaderGroupAt(e.OriginalSource) : null;
         _rowDragStart = e.GetPosition(this);
+        _rowDragPressedAt = DateTime.UtcNow;
     }
 
     void Grid_PreviewMouseMove(object sender, MouseEventArgs e)
     {
         if ((_rowDragCandidate == null && _groupDragCandidate == null) || e.LeftButton != MouseButtonState.Pressed) return;
         var d = e.GetPosition(this) - _rowDragStart;
-        if (Math.Abs(d.X) < SystemParameters.MinimumHorizontalDragDistance && Math.Abs(d.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+        if (d.Length < RowDragDistance || DateTime.UtcNow - _rowDragPressedAt < RowDragHold) return;
         var row = _rowDragCandidate;
         var group = _groupDragCandidate;
         _rowDragCandidate = null;
         _groupDragCandidate = null;
-        if (row != null) DragDrop.DoDragDrop(SessionsGrid, new DataObject(typeof(SessionRow), row), DragDropEffects.Move);
-        else if (group != null) DragDrop.DoDragDrop(SessionsGrid, new DataObject(typeof(GroupDrag), new GroupDrag(group)), DragDropEffects.Move);
+        var view = (ListCollectionView)CollectionViewSource.GetDefaultView(Rows);
+        // The list holds still while a drag is in flight, so the drop lands where it was aimed.
+        view.IsLiveSorting = false;
+        view.IsLiveGrouping = false;
+        try
+        {
+            if (row != null) DragDrop.DoDragDrop(SessionsGrid, new DataObject(typeof(SessionRow), row), DragDropEffects.Move);
+            else if (group != null) DragDrop.DoDragDrop(SessionsGrid, new DataObject(typeof(GroupDrag), new GroupDrag(group)), DragDropEffects.Move);
+        }
+        finally
+        {
+            view.IsLiveSorting = true;
+            view.IsLiveGrouping = true;
+            view.Refresh();
+        }
     }
 
     void Grid_DragOver(object sender, DragEventArgs e)
@@ -1384,7 +1413,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         else if (HeaderGroupAt(e.OriginalSource) is { } name) target = name;
         else if (!IsInsideGrid(e.OriginalSource)) return;
         if ((target ?? "") == dragged.GroupName) return;
-        MoveToGroup(dragged, target);
+        MoveToGroup(dragged, target, "drop");
     }
 
     /// <summary>The group whose header contains the element, or null.</summary>
@@ -1555,7 +1584,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
 
     readonly HashSet<string> _restarting = new();
     /// <summary>What a restarted session's new row inherits from the row it replaces.</summary>
-    sealed record Succession(string GroupedAs, DateTime LastChanged);
+    sealed record Succession(string GroupedAs, DateTime LastChanged, int SortPriority);
     readonly Dictionary<string, Succession> _successors = new();
     readonly AutoRestartLedger _autoRestarted = new(AutoRestartLedger.DefaultPath);
     Task _autoRestart = Task.CompletedTask;
@@ -1608,7 +1637,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         if (!row.CanRestart || !_restarting.Add(host.Id)) return;
         try
         {
-            var inherit = new Succession(row.GroupedAs, row.LastChanged);
+            var inherit = new Succession(row.GroupedAs, row.LastChanged, row.SortPriority);
             var provider = row.Provider;
             string sessionId = row.LiveSessionId;
             // A Codex session resumed on a binary older than the newest release boots into the update

@@ -182,6 +182,20 @@ public class ListStateTests
     }
 
     [Fact]
+    public void A_restarted_row_keeps_its_band_until_it_takes_a_turn()
+    {
+        var old = Row(Host("h1", "s1", At(9, 0)), Idle("s1", At(16, 40)));
+        Assert.Equal(4, old.SortPriority);
+        var busy = new SessionInfo { SessionId = "s1", Status = "busy", StatusUpdatedAt = At(16, 59, 45), UpdatedAt = At(16, 59, 45), Kind = "interactive", Name = "s1" };
+        var row = Row(Host("h1b", "s1", At(16, 59, 36), "SessionStart"), busy);
+        row.Inherit(old.GroupedAs, old.LastChanged, old.SortPriority);
+        Assert.Equal(4, row.SortPriority);
+
+        row.Update(busy, Host("h1b", "s1", At(16, 59, 36), "PreToolUse"));
+        Assert.Equal(2, row.SortPriority);
+    }
+
+    [Fact]
     public void Dragging_a_group_down_lands_it_below_the_target_and_up_lands_it_above()
     {
         var groups = Groups(("a", new[] { "s1" }), ("b", new[] { "s2" }), ("c", new[] { "s3" }), ("d", new[] { "s4" }));
