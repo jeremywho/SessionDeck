@@ -79,6 +79,12 @@ internal sealed class HostRecord
     public int Protocol { get; set; }
 
     [JsonIgnore] public bool HasExited => ExitCode.HasValue;
+
+    /// <summary>
+    /// The CLI did not end on its own: the console was closed under it (Windows shutdown, logoff,
+    /// a killed window) or it was interrupted. Such a session is still one to bring back.
+    /// </summary>
+    [JsonIgnore] public bool WasKilled => ExitCode is 0x40010004 or 0xC000013A or 0xC000013B;
 }
 
 /// <summary>

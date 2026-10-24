@@ -27,6 +27,19 @@ public class StaleHostTests
         Assert.False(HostLiveness.Alive(At(1), null, "", Boot));
     }
 
+    [Theory]
+    [InlineData(0x40010004u, true)]
+    [InlineData(0xC000013Au, true)]
+    [InlineData(0u, false)]
+    [InlineData(1u, false)]
+    public void A_cli_closed_under_it_counts_as_killed_and_a_clean_exit_does_not(uint code, bool killed)
+    {
+        var h = new HostRecord { Id = "h", ExitCode = code };
+        Assert.True(h.HasExited);
+        Assert.Equal(killed, h.WasKilled);
+        Assert.False(new HostRecord { Id = "live" }.WasKilled);
+    }
+
     static HostRecord Host(string id, string session, int startHour, bool exited) => new()
     {
         Id = id, SessionId = session, Provider = "Claude", HostPid = 1, ChildPid = 1,

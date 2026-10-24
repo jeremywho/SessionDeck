@@ -1000,7 +1000,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         foreach (var x in byHost)
             if (_rowsById.TryGetValue(x.Host.Id, out var r)) rowOf.TryAdd(x.Info, r);
         SessionRegistry.Snapshot(
-            byHost.Where(x => !x.Host.HasExited && x.Host.AgentStatus != "ended" && x.Info.SessionId.Length > 0 && IsRestorable(x.Info)).Select(x => x.Info).ToList(),
+            byHost.Where(x => (!x.Host.HasExited || x.Host.WasKilled) && x.Host.AgentStatus != "ended" && x.Info.SessionId.Length > 0 && IsRestorable(x.Info)).Select(x => x.Info).ToList(),
             s => rowOf.TryGetValue(s, out var r) && r.State is SessionState.Completed or SessionState.Idle ? r.LastChanged : null,
             s => rowOf.TryGetValue(s, out var r) ? r.Host.Profile : "");
         SaveLayoutIfSessionsMoved();
