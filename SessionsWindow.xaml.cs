@@ -502,6 +502,29 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         }
     }
 
+    /// <summary>The order the sort keys define, as the view should show it.</summary>
+    IEnumerable<SessionRow> SortedRows() =>
+        _app.Settings.RowOrder == Settings.RowOrderName
+            ? Rows.OrderBy(r => r.GroupOrder).ThenBy(r => r.HostExited).ThenBy(r => r.Name, StringComparer.CurrentCulture)
+            : Rows.OrderBy(r => r.GroupOrder).ThenBy(r => r.SortPriority).ThenBy(r => r.Name, StringComparer.CurrentCulture);
+
+    /// <summary>
+    /// Live shaping in a grouped view sometimes leaves a row where it was after its sort key changed.
+    /// After each refresh the view's order is checked against the keys and re-sorted when they differ;
+    /// every such miss is logged so the rate is known.
+    /// </summary>
+    void EnsureViewOrder()
+    {
+        var view = (ListCollectionView)CollectionViewSource.GetDefaultView(Rows);
+        if (view.SortDescriptions.Count == 0) return;
+        var shown = view.Cast<SessionRow>().ToList();
+        var wanted = SortedRows().ToList();
+        if (shown.SequenceEqual(wanted)) return;
+        var first = wanted.Where((r, i) => i >= shown.Count || shown[i] != r).FirstOrDefault();
+        PerformanceLog.Write($"view-resort rows={shown.Count} first-misplaced=\"{first?.Name}\" priority={first?.SortPriority} group={first?.GroupName}");
+        view.Refresh();
+    }
+
     // ---------------- columns ----------------
 
     sealed record Col(string Key, string Label, DataGridColumn Column, bool Toggleable, bool DefaultVisible);
@@ -906,6 +929,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             apply.Stop();
             RestartUpdatedIdleSessions();
             ApplyGroups();
+            EnsureViewOrder();
             if (ExperimentOptions.TelemetryActive)
             {
                 double applyMs = apply.Elapsed.TotalMilliseconds;
