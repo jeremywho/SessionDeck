@@ -1466,7 +1466,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         var tab = Deck.FindByHost(row.Host.Id);
         if (row.Host.HasExited)
         {
-            _rowMenu.Items.Add(Item("Remove", () => { if (tab != null) Deck.Close(tab); HostManager.Forget(row.Host); RequestRefresh(); }));
+            _rowMenu.Items.Add(Item("Remove", () => { if (tab != null) Deck.Close(tab); HostManager.Forget(row.Host); SessionRegistry.Forget(row.LiveSessionId); RequestRefresh(); }));
             var again = Item("Restart session", () => _ = RestartSession(row));
             again.IsEnabled = row.CanRestart && !_restarting.Contains(row.Host.Id);
             _rowMenu.Items.Add(again);
@@ -1475,7 +1475,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         {
             _rowMenu.Items.Add(Item(tab != null ? "Show tab" : "Open tab", () => Deck.Open(row.Host)));
             if (tab != null) _rowMenu.Items.Add(Item("Close tab (keep running)", () => Deck.Close(tab)));
-            _rowMenu.Items.Add(Item("End session", () => { HostManager.Kill(row.Host); if (tab != null) Deck.Close(tab); }));
+            _rowMenu.Items.Add(Item("End session", () => { SessionRegistry.Forget(row.LiveSessionId); HostManager.Kill(row.Host); if (tab != null) Deck.Close(tab); }));
             var restart = Item(row.UpdatePending
                     ? $"Restart to update (v{row.Version} → v{InstalledVersions.For(row.Provider)})"
                     : "Restart session (resume on the installed CLI)",

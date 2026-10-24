@@ -30,7 +30,7 @@ internal static class SessionRegistry
     public static readonly TimeSpan LastSeenCheckpoint = TimeSpan.FromHours(12);
 
     /// <summary>Test seam: forget the last-written signature/time so a test starts from a clean slate.</summary>
-    internal static void ResetForTests() { _lastSig = ""; _lastWriteUtc = DateTime.MinValue; _settled = null; }
+    internal static void ResetForTests() { _lastSig = ""; _lastWriteUtc = DateTime.MinValue; _settled = null; _known = null; _forgotten.Clear(); }
 
     /// <summary>
     /// When the session last settled (its last status change while not working), as last recorded.
@@ -64,9 +64,39 @@ internal static class SessionRegistry
     public static List<SavedSession> Load() =>
         AtomicFile.Read(FilePath, text => JsonSerializer.Deserialize<List<SavedSession>>(text)) ?? new();
 
+    /// <summary>
+    /// How long a session stays in the file after it drops out of the live set. Windows kills the
+    /// CLI processes before it tells this app the session is ending, and a session that vanishes
+    /// in that window is one the reboot must bring back; a session the user ended is removed at
+    /// once through <see cref="Forget"/>.
+    /// </summary>
+    public static readonly TimeSpan KeepAfterLoss = TimeSpan.FromMinutes(10);
+
+    static Dictionary<string, SavedSession>? _known;
+    static readonly HashSet<string> _forgotten = new(StringComparer.OrdinalIgnoreCase);
+
+    static Dictionary<string, SavedSession> Known()
+    {
+        if (_known != null) return _known;
+        _known = new(StringComparer.OrdinalIgnoreCase);
+        foreach (var s in Load()) if (s.Id.Length > 0) _known[s.Id] = s;
+        return _known;
+    }
+
+    /// <summary>The user ended or removed this session: it leaves the file now and is not kept back.</summary>
+    public static void Forget(string sessionId)
+    {
+        if (sessionId.Length == 0) return;
+        _forgotten.Add(sessionId);
+        if (Known().Remove(sessionId)) { _lastSig = ""; Write(); }
+    }
+
     /// <summary>Rewrite the file when anything about the live interactive set changes (not just the
     /// id-set — a rename or cwd change must persist too), plus a periodic checkpoint for LastSeen.</summary>
-    public static void Snapshot(IReadOnlyList<SessionInfo> liveInteractive, Func<SessionInfo, DateTime?>? settledAt = null, Func<SessionInfo, string>? profileOf = null)
+    public static void Snapshot(IReadOnlyList<SessionInfo> liveInteractive, Func<SessionInfo, DateTime?>? settledAt = null, Func<SessionInfo, string>? profileOf = null) =>
+        Snapshot(liveInteractive, DateTime.UtcNow, settledAt, profileOf);
+
+    internal static void Snapshot(IReadOnlyList<SessionInfo> liveInteractive, DateTime nowUtc, Func<SessionInfo, DateTime?>? settledAt = null, Func<SessionInfo, string>? profileOf = null)
     {
         if (Frozen) return;
 
@@ -76,25 +106,35 @@ internal static class SessionRegistry
                 settled[s.SessionId] = new DateTimeOffset(at).ToUnixTimeMilliseconds();
         string Profile(SessionInfo s) => profileOf?.Invoke(s) ?? "";
 
-        var parts = new List<string>(liveInteractive.Count);
+        long now = new DateTimeOffset(nowUtc).ToUnixTimeMilliseconds();
+        var known = Known();
+        var liveIds = new HashSet<string>(liveInteractive.Select(s => s.SessionId), StringComparer.OrdinalIgnoreCase);
         foreach (var s in liveInteractive)
-            parts.Add($"{s.SessionId}|{s.DisplayName}|{s.Cwd}|{s.Model}|{(int)s.Provider}|{settled.GetValueOrDefault(s.SessionId)}|{Profile(s)}");
+        {
+            _forgotten.Remove(s.SessionId);
+            known[s.SessionId] = new SavedSession
+            {
+                Id = s.SessionId, Cwd = s.Cwd, Name = s.DisplayName, Model = s.Model, LastSeen = now,
+                Provider = s.Provider, LastChanged = settled.GetValueOrDefault(s.SessionId), Profile = Profile(s),
+            };
+        }
+        foreach (var id in known.Keys.Where(id => !liveIds.Contains(id)).ToList())
+            if (_forgotten.Contains(id) || now - known[id].LastSeen >= (long)KeepAfterLoss.TotalMilliseconds) known.Remove(id);
+
+        var parts = known.Values.Select(s => $"{s.Id}|{s.Name}|{s.Cwd}|{s.Model}|{(int)s.Provider}|{s.LastChanged}|{s.Profile}|{liveIds.Contains(s.Id)}").ToList();
         parts.Sort(StringComparer.Ordinal);
         string sig = string.Join("\n", parts);
 
-        var nowUtc = DateTime.UtcNow;
         bool checkpoint = liveInteractive.Count > 0 && nowUtc - _lastWriteUtc >= LastSeenCheckpoint;
         if (sig == _lastSig && !checkpoint) return;
         _lastSig = sig;
         _lastWriteUtc = nowUtc;
+        Write();
+    }
 
-        long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        var saved = liveInteractive.Select(s => new SavedSession
-        {
-            Id = s.SessionId, Cwd = s.Cwd, Name = s.DisplayName, Model = s.Model, LastSeen = now,
-            Provider = s.Provider, LastChanged = settled.GetValueOrDefault(s.SessionId), Profile = Profile(s),
-        }).ToList();
-
+    static void Write()
+    {
+        var saved = Known().Values.OrderByDescending(s => s.LastSeen).ToList();
         try { AtomicFile.Write(FilePath, JsonSerializer.Serialize(saved, new JsonSerializerOptions { WriteIndented = true })); }
         catch (Exception ex) { App.LogError(ex); }
     }

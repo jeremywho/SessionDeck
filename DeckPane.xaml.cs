@@ -458,7 +458,11 @@ internal partial class DeckPane : UserControl
     }
 
     /// <summary>Stop the session behind the tab. The tab stays so the exit is visible; close it after.</summary>
-    public void Stop(DeckTab tab) => tab.View.Kill();
+    public void Stop(DeckTab tab)
+    {
+        SessionRegistry.Forget(tab.View.Host.SessionId);
+        tab.View.Kill();
+    }
 
     public void ApplyTheme(bool dark)
     {

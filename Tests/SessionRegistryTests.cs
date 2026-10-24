@@ -50,12 +50,53 @@ public class SessionRegistryTests
             SessionRegistry.Frozen = false;
         }
 
-        // Unfrozen behavior is unchanged: a genuine graceful close still empties the file
-        // (and the frozen calls above must not have corrupted the change-detection set).
+        // Unfrozen: a session that vanishes is kept for a while (the OS kills the CLIs before it
+        // announces the shutdown), then ages out; "ccc" was only ever offered while frozen.
         SessionRegistry.Snapshot(Array.Empty<SessionInfo>());
         var after = File.ReadAllText(RegistryFile);
-        Assert.DoesNotContain("aaa", after);
+        Assert.Contains("aaa", after);
         Assert.DoesNotContain("ccc", after);
+        SessionRegistry.Snapshot(Array.Empty<SessionInfo>(), DateTime.UtcNow + SessionRegistry.KeepAfterLoss + TimeSpan.FromSeconds(1));
+        Assert.DoesNotContain("aaa", File.ReadAllText(RegistryFile));
+    }
+
+    // Regression for the reboot that lost three sessions: Windows killed their CLIs a minute before
+    // the shutdown notice, one scan saw them gone, and the file was rewritten without them.
+    [Fact]
+    public void A_session_killed_just_before_a_reboot_is_still_offered_for_restore_unless_the_user_ended_it()
+    {
+        SessionRegistry.ResetForTests();
+        var t0 = DateTime.UtcNow;
+        SessionRegistry.Snapshot(new[] { Session("kept"), Session("ended"), Session("stays") }, t0);
+
+        SessionRegistry.Forget("ended");
+        SessionRegistry.Snapshot(new[] { Session("stays") }, t0 + TimeSpan.FromMinutes(1));
+        var text = File.ReadAllText(RegistryFile);
+        Assert.Contains("kept", text);
+        Assert.Contains("stays", text);
+        Assert.DoesNotContain("ended", text);
+
+        SessionRegistry.Snapshot(new[] { Session("stays") }, t0 + TimeSpan.FromMinutes(12));
+        text = File.ReadAllText(RegistryFile);
+        Assert.DoesNotContain("kept", text);
+        Assert.Contains("stays", text);
+
+        // A forgotten session that comes back live is a session again.
+        SessionRegistry.Snapshot(new[] { Session("stays"), Session("ended") }, t0 + TimeSpan.FromMinutes(13));
+        Assert.Contains("ended", File.ReadAllText(RegistryFile));
+    }
+
+    [Fact]
+    public void The_kept_entries_are_read_from_the_file_the_previous_run_left()
+    {
+        SessionRegistry.ResetForTests();
+        var t0 = DateTime.UtcNow;
+        SessionRegistry.Snapshot(new[] { Session("old-run") }, t0);
+        SessionRegistry.ResetForTests();
+        SessionRegistry.Snapshot(new[] { Session("new-run") }, t0 + TimeSpan.FromSeconds(30));
+        var text = File.ReadAllText(RegistryFile);
+        Assert.Contains("old-run", text);
+        Assert.Contains("new-run", text);
     }
 
     // The snapshot used to be keyed on the id-SET alone, so a rename (or cwd/model change) with an
@@ -140,6 +181,7 @@ public class SessionRegistryTests
     public void A_damaged_registry_falls_back_to_its_last_good_copy_and_is_kept_aside()
     {
         SessionRegistry.ResetForTests();
+        foreach (var f in Directory.GetFiles(DataDir, "active-sessions.json*")) File.Delete(f);
         SessionRegistry.Snapshot(new[] { Session("good-1"), Session("good-2") });
         SessionRegistry.Snapshot(new[] { Session("good-1"), Session("good-2"), Session("good-3") });
         File.WriteAllText(RegistryFile, "[{\"Id\":\"good-1\",\"Cw");
