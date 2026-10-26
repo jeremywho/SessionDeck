@@ -21,6 +21,13 @@ internal static class TitleMarks
         return t;
     }
 
+    /// <summary>A shell announcing itself by its executable path, which says nothing about what runs in it.</summary>
+    public static bool IsExePath(string title)
+    {
+        string t = title.Trim();
+        return t.Contains('\\') && t.EndsWith(".exe", StringComparison.OrdinalIgnoreCase);
+    }
+
     /// <summary>Whether two titles name the same thing, a spinner frame apart.</summary>
     public static bool SameName(string a, string b) => string.Equals(Strip(a), Strip(b), StringComparison.Ordinal);
 }

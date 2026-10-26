@@ -108,6 +108,7 @@ internal static class HostProgram
     static ConPty _pty = null!;
     static HostRecord _record = null!;
     static string _recordPath = "";
+    static HostSpec _spec = new();
     static volatile bool _exited;
     static uint _exitCode;
     static readonly MemoryStream _oscBuf = new();
@@ -154,6 +155,7 @@ internal static class HostProgram
 
     static int Serve(HostSpec spec)
     {
+        _spec = spec;
         Directory.CreateDirectory(spec.HostsDir);
         _recordPath = Path.Combine(spec.HostsDir, spec.Id + ".json");
         _ring = new Ring(Math.Max(spec.RingBytes, 64 * 1024));
@@ -313,7 +315,9 @@ internal static class HostProgram
                 if (s.StartsWith("0;") || s.StartsWith("2;"))
                 {
                     string title = s[2..].Trim();
-                    if (title.Length > 0 && title != _record.Title)
+                    // A pane given a name keeps it over the shell's own path; a CLI that titles itself still wins.
+                    bool shellPath = TitleMarks.IsExePath(title) && _spec.Title.Length > 0;
+                    if (title.Length > 0 && title != _record.Title && !shellPath)
                     {
                         // A spinner frame changes only the leading mark; the record on disk keeps the
                         // name it has, since every write makes the app rescan.

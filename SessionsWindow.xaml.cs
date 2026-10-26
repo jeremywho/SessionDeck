@@ -145,6 +145,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             {
                 case "codex": NewCodexSessionButton_Click(this, new RoutedEventArgs()); break;
                 case "shell": SpawnShellIntoDeck(); break;
+                case "agy": SpawnAgyIntoDeck(); break;
                 case var p when p.StartsWith("profile:", StringComparison.Ordinal): NewProfileSession(p["profile:".Length..]); break;
                 default: NewSessionButton_Click(this, new RoutedEventArgs()); break;
             }
@@ -725,6 +726,17 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     /// started before the saved layout is rebuilt, so each lands in the slot its session had.
     /// </summary>
     public void ResumeWhenAttached(List<SavedSession> sessions) => _resumeOnAttach = sessions;
+
+    /// <summary>The Antigravity CLI in a pane: no hooks, so the row reads like a terminal with a fixed name.</summary>
+    void SpawnAgyIntoDeck()
+    {
+        try { Deck.Open(HostManager.Spawn("", "Agy", "agy --dangerously-skip-permissions", HomeDir, "AGY")); }
+        catch (Exception ex)
+        {
+            App.LogError(ex);
+            LiveLabel.Text = "Could not start the AGY host: " + ex.Message;
+        }
+    }
 
     void SpawnShellIntoDeck()
     {

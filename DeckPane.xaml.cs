@@ -22,7 +22,7 @@ internal partial class DeckPane : UserControl
         public DeckTab(TerminalView v) { View = v; }
 
         public string Title => StripMark(View.Title);
-        public string Glyph => View.Host.Provider switch { "Codex" => "◆", "Shell" => ">", _ => "✳" };
+        public string Glyph => View.Host.Provider switch { "Codex" => "◆", "Shell" => ">", "Agy" => "◈", _ => "✳" };
 
         /// <summary>Claude titles its own window "✳ …" (a spinner while it works); the tab already leads with a mark.</summary>
         internal static string StripMark(string t) => TitleMarks.Strip(t);
@@ -90,35 +90,20 @@ internal partial class DeckPane : UserControl
     }
 
     void NewInGroup_Click(object sender, RoutedEventArgs e) => RequestNew(sender, "claude");
-    /// <summary>Opened from code, which raises no ContextMenuOpening, so the account items are added right here.</summary>
     void NewInGroup_RightClick(object sender, MouseButtonEventArgs e)
     {
         if (sender is FrameworkElement { ContextMenu: { } menu } fe)
         {
-            AddProfileItems(fe, menu);
             ShowPrPaneItem(menu);
             menu.PlacementTarget = fe;
             Dispatcher.BeginInvoke(() => menu.IsOpen = true);
         }
         e.Handled = true;
     }
-
-    /// <summary>One "New Claude session as …" item per pinned account found on disk, refreshed each time the menu opens.</summary>
-    void AddProfileItems(FrameworkElement plus, ContextMenu menu)
-    {
-        var group = plus.Tag;
-        foreach (var stale in menu.Items.OfType<MenuItem>().Where(m => m.Tag is ClaudeProfile).ToList()) menu.Items.Remove(stale);
-        int at = 1;
-        foreach (var p in ClaudeProfiles.Discover())
-        {
-            var item = new MenuItem { Header = $"New Claude session as {p.Name}", Tag = p, ToolTip = p.ScriptPath };
-            item.Click += (_, _) => { if (group is DeckGroup<DeckTab> g && Groups.Contains(g)) { _model.Focused = Groups.IndexOf(g); Mark(); } NewSessionRequested?.Invoke("profile:" + p.Name); };
-            menu.Items.Insert(at++, item);
-        }
-    }
     void NewClaudeMenu_Click(object sender, RoutedEventArgs e) => RequestNew(sender, "claude");
     void NewCodexMenu_Click(object sender, RoutedEventArgs e) => RequestNew(sender, "codex");
     void NewShellMenu_Click(object sender, RoutedEventArgs e) => RequestNew(sender, "shell");
+    void NewAgyMenu_Click(object sender, RoutedEventArgs e) => RequestNew(sender, "agy");
 
     public DeckPane()
     {

@@ -34,6 +34,15 @@ public class HostRecordWriteTests : IDisposable
     public void A_leading_mark_is_not_part_of_the_name(string title, string name)
         => Assert.Equal(name, TitleMarks.Strip(title));
 
+    [Theory]
+    [InlineData("C:\\Program Files\\PowerShell\\7\\pwsh.exe", true)]
+    [InlineData("C:\\Windows\\system32\\cmd.exe", true)]
+    [InlineData("✳ local chess", false)]
+    [InlineData("AGY", false)]
+    [InlineData("", false)]
+    public void A_shells_own_path_is_recognised_as_no_name(string title, bool exePath)
+        => Assert.Equal(exePath, TitleMarks.IsExePath(title));
+
     [Fact]
     public void Spinner_frames_are_the_same_name_and_a_rename_is_not()
     {
