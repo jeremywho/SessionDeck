@@ -258,6 +258,8 @@ internal sealed class App : Application
         var menu = new WpfContextMenu();
         menu.Items.Add(Item("Open", ShowWindow));
         menu.Items.Add(Item("Settings…", ShowSettings));
+        menu.Items.Add(Item("New session with options…", () => { ShowWindow(); _window?.ShowNewSessionDialog(); }));
+        menu.Items.Add(Item("Adopt a session from another terminal…", () => { ShowWindow(); _window?.ShowAdoptPicker(); }));
         menu.Items.Add(Item("Restore sessions…", RestoreFromTray));
         menu.Items.Add(Item("Toggle theme", ToggleTheme));
         menu.Items.Add(new System.Windows.Controls.Separator());

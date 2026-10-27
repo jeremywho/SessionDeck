@@ -657,6 +657,11 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
 
     void SettingsButton_Click(object sender, RoutedEventArgs e) => _app.ShowSettings();
 
+    /// <summary>The new-session dialog, now reached from the tray; the column "+" covers plain new sessions.</summary>
+    public void ShowNewSessionDialog() => NewSessionDialog(SessionProvider.Claude);
+
+    public void ShowAdoptPicker() => AdoptButton_Click(this, new RoutedEventArgs());
+
     void AdoptButton_Click(object sender, RoutedEventArgs e)
     {
         PerformanceLog.Write($"adopt-button external={_externalSnapshot.Length}");
