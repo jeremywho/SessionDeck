@@ -1069,10 +1069,10 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         if (h.Protocol < 3 && agentStatus == "scheduled") agentStatus = "idle";
         // A SessionStart mid-turn (Codex compaction) must not downgrade a turn the CLI's own record says is open.
         if (h.LastEvent == "SessionStart" && agentStatus == "idle" && info.Status == "busy") return;
-        // The CLI's own registry says "shell" while background shells it started are still running;
-        // the hooks only see the agent's turn end. Background work in flight outranks an idle hook.
-        bool backgroundHolds = info.Status == "shell" && agentStatus is "idle" or "scheduled";
-        if (agentStatus.Length > 0 && (newer || info.Status.Length == 0) && !backgroundHolds)
+        // The CLI's own registry says "shell" while a background shell it started still runs, long
+        // after the turn that started it ended and the session began waiting for the person. The
+        // hook's word on the turn wins; the shell shows as a badge, not as the session working.
+        if (agentStatus.Length > 0 && (newer || info.Status.Length == 0 || info.Status == "shell"))
         {
             info.Status = agentStatus;
             info.StatusUpdatedAt = at.ToLocalTime();

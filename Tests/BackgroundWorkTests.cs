@@ -24,13 +24,18 @@ public class BackgroundWorkTests
     }
 
     [Fact]
-    public void A_finished_turn_with_background_work_shows_as_scheduled()
+    public void A_finished_turn_with_a_background_shell_is_completed_and_badged_not_scheduled()
     {
-        var idle = new SessionRow(new SessionInfo { SessionId = "s1", Status = "idle", BackgroundWork = 1 });
-        Assert.Equal(SessionState.Scheduled, idle.State);
+        var shell = new SessionRow(new SessionInfo { SessionId = "s1", Status = "idle", BackgroundWork = 1 });
+        Assert.Equal(SessionState.Completed, shell.State);
+        Assert.Equal(1, shell.SubagentsActive);
         var quiet = new SessionRow(new SessionInfo { SessionId = "s2", Status = "idle" });
         Assert.Equal(SessionState.Completed, quiet.State);
         var busy = new SessionRow(new SessionInfo { SessionId = "s3", Status = "busy", BackgroundWork = 1 });
         Assert.Equal(SessionState.Working, busy.State);
+        var agents = new SessionRow(new SessionInfo { SessionId = "s4", Status = "idle", SubagentsActive = 2 });
+        Assert.Equal(SessionState.Scheduled, agents.State);
+        var tasks = new SessionRow(new SessionInfo { SessionId = "s5", Status = "idle", BackgroundTasks = 1 });
+        Assert.Equal(SessionState.Scheduled, tasks.State);
     }
 }

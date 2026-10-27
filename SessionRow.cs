@@ -158,8 +158,10 @@ internal sealed class SessionRow : INotifyPropertyChanged
     public string Status => _s.Status;                            // raw status (optional column)
     public bool HostExited => Host.HasExited;
     /// <summary>
-    /// A session whose own turn is over but which still has subagents streaming or background tasks
-    /// writing is not done: it shows as Scheduled, since something of its own will bring it back.
+    /// A session whose own turn is over but whose subagents are still streaming, or whose Codex
+    /// tasks are still running, is not done: it shows as Scheduled, since their end brings it back.
+    /// A background shell does not: it can outlive the turn by hours while the session waits for
+    /// the person, so it counts in the badge only and the turn's end shows as Completed.
     /// </summary>
     public SessionState State
     {
@@ -168,7 +170,7 @@ internal sealed class SessionRow : INotifyPropertyChanged
             if (Host.HasExited) return SessionState.Idle;
             if (_s.ApiError) return SessionState.Error;
             var state = SessionStateMap.FromStatus(_s.Status);
-            if (state is SessionState.Completed or SessionState.Idle && HasActiveSubagents) return SessionState.Scheduled;
+            if (state is SessionState.Completed or SessionState.Idle && _s.SubagentsActive + _s.BackgroundTasks > 0) return SessionState.Scheduled;
             return state;
         }
     }
