@@ -206,6 +206,12 @@ internal static class HostProgram
             StartedAt = DateTime.UtcNow,
             Title = spec.Title,
         };
+        // A resumed agy conversation fires no SessionStart; it sits at its prompt until spoken to.
+        if (spec.Provider == "Agy" && spec.CommandLine.Contains(Hooks.AgyHooksDirPlaceholder))
+        {
+            _record.AgentStatus = "idle";
+            _record.StatusAt = _record.StartedAt;
+        }
         WriteRecord();
         ready.WriteLine("ready");
         ready.Flush();

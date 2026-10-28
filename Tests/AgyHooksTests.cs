@@ -60,6 +60,37 @@ public class AgyHooksTests
             SessionLauncher.ResumeCommand(new SavedSession { Id = "b34a47d3-a8cf-4e41-98cc-7eca5276e0f5", Provider = SessionProvider.Agy }, ""));
     }
 
+    // Seen live on 2026-10-28: an agy pane ran a codex exec, the exec was paired to the pane by
+    // descent, and the row turned into a Codex session named Oura; the registry then alternated
+    // between Codex and Agy for the same conversation id.
+    [Fact]
+    public void A_tool_running_under_an_agy_pane_never_becomes_the_panes_session()
+    {
+        var agyHost = new HostRecord { Id = "h1", SessionId = "", Provider = "Agy", HostPid = 1, ChildPid = 10, StartedAt = DateTime.UtcNow };
+        var codexExec = new SessionInfo { SessionId = "t1", Pid = 99, Provider = SessionProvider.Codex, Kind = "exec", Model = "gpt-6-astra" };
+        var pairs = HostPairing.Pair(new[] { agyHost }, new[] { codexExec }, (_, _) => true, new HashSet<SessionInfo>());
+        Assert.NotSame(codexExec, pairs.Single().Info);
+        Assert.Equal(SessionProvider.Agy, pairs.Single().Info.Provider);
+
+        var claudeHost = new HostRecord { Id = "h2", SessionId = "", Provider = "Shell", HostPid = 1, ChildPid = 20, StartedAt = DateTime.UtcNow };
+        Assert.False(HostPairing.CanDescend(codexExec, claudeHost));
+        Assert.True(HostPairing.CanDescend(new SessionInfo { Provider = SessionProvider.Codex, Kind = "tui" }, new HostRecord { Provider = "Codex" }));
+        Assert.True(HostPairing.CanDescend(new SessionInfo { Provider = SessionProvider.Claude, Kind = "interactive" }, claudeHost));
+    }
+
+    // Seen live the same day: the app restarted for an update, the pre-hook Oura pane had no
+    // session id on its host, so the registry's Oura looked orphaned and was resumed a second time.
+    [Fact]
+    public void A_running_pre_hook_agy_pane_still_counts_its_conversation_as_live()
+    {
+        var table = new Dictionary<int, (int Parent, string Name)> { [10] = (1, "pwsh.exe"), [11] = (10, "agy.exe") };
+        var hooked = new HostRecord { Id = "a", SessionId = "conv-a", Provider = "Agy", ChildPid = 50 };
+        var preHook = new HostRecord { Id = "b", SessionId = "", Provider = "Agy", ChildPid = 10 };
+        var shell = new HostRecord { Id = "c", SessionId = "", Provider = "Shell", ChildPid = 10 };
+        var ids = App.HostedConversations(new[] { hooked, preHook, shell }, table).ToList();
+        Assert.Equal(new[] { "conv-a" }, ids);
+    }
+
     [Fact]
     public void An_agy_host_is_an_agy_row_not_a_claude_one()
     {
