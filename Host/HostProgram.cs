@@ -532,6 +532,11 @@ internal static class HostProgram
     {
         string ev = EventName(root, eventFromQuery);
         if (ev.Length == 0) return;
+        if (Hooks.FromSubagent(root))
+        {
+            lock (_record) _record.HookEvents++;
+            return;
+        }
         lock (_record)
         {
             _record.HookEvents++;

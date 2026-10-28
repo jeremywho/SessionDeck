@@ -8,6 +8,17 @@ public class HookStatusTests
 {
     static JsonElement J(string json) => JsonDocument.Parse(json).RootElement.Clone();
 
+    // Seen live on 2026-10-28: a background subagent kept running after the session's turn ended, and
+    // its Bash calls arrived as PreToolUse events that flipped the session back to busy for good.
+    [Fact]
+    public void A_subagents_hook_events_are_told_apart_by_their_agent_id()
+    {
+        Assert.True(Hooks.FromSubagent(J("{\"hook_event_name\": \"PreToolUse\", \"tool_name\": \"Bash\", \"agent_id\": \"aa2958c3833db8871\", \"agent_type\": \"general-purpose\"}")));
+        Assert.False(Hooks.FromSubagent(J("{\"hook_event_name\": \"PreToolUse\", \"tool_name\": \"Bash\"}")));
+        Assert.False(Hooks.FromSubagent(J("{\"hook_event_name\": \"PreToolUse\", \"tool_name\": \"Bash\", \"agent_type\": \"my-agent\"}")));
+        Assert.False(Hooks.FromSubagent(J("{\"agent_id\": \"\"}")));
+    }
+
     [Fact]
     public void A_turn_that_armed_a_wakeup_ends_scheduled_not_idle()
     {

@@ -89,6 +89,15 @@ internal static class Hooks
         _ => null,
     };
 
+    /// <summary>
+    /// Claude runs the same hooks inside subagents, stamping those events with the agent's id. A
+    /// subagent's tool call says nothing about the session's own turn: it can run for an hour after
+    /// the turn ended and the person was asked something, and its end fires no Stop for the session.
+    /// The app sees subagents through their transcripts instead.
+    /// </summary>
+    public static bool FromSubagent(JsonElement root) =>
+        root.TryGetProperty("agent_id", out var a) && a.ValueKind == JsonValueKind.String && (a.GetString() ?? "").Length > 0;
+
     /// <summary>Why a SessionStart fired: startup, resume, clear, or compact. A compaction happens mid-turn and changes nothing.</summary>
     public static string StartSource(JsonElement root) =>
         root.TryGetProperty("source", out var s) && s.ValueKind == JsonValueKind.String ? s.GetString() ?? "" : "";
