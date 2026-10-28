@@ -39,13 +39,22 @@ internal sealed class TerminalView
 
     public void FocusTerminal() => _browser.FocusPage();
 
+    /// <summary>A name learned outside the terminal stream (a CLI's own conversation name).</summary>
+    public void Rename(string title)
+    {
+        if (title.Length == 0 || title == Title) return;
+        Title = title;
+        TitleChanged?.Invoke(this);
+    }
+
     internal void OnMessage(string type, JsonElement root)
     {
         switch (type)
         {
             case "title":
                 string t = root.GetProperty("title").GetString() ?? "";
-                if (t.Length > 0 && t != Title) { Title = t; TitleChanged?.Invoke(this); }
+                // A pane given a name keeps it over the shell's own path; a CLI that titles itself still wins.
+                if (t.Length > 0 && t != Title && !(Host.Title.Length > 0 && SessionDeck.Host.TitleMarks.IsExePath(t))) { Title = t; TitleChanged?.Invoke(this); }
                 break;
             case "exit":
                 Exited = true;

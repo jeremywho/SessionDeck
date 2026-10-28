@@ -1002,6 +1002,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         var claimed = new HashSet<SessionInfo>();
         var byHost = HostPairing.Pair(hosts, live, (s, h) => DescendsFrom(s.Pid, h.ChildPid, parents), claimed);
         foreach (var (h, info) in byHost) ApplyHookState(h, info);
+        ApplyAgyNames(byHost, parents);
 
         var seen = new HashSet<string>();
         int added = 0;
@@ -1088,6 +1089,23 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         if (h.LastTool.Length > 0 && (hookOwns || info.LastTool.Length == 0)) info.LastTool = h.LastTool;
         if (info.SessionId.Length == 0 && h.SessionId.Length > 0) info.SessionId = h.SessionId;
         if (info.TranscriptPath.Length == 0 && h.TranscriptPath.Length > 0) info.TranscriptPath = h.TranscriptPath;
+    }
+
+    /// <summary>An agy pane shows the conversation's own name (its /rename) in the row and the tab, like Claude and Codex panes do.</summary>
+    void ApplyAgyNames(List<(Host.HostRecord Host, SessionInfo Info)> byHost, Dictionary<int, int> parents)
+    {
+        if (!byHost.Any(x => x.Host.Provider == "Agy")) return;
+        var table = SessionScanner.ProcessTable;
+        foreach (var (h, info) in byHost)
+        {
+            if (h.Provider != "Agy" || h.HasExited) continue;
+            int agyPid = AgyScanner.AgyPidUnder(h.ChildPid, table);
+            if (agyPid == 0) continue;
+            string name = AgyScanner.NameFor(agyPid);
+            if (name.Length == 0) continue;
+            info.Name = name;
+            Deck.FindByHost(h.Id)?.View.Rename(name);
+        }
     }
 
     static bool DescendsFrom(int pid, int ancestor, Dictionary<int, int> parents)

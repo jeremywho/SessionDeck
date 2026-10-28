@@ -36,6 +36,8 @@ internal static class SessionScanner
     /// <summary>One process snapshot per scan, shared by every session's shell count.</summary>
     static Dictionary<int, (int Parent, string Name)> _procs = new();
 
+    public static IReadOnlyDictionary<int, (int Parent, string Name)> ProcessTable => _procs;
+
     public static List<SessionInfo> Scan()
     {
         try { _procs = Native.BuildProcessTable(); } catch { _procs = new(); }
