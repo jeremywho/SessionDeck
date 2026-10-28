@@ -29,6 +29,16 @@ public class SessionRowTests
     public void Codex_model_ids_prefer_the_named_variant(string id, string expected)
         => Assert.Equal(expected, WithModel(id, p: SessionProvider.Codex).ModelChip);
 
+    [Theory]
+    [InlineData("gemini-4-argon-medium", "Argon 4", "medium")]
+    [InlineData("gemini-3.5-flash-high", "Flash 3.5", "high")]
+    [InlineData("gemini-3.5-flash", "Flash 3.5", "")]
+    public void Antigravity_model_ids_shorten_to_variant_and_version_and_carry_their_effort(string id, string chip, string effort)
+    {
+        Assert.Equal(chip, WithModel(id, p: SessionProvider.Agy).ModelChip);
+        Assert.Equal(effort, SessionRow.EffortOfModel(id));
+    }
+
     [Fact]
     public void An_unrecognised_model_id_is_shown_as_is_rather_than_blanked()
         => Assert.Equal("some-new-model", WithModel("some-new-model").ModelChip);

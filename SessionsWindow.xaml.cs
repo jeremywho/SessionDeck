@@ -1086,6 +1086,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         if (info.SessionId.Length == 0 && h.SessionId.Length > 0) info.SessionId = h.SessionId;
         if (info.TranscriptPath.Length == 0 && h.TranscriptPath.Length > 0) info.TranscriptPath = h.TranscriptPath;
         if (info.Model.Length == 0 && h.Model.Length > 0) info.Model = h.Model;
+        if (info.Effort.Length == 0) info.Effort = SessionRow.EffortOfModel(info.Model);
     }
 
     /// <summary>An agy pane shows the conversation's own name (its /rename) in the row and the tab, like Claude and Codex panes do.</summary>
@@ -1097,10 +1098,13 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         {
             if (h.Provider != "Agy" || h.HasExited) continue;
             string name = h.SessionId.Length > 0 ? AgyScanner.NameForConversation(h.SessionId) : "";
-            if (name.Length == 0)
+            if (h.SessionId.Length == 0)
             {
                 int agyPid = AgyScanner.AgyPidUnder(h.ChildPid, table);
                 if (agyPid == 0) continue;
+                // A pane started before hooks were wired still gets its conversation from agy's log, so
+                // it can be restarted (onto hooks) and comes back after a reboot.
+                if (info.SessionId.Length == 0) info.SessionId = AgyScanner.ConversationFor(agyPid);
                 name = AgyScanner.NameFor(agyPid);
             }
             if (name.Length == 0) continue;

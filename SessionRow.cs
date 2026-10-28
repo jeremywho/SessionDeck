@@ -483,7 +483,18 @@ internal sealed class SessionRow : INotifyPropertyChanged
                 ? Title(m.Groups[2].Value)
                 : $"GPT-{m.Groups[1].Value}";
 
+        // Antigravity: gemini-4-argon-medium -> "Argon 4", gemini-3.5-flash -> "Flash 3.5"; the effort suffix is shown separately.
+        m = Regex.Match(raw, @"^gemini-([\d.]+)-([a-z]+)(?:-(?:low|medium|high|xhigh|max))?$", RegexOptions.IgnoreCase);
+        if (m.Success) return $"{Title(m.Groups[2].Value)} {m.Groups[1].Value}";
+
         return raw;
+    }
+
+    /// <summary>The effort an Antigravity model id carries in its last segment, or empty.</summary>
+    public static string EffortOfModel(string id)
+    {
+        var m = Regex.Match(id, @"^gemini-[\d.]+-[a-z]+-(low|medium|high|xhigh|max)$", RegexOptions.IgnoreCase);
+        return m.Success ? m.Groups[1].Value.ToLowerInvariant() : "";
     }
 
     static string Title(string s) =>
