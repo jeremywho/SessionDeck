@@ -228,6 +228,10 @@ internal sealed class App : Application
         var saved = SessionRegistry.Load();
         if (saved.Count == 0) return new();
         var liveIds = new HashSet<string>(SessionScanner.Scan().Select(s => s.SessionId));
+        // Agy has no registry of its own: a conversation is live while a host of this app still runs
+        // it, which is the case across every restart of the app itself.
+        foreach (var h in HostManager.Discover())
+            if (!h.HasExited && h.SessionId.Length > 0 && HostManager.IsAlive(h)) liveIds.Add(h.SessionId);
         // A week, not a day: a machine can sit wedged/powered-off well past 24h, and the restore
         // offer is an opt-in checklist — a stale entry costs one unticked row.
         long cutoff = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - 7L * 24 * 60 * 60 * 1000;

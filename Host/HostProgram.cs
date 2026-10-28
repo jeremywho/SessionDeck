@@ -61,6 +61,7 @@ internal sealed class HostRecord
     public string LastTool { get; set; } = "";
     public DateTime? StatusAt { get; set; }
     public string TranscriptPath { get; set; } = "";
+    public string Model { get; set; } = "";
 
     /// <summary>Hooks seen by this process; kept out of the file so a hook that changes nothing else writes nothing.</summary>
     [JsonIgnore] public int HookEvents { get; set; }
@@ -175,6 +176,13 @@ internal static class HostProgram
             File.WriteAllText(settingsPath, Hooks.ClaudeSettingsJson(hookCmd));
             commandLine = commandLine.Replace(Hooks.ClaudeSettingsPlaceholder, settingsPath.Replace('\\', '/'));
         }
+        if (commandLine.Contains(Hooks.AgyHooksDirPlaceholder))
+        {
+            string hooksDir = AgyHooksDir(spec);
+            Directory.CreateDirectory(Path.Combine(hooksDir, ".agents"));
+            File.WriteAllText(Path.Combine(hooksDir, ".agents", "hooks.json"), Hooks.AgyHooksJson(port, token));
+            commandLine = commandLine.Replace(Hooks.AgyHooksDirPlaceholder, hooksDir.Replace('\\', '/'));
+        }
 
         var ready = Console.Out;
         DetachStdHandles();
@@ -222,6 +230,7 @@ internal static class HostProgram
         _record.ExitedAt = DateTime.UtcNow;
         WriteRecord();
         try { File.Delete(Path.Combine(Path.GetDirectoryName(spec.HostsDir)!, "hook-settings", spec.Id + ".claude.json")); } catch { }
+        try { Directory.Delete(AgyHooksDir(spec), true); } catch { }
         Broadcast(true, Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { type = "exit", code = _exitCode })));
         lock (ClientsLock) foreach (var c in Clients) c.Out.Writer.TryComplete();
         listener.Stop();
@@ -229,6 +238,9 @@ internal static class HostProgram
         _pty.Dispose();
         return 0;
     }
+
+    /// <summary>The folder handed to agy as <c>--add-dir</c>, holding only this host's hooks.json.</summary>
+    static string AgyHooksDir(HostSpec spec) => Path.Combine(Path.GetDirectoryName(spec.HostsDir)!, "hook-settings", spec.Id + ".agy");
 
     static long _lastOutputTicks;
     static long _outputBytes;
@@ -498,15 +510,27 @@ internal static class HostProgram
         try
         {
             using var doc = JsonDocument.Parse(body.AsMemory(0, have));
-            ApplyHook(doc.RootElement);
+            ApplyHook(doc.RootElement, EventFromPath(path));
         }
         catch (Exception ex) { Log($"hook: {ex.Message}"); }
         await WriteAscii(stream, "HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n");
     }
 
-    static void ApplyHook(JsonElement root)
+    /// <summary><c>/hook/Stop?token=…</c> names the event in the path; <c>/hook?token=…</c> names none.</summary>
+    internal static string EventFromPath(string path)
     {
-        string ev = root.TryGetProperty("hook_event_name", out var e) && e.ValueKind == JsonValueKind.String ? e.GetString() ?? "" : "";
+        int q = path.IndexOf('?');
+        string p = q < 0 ? path : path[..q];
+        return p.StartsWith("/hook/") ? p["/hook/".Length..].Trim('/') : "";
+    }
+
+    /// <summary>Claude and Codex name the event in the body; agy's forwarder names it in the path instead.</summary>
+    internal static string EventName(JsonElement root, string fromQuery) =>
+        root.TryGetProperty("hook_event_name", out var e) && e.ValueKind == JsonValueKind.String && (e.GetString() ?? "").Length > 0 ? e.GetString()! : fromQuery;
+
+    static void ApplyHook(JsonElement root, string eventFromQuery = "")
+    {
+        string ev = EventName(root, eventFromQuery);
         if (ev.Length == 0) return;
         lock (_record)
         {
@@ -514,7 +538,7 @@ internal static class HostProgram
             // PostToolUse follows a PreToolUse that already said busy and names the tool; recording it
             // would rewrite the file on every tool call for nothing the app reads.
             if (ev != "PostToolUse") _record.LastEvent = ev;
-            bool turnStarts = ev is "UserPromptSubmit" or "PreToolUse" && _record.AgentStatus is "idle" or "scheduled" or "waiting" or "";
+            bool turnStarts = ev is "UserPromptSubmit" or "PreToolUse" or "PreInvocation" && _record.AgentStatus is "idle" or "scheduled" or "waiting" or "";
             if (ev == "SessionStart" || turnStarts) _record.Pending = false;
             if (ev == "PreToolUse" && Hooks.Defers(root)) _record.Pending = true;
             if (ev == "PreToolUse" && Hooks.StopsLoop(root)) _record.Pending = false;
@@ -533,10 +557,16 @@ internal static class HostProgram
                 _record.SessionId = sid.GetString() ?? "";
             if (root.TryGetProperty("transcript_path", out var tp) && tp.ValueKind == JsonValueKind.String && (tp.GetString() ?? "").Length > 0)
                 _record.TranscriptPath = tp.GetString() ?? "";
+            if (Text(root, "conversationId") is { Length: > 0 } conversation) _record.SessionId = conversation;
+            if (Text(root, "transcriptPath") is { Length: > 0 } transcript) _record.TranscriptPath = transcript;
+            if (Text(root, "modelName") is { Length: > 0 } model) _record.Model = model;
         }
         WriteRecord();
         Broadcast(true, Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { type = "hook", @event = ev, status = _record.AgentStatus, tool = _record.LastTool })));
     }
+
+    static string Text(JsonElement root, string name) =>
+        root.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
 
     static Dictionary<string, string> ParseQuery(string path)
     {

@@ -39,9 +39,12 @@ internal static class SessionLauncher
     {
         // `codex resume <id>` takes the thread id and nothing else — there is no --name to pass,
         // because on Codex's side the name is already attached to the thread.
-        string cmd = s.Provider == SessionProvider.Codex
-            ? $"codex resume {s.Id}"
-            : ClaudeResumeCommand(s);
+        string cmd = s.Provider switch
+        {
+            SessionProvider.Codex => $"codex resume {s.Id}",
+            SessionProvider.Agy => $"agy --conversation {s.Id}",
+            _ => ClaudeResumeCommand(s),
+        };
 
         if (!string.IsNullOrWhiteSpace(extraFlags))
             cmd += " " + extraFlags.Trim();

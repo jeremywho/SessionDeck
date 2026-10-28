@@ -52,9 +52,26 @@ internal static class HostManager
         return cmd + CodexHookArgs;
     }
 
+    public const string AgyDefaultFlags = "--dangerously-skip-permissions";
+
+    public static string NewAgyCommand(string extraFlags)
+    {
+        string cmd = "agy";
+        if (!string.IsNullOrWhiteSpace(extraFlags)) cmd += " " + extraFlags.Trim();
+        return cmd + AgyHookArgs;
+    }
+
+    public static string ResumeAgyCommand(string conversationId, string extraFlags)
+    {
+        string cmd = $"agy --conversation {conversationId}";
+        if (!string.IsNullOrWhiteSpace(extraFlags)) cmd += " " + extraFlags.Trim();
+        return cmd + AgyHookArgs;
+    }
+
     /// <summary>Filled in by the host once it knows its port and token — see <see cref="Host.Hooks"/>.</summary>
     const string ClaudeHookArgs = " --settings \"" + Host.Hooks.ClaudeSettingsPlaceholder + "\"";
     static readonly string CodexHookArgs = " " + Host.Hooks.CodexArgs(Host.Hooks.CommandPlaceholder);
+    const string AgyHookArgs = " --add-dir \"" + Host.Hooks.AgyHooksDirPlaceholder + "\"";
 
     /// <summary>
     /// The host runs the CLI under pwsh so its own PATH resolution and profile apply, exactly as a

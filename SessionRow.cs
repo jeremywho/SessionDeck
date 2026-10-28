@@ -36,7 +36,7 @@ internal sealed class SessionRow : INotifyPropertyChanged
     /// registry entry (a Codex TUI before its first turn, a Claude that is still starting).</summary>
     public static SessionInfo Placeholder(Host.HostRecord h) => new()
     {
-        Provider = string.Equals(h.Provider, "Codex", StringComparison.OrdinalIgnoreCase) ? SessionProvider.Codex : SessionProvider.Claude,
+        Provider = ProviderOf(h.Provider),
         Pid = h.ChildPid,
         SessionId = h.SessionId,
         Cwd = h.Cwd,
@@ -45,6 +45,11 @@ internal sealed class SessionRow : INotifyPropertyChanged
         StartedAt = h.StartedAt,
         UpdatedAt = h.StartedAt,
     };
+
+    public static SessionProvider ProviderOf(string hostProvider) =>
+        string.Equals(hostProvider, "Codex", StringComparison.OrdinalIgnoreCase) ? SessionProvider.Codex
+        : string.Equals(hostProvider, "Agy", StringComparison.OrdinalIgnoreCase) ? SessionProvider.Agy
+        : SessionProvider.Claude;
 
     /// <summary>Take the latest scan and the host record as it is on disk now: the host follows the
     /// session's id through /resume and /clear, and the row's group key has to follow with it.</summary>
@@ -404,10 +409,10 @@ internal sealed class SessionRow : INotifyPropertyChanged
     // --- provider ---
     public SessionProvider Provider => _s.Provider;
     public bool IsCodex => _s.Provider == SessionProvider.Codex;
-    public string ProviderName => _s.Provider == SessionProvider.Codex ? "Codex" : "Claude Code";
-    /// <summary>Marker inside the model pill. Two shapes rather than two letters — both CLIs start
+    public string ProviderName => _s.Provider switch { SessionProvider.Codex => "Codex", SessionProvider.Agy => "Antigravity", _ => "Claude Code" };
+    /// <summary>Marker inside the model pill. Shapes rather than letters — two of the CLIs start
     /// with a C, so a glyph tells them apart faster than initials do.</summary>
-    public string ProviderGlyph => _s.Provider == SessionProvider.Codex ? "◆" : "✳";
+    public string ProviderGlyph => _s.Provider switch { SessionProvider.Codex => "◆", SessionProvider.Agy => "◈", _ => "✳" };
 
     /// <summary>This session's context size — the model's own when we know it (Codex reports it per
     /// turn), otherwise the app-wide default.</summary>

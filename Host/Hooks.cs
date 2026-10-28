@@ -13,6 +13,12 @@ internal static class Hooks
 {
     public const string CommandPlaceholder = "{SD_HOOK_CMD}";
     public const string ClaudeSettingsPlaceholder = "{SD_CLAUDE_SETTINGS}";
+    public const string AgyHooksDirPlaceholder = "{SD_AGY_HOOKS_DIR}";
+
+    /// <summary>Agy fires these from a <c>hooks.json</c> under any <c>--add-dir</c> folder. Its hooks
+    /// block the agent loop and PreInvocation fires per model call, so the forwarder is curl (about
+    /// 30 ms) rather than this exe (about 200 ms), and no tool events are wired.</summary>
+    static readonly string[] AgyEvents = { "SessionStart", "PreInvocation", "Stop" };
 
     static readonly string[] ClaudeEvents = { "SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Notification", "Stop", "SessionEnd" };
     /// <summary>No tool events for Codex: its hooks run synchronously (an <c>async</c> handler never
@@ -46,6 +52,20 @@ internal static class Hooks
         return sb.ToString();
     }
 
+    /// <summary>Agy: the <c>hooks.json</c> for a per-host folder. Agy's payload carries no event name,
+    /// so each command names its event in the path. No quotes or backslashes anywhere: agy's parser rejects them.</summary>
+    public static string AgyHooksJson(int port, string token)
+    {
+        var events = new Dictionary<string, object>();
+        foreach (var ev in AgyEvents)
+            events[ev] = new object[] { new { command = AgyHookCommand(port, token, ev), timeout = 5 } };
+        return JsonSerializer.Serialize(new Dictionary<string, object> { ["sessiondeck"] = events },
+            new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
+    }
+
+    public static string AgyHookCommand(int port, string token, string eventName) =>
+        $"%SystemRoot%/System32/curl.exe -s -m 2 -X POST --data-binary @- http://127.0.0.1:{port}/hook/{eventName}?token={token}";
+
     /// <summary>Map a hook event to the status the deck shows.</summary>
     /// <summary>
     /// The status an event implies. <paramref name="pending"/> says the turn armed something that will
@@ -58,6 +78,7 @@ internal static class Hooks
     {
         "SessionStart" => StartSource(root) == "compact" ? null : "idle",
         "UserPromptSubmit" => "busy",
+        "PreInvocation" => "busy",
         "PreToolUse" => AsksUser(ToolName(root)) ? "waiting" : "busy",
         "PostToolUse" => "busy",
         "PermissionRequest" => "waiting",

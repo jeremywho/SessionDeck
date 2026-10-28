@@ -710,11 +710,14 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     {
         string cwd = string.IsNullOrWhiteSpace(s.Cwd) ? HomeDir : s.Cwd;
         string launcher = ClaudeProfiles.CommandFor(s.Profile);
-        string cmd = s.Provider == SessionProvider.Codex
-            ? HostManager.ResumeCodexCommand(s.Id, _app.Settings.CodexFlags)
-            : SessionScanner.HasTranscript(s.Id, cwd)
+        string cmd = s.Provider switch
+        {
+            SessionProvider.Codex => HostManager.ResumeCodexCommand(s.Id, _app.Settings.CodexFlags),
+            SessionProvider.Agy => HostManager.ResumeAgyCommand(s.Id, HostManager.AgyDefaultFlags),
+            _ => SessionScanner.HasTranscript(s.Id, cwd)
                 ? HostManager.ResumeClaudeCommand(s.Id, _app.Settings.ResumeFlags, launcher)
-                : HostManager.NewClaudeCommand(s.Id, s.Name, _app.Settings.ResumeFlags, launcher: launcher);
+                : HostManager.NewClaudeCommand(s.Id, s.Name, _app.Settings.ResumeFlags, launcher: launcher),
+        };
         try { return HostManager.Spawn(s.Id, s.Provider, cmd, cwd, s.Name, profile: s.Profile); }
         catch (Exception ex)
         {
@@ -732,16 +735,9 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     /// </summary>
     public void ResumeWhenAttached(List<SavedSession> sessions) => _resumeOnAttach = sessions;
 
-    /// <summary>The Antigravity CLI in a pane: no hooks, so the row reads like a terminal with a fixed name.</summary>
-    void SpawnAgyIntoDeck()
-    {
-        try { Deck.Open(HostManager.Spawn("", "Agy", "agy --dangerously-skip-permissions", HomeDir, "AGY")); }
-        catch (Exception ex)
-        {
-            App.LogError(ex);
-            LiveLabel.Text = "Could not start the AGY host: " + ex.Message;
-        }
-    }
+    /// <summary>The Antigravity CLI in a pane, with its hooks wired to the host like the other two CLIs.</summary>
+    void SpawnAgyIntoDeck() =>
+        SpawnIntoDeck("", SessionProvider.Agy, HostManager.NewAgyCommand(HostManager.AgyDefaultFlags), HomeDir, "AGY");
 
     void SpawnShellIntoDeck()
     {
@@ -1089,6 +1085,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         if (h.LastTool.Length > 0 && (hookOwns || info.LastTool.Length == 0)) info.LastTool = h.LastTool;
         if (info.SessionId.Length == 0 && h.SessionId.Length > 0) info.SessionId = h.SessionId;
         if (info.TranscriptPath.Length == 0 && h.TranscriptPath.Length > 0) info.TranscriptPath = h.TranscriptPath;
+        if (info.Model.Length == 0 && h.Model.Length > 0) info.Model = h.Model;
     }
 
     /// <summary>An agy pane shows the conversation's own name (its /rename) in the row and the tab, like Claude and Codex panes do.</summary>
@@ -1099,9 +1096,13 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         foreach (var (h, info) in byHost)
         {
             if (h.Provider != "Agy" || h.HasExited) continue;
-            int agyPid = AgyScanner.AgyPidUnder(h.ChildPid, table);
-            if (agyPid == 0) continue;
-            string name = AgyScanner.NameFor(agyPid);
+            string name = h.SessionId.Length > 0 ? AgyScanner.NameForConversation(h.SessionId) : "";
+            if (name.Length == 0)
+            {
+                int agyPid = AgyScanner.AgyPidUnder(h.ChildPid, table);
+                if (agyPid == 0) continue;
+                name = AgyScanner.NameFor(agyPid);
+            }
             if (name.Length == 0) continue;
             info.Name = name;
             Deck.FindByHost(h.Id)?.View.Rename(name);
@@ -1119,9 +1120,12 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     }
 
     /// <summary>Is this a session a human is sitting in front of, and could therefore want back?</summary>
-    static bool IsRestorable(SessionInfo s) => s.Provider == SessionProvider.Codex
-        ? s.Kind == "tui"
-        : s.Kind == "interactive";
+    static bool IsRestorable(SessionInfo s) => s.Provider switch
+    {
+        SessionProvider.Codex => s.Kind == "tui",
+        SessionProvider.Agy => true,
+        _ => s.Kind == "interactive",
+    };
 
     /// <summary>Poll the selected usage source now, then at that source's own cadence.</summary>
     void StartUsagePolling()
@@ -1705,11 +1709,14 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
                 PerformanceLog.Write($"restart host={host.Id}: codex update did not complete; resuming on v{InstalledVersions.Codex}");
             bool hasTranscript = SessionScanner.HasConversation(row.TranscriptPath);
             string launcher = ClaudeProfiles.CommandFor(host.Profile);
-            string cmd = provider == SessionProvider.Codex
-                ? HostManager.ResumeCodexCommand(sessionId, _app.Settings.CodexFlags)
-                : hasTranscript
+            string cmd = provider switch
+            {
+                SessionProvider.Codex => HostManager.ResumeCodexCommand(sessionId, _app.Settings.CodexFlags),
+                SessionProvider.Agy => HostManager.ResumeAgyCommand(sessionId, HostManager.AgyDefaultFlags),
+                _ => hasTranscript
                     ? HostManager.ResumeClaudeCommand(sessionId, _app.Settings.ResumeFlags, launcher)
-                    : HostManager.NewClaudeCommand(sessionId, null, _app.Settings.ResumeFlags, launcher: launcher);
+                    : HostManager.NewClaudeCommand(sessionId, null, _app.Settings.ResumeFlags, launcher: launcher),
+            };
 
             if (!host.HasExited)
             {

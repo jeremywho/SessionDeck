@@ -30,6 +30,13 @@ internal static class AgyScanner
         return _conversationByPid.TryGetValue(pid, out var id) && _nameByConversation.TryGetValue(id, out var name) ? name : "";
     }
 
+    /// <summary>The latest <c>/rename</c> of a conversation known by id (from its hooks), or empty.</summary>
+    public static string NameForConversation(string conversationId)
+    {
+        Refresh();
+        return _nameByConversation.TryGetValue(conversationId, out var name) ? name : "";
+    }
+
     public static string ConversationFor(int pid)
     {
         Refresh();

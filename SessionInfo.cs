@@ -2,7 +2,7 @@ namespace SessionDeck;
 
 /// <summary>Which CLI a session belongs to. Drives the provider badge and the launch/restore paths —
 /// the two scanners normalise very different on-disk shapes into one <see cref="SessionInfo"/>.</summary>
-internal enum SessionProvider { Claude, Codex }
+internal enum SessionProvider { Claude, Codex, Agy }
 
 /// <summary>One live Claude Code (or compatible) session.</summary>
 internal sealed class SessionInfo
