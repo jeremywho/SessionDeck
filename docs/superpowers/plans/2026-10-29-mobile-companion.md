@@ -51,7 +51,7 @@
 | `SettingsWindow.xaml(.cs)` | modify | "Phone" section: QR, devices, revoke, firewall button. |
 | `wwwroot/mobile.html`, `wwwroot/mobile.js` | create | Terminal page for the phone. |
 | `ios/project.yml`, `ios/SessionDeckMobile/**`, `ios/build.sh` | create | The iOS app. |
-| `Tests/SessionPipelineTests.cs`, `Tests/SessionCatalogTests.cs`, `Tests/DeviceStoreTests.cs`, `Tests/GatewayServerTests.cs`, `Tests/AttachRelayTests.cs`, `Tests/GatewayProcessTests.cs`, `Tests/FakeHost.cs` | create | Tests; `FakeHost` is an in-process stand-in for a host's attach server. |
+| `Tests/HostAttachTests.cs`, `Tests/SessionPipelineTests.cs`, `Tests/SessionCatalogTests.cs`, `Tests/DeviceStoreTests.cs`, `Tests/GatewayServerTests.cs`, `Tests/AttachRelayTests.cs`, `Tests/GatewayProcessTests.cs`, `Tests/FakeHost.cs` | create | Tests; `FakeHost` is an in-process stand-in for a host's attach server. |
 
 ---
 
@@ -82,7 +82,7 @@ public void A_snapshot_carries_the_pty_size_and_a_resize_announces_the_new_one()
 - [ ] **Step 2: Run to verify it fails** — `dotnet test ... --filter A_snapshot_carries` → FAIL (no such members).
 - [ ] **Step 3: Implement** the two builders; use them in `ServeClient` and in the `resize` case (`Broadcast(true, SizeJson(...))` after `_pty.Resize`); track size in `ConPty`; set `Protocol = 4`. `deck.html` ignores unknown text frames already (no change).
 - [ ] **Step 4: Run all tests** → PASS. Build Release.
-- [ ] **Step 5: Rehearse** against a throwaway host under `C:\Temp` (spec JSON on stdin, the way `v0.5.44` was verified): attach with a WebSocket client, assert the first text frame has `cols`/`rows`; send `resize`, assert a `size` frame arrives.
+- [ ] **Step 5: Integration test** `Tests/HostAttachTests.cs`: start the built `SessionDeck.exe --host` (it sits next to the test assembly) with a spec on stdin whose `HostsDir` is a temp folder and whose command is `pwsh -NoLogo -Command "Start-Sleep 20"`; attach with `ClientWebSocket`; assert the first text frame has `cols`/`rows`; send `resize`; assert a `size` frame arrives; then `kill`.
 - [ ] **Step 6: Commit** — "A host tells its viewers the pty size".
 
 ### Task 2: `SessionPipeline` — one headless scan-and-pair for every caller
@@ -100,7 +100,7 @@ public void A_snapshot_carries_the_pty_size_and_a_resize_announces_the_new_one()
                                     List<SessionInfo> Unowned, int ClaudeDiscovered, int CodexDiscovered, long ElapsedMs);
   internal static class SessionPipeline
   {
-      public static ScanResult Scan();                                   // off-dispatcher safe; logs session-scan like today
+      public static ScanResult Scan(bool prune = true);                  // off-dispatcher safe; logs session-scan like today; prune=false (gateway) never deletes a host record
       public static void WarmUp();                                       // CodexScanner.Probe() four times 3 s apart, as --list does today; headless callers run it once before their first Scan and Probe() once per cycle after
       public static List<(Host.HostRecord Host, SessionInfo Info)> Pair(ScanResult scan, HashSet<SessionInfo>? claimed = null);
       internal static void ApplyHookState(Host.HostRecord h, SessionInfo info);          // moved verbatim
@@ -108,7 +108,8 @@ public void A_snapshot_carries_the_pty_size_and_a_resize_announces_the_new_one()
       internal static bool DescendsFrom(int pid, int ancestor, Dictionary<int,int> parents);
   }
   ```
-- Consumes: `HostPairing.Pair`, `SessionScanner.Scan`, `CodexScanner.Scan`, `Native.BuildParentMap`, `CodexAttribution.Fold`, `HostManager.Discover`, `AgyScanner`.
+- Consumes: `HostPairing.Pair`, `SessionScanner.Scan`, `CodexScanner.Scan`, `Native.BuildParentMap`, `CodexAttribution.Fold`, `HostManager.Discover(bool prune)` (new overload: `prune=false` skips every `File.Delete`), `AgyScanner`.
+- Also produces `Settings.Peek()`: loads `settings.json` without `ApplyNewDefaults`/`Save` and without `AtomicFile.Read`'s set-aside rename (a plain parse of the file, then of `.bak`, null → `new Settings()`). The gateway only ever calls `Peek()` and `Scan(prune: false)`; tests `Peek_never_writes` (a settings file with `FlagsVersion = 0` is byte-identical after `Peek`) and `Discover_without_prune_leaves_dead_records` (a record whose pid is dead stays on disk).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -151,12 +152,13 @@ public void A_host_with_no_scanned_session_gets_a_placeholder_of_its_own_provide
   internal sealed record CatalogEntry(string HostId, string SessionId, string Provider, string Name, string ModelChip, string Effort,
       string State, long StateSinceMs, int Subagents, string Group, int GroupOrder, int SortPriority, string Cwd, bool HostExited, bool MobileReady);
   // MobileReady = host.Protocol >= 4 && !host.HasExited (a protocol-3 host cannot report its pty size)
-  internal static class SessionCatalog
+  internal sealed class SessionCatalog
   {
-      public static List<CatalogEntry> Build(List<(Host.HostRecord Host, SessionInfo Info)> pairs, Settings settings, DateTime nowUtc);
+      public List<CatalogEntry> Build(List<(Host.HostRecord Host, SessionInfo Info)> pairs, Settings settings, DateTime nowUtc);
       public static string ToJson(IReadOnlyList<CatalogEntry> entries);   // camelCase, no indentation
   }
   ```
+  The catalog is an instance that keeps one `SessionRow` per host id across builds and calls `row.Update(info, host)`, so `StateSince` keeps the turn's end through Claude's idle notification a minute later (the regression `ReadLedgerTests` pins for the window). Rows whose host is gone from `pairs` are dropped.
   `State` is `SessionState` name (`Working|Awaiting|Scheduled|Completed|Idle|Error`). Order = `SessionsWindow.SortedRows` rule: `GroupOrder`, then `HostExited` when `settings.RowOrder == Settings.RowOrderName` else `SortPriority`, then `Name` (`StringComparer.CurrentCulture`).
 - Consumes: `SessionRow(host, info)` for `State`, `StateSince`, `Name`, `ModelChip`, `Effort`, `SubagentsActive`, `SortPriority`; `SessionGroup.Apply` on a **deep copy** of `settings.SessionGroups` (the gateway must not mutate or save the deck's groups).
 
@@ -206,7 +208,7 @@ public void Only_hosts_that_report_their_size_are_mobile_ready()
 ```
 
 - [ ] **Step 2: Run to verify they fail** → FAIL.
-- [ ] **Step 3: Implement** `Build`: rows = `pairs.Select(p => new SessionRow(p.Host, p.Info))`; `SessionGroup.Apply(copyOfGroups, rows)`; map to entries; sort by the rule above. `ToJson` with `JsonSerializerDefaults.Web`.
+- [ ] **Step 3: Implement** `Build`: for each pair, reuse the cached row (`row.Update(info, host)`) or create one; drop rows for hosts not in `pairs`; `SessionGroup.Apply(copyOfGroups, rows)`; map to entries; sort by the rule above. `ToJson` with `JsonSerializerDefaults.Web`. Add the test `A_rebuilt_catalog_keeps_the_time_a_session_completed` (build at t0 with a completed row, build again at t0+70 s with the same status and a later `StatusUpdatedAt` → `StateSinceMs` unchanged).
 - [ ] **Step 4: Run all tests** → PASS.
 - [ ] **Step 5: Commit** — "A catalog of the session list that carries no secrets".
 
@@ -285,7 +287,7 @@ public void Only_hosts_that_report_their_size_are_mobile_ready()
   - `GET /events` (WebSocket) → on open and on every `CatalogChanged()`: text frame `{"type":"sessions","sessions":[…]}`. Auth: `?token=` on the upgrade (a header is also accepted). Origin rule: no `Origin` header, or `Origin` equal to `http://{Host header}`; anything else → 403 before the upgrade.
   - `GET /sessions/{hostId}/attach?after=N` (WebSocket) → relay (Task 6). Auth and Origin as `/events`. Host unknown or exited → 404; host `Protocol < 4` → 409 `{"error":"restart from the desktop to open here"}`.
   - `GET /mobile/{file}` → embedded `www/{file}`; `.html` → `text/html`, `.js` → `text/javascript`, `.css` → `text/css`; only files under `www/`, no `..`. No auth (the page itself holds no secrets; the token arrives from the native shell).
-  - `GET /devices` → list (auth); `DELETE /devices/{id}` → 204 (auth: device token **or** `X-Admin-Token: <adminToken>`).
+  - `GET /devices` → list (auth); `DELETE /devices/{id}` → 204 (auth: device token **or** `X-Admin-Token: <adminToken>`). Every open `/events` and attach socket is tagged with its device id; revoking closes them (close code 4401) within a second, so a revoked phone cannot keep typing.
   - `POST /admin/quit` with `X-Admin-Token` → 204 then the server stops (Task 8 uses it).
   - Anything else → 404. Missing/invalid token → 401 on HTTP; WebSocket upgrade refused with 401 before the 101.
 
@@ -295,7 +297,7 @@ public void Only_hosts_that_report_their_size_are_mobile_ready()
 [Fact] public async Task Pairing_then_listing_then_live_events()
 { /* POST /pair with issued code → token; GET /sessions with Bearer → the fake catalog JSON; connect ws /events?token= → first frame type "sessions"; CatalogChanged() → second frame */ }
 [Fact] public async Task Unknown_tokens_are_refused_everywhere()
-{ /* GET /sessions no header → 401; Bearer nope → 401; ws /events?token=nope → WebSocketException (handshake not 101); ws /events?token=good with Origin http://evil.example → refused; with Origin http://127.0.0.1:{port} → 101; GET /mobile/mobile.html → 200 without a token */ }
+{ /* GET /sessions no header → 401; Bearer nope → 401; DELETE /devices/{id} while that device holds an open /events socket → the socket receives Close 4401 within 1 s; ws /events?token=nope → WebSocketException (handshake not 101); ws /events?token=good with Origin http://evil.example → refused; with Origin http://127.0.0.1:{port} → 101; GET /mobile/mobile.html → 200 without a token */ }
 [Fact] public async Task Static_files_come_from_the_embedded_site_and_stay_inside_it()
 { /* /mobile/xterm.js → 200 text/javascript; /mobile/../deck.html → 404 */ }
 ```
@@ -340,7 +342,7 @@ public void Only_hosts_that_report_their_size_are_mobile_ready()
 - Test: `Tests/GatewayServerTests.cs` (append)
 
 **Interfaces:**
-- Produces: `internal sealed class CatalogLoop { public CatalogLoop(Func<List<CatalogEntry>> build, Action<List<CatalogEntry>> changed, Func<int> subscribers, TimeSpan busy = 5 s, TimeSpan idle = 30 s); public Task RunAsync(CancellationToken ct); public List<CatalogEntry> Current { get; } }` — rebuilds every `busy` while `subscribers() > 0`, else every `idle`; calls `changed` only when `SessionCatalog.ToJson` differs from the last push. In the gateway, `build = () => { CodexScanner.Probe(); return SessionCatalog.Build(SessionPipeline.Pair(SessionPipeline.Scan()), Settings.Load(), DateTime.UtcNow); }` after one `SessionPipeline.WarmUp()` at start (settings re-read each cycle so group edits on the desktop show up).
+- Produces: `internal sealed class CatalogLoop { public CatalogLoop(Func<List<CatalogEntry>> build, Action<List<CatalogEntry>> changed, Func<int> subscribers, TimeSpan busy = 5 s, TimeSpan idle = 30 s); public Task RunAsync(CancellationToken ct); public List<CatalogEntry> Current { get; } }` — rebuilds every `busy` while `subscribers() > 0`, else every `idle`; calls `changed` only when `SessionCatalog.ToJson` differs from the last push. In the gateway, `build = () => { CodexScanner.Probe(); return catalog.Build(SessionPipeline.Pair(SessionPipeline.Scan(prune: false)), Settings.Peek(), DateTime.UtcNow); }` after one `SessionPipeline.WarmUp()` at start (settings re-read each cycle so group edits on the desktop show up).
 
 - [ ] **Step 1: Write the failing test**
 

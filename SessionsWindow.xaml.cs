@@ -900,44 +900,13 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         {
             var scan = await System.Threading.Tasks.Task.Run(() =>
             {
-                // Same list, same sort — told apart by the provider mark. Headless threads are folded
-                // onto their interactive owner because they have no terminal of their own.
-                var total = Stopwatch.StartNew();
-                var phase = Stopwatch.StartNew();
-                var claude = SessionScanner.Scan();
-                long claudeMs = phase.ElapsedMilliseconds;
-                phase.Restart();
-                var codex = CodexScanner.Scan();
-                long codexMs = phase.ElapsedMilliseconds;
-                phase.Restart();
-                var parents = Native.BuildParentMap();
-                long processesMs = phase.ElapsedMilliseconds;
-                phase.Restart();
-                var unowned = new List<SessionInfo>();
-                var found = CodexAttribution.Fold(claude, codex, parents, unowned);
-                long attributionMs = phase.ElapsedMilliseconds;
-                phase.Restart();
-                var hosts = HostManager.Discover();
-                long registryMs = phase.ElapsedMilliseconds;
-                total.Stop();
-                System.Threading.Interlocked.Exchange(ref _lastScanMs, total.ElapsedMilliseconds);
-                NoteScan(total.ElapsedMilliseconds);
-                if (DwmDiagnosticOptions.Enabled || total.ElapsedMilliseconds >= 1000)
-                    PerformanceLog.Write($"session-scan {total.ElapsedMilliseconds}ms claude={claudeMs} codex={codexMs} " +
-                        $"processes={processesMs} attribution={attributionMs} hosts={registryMs} sessions={found.Count}");
-                DwmDiagnostics.Mark("session-scan", $"elapsedMs={total.ElapsedMilliseconds}; claudeMs={claudeMs}; codexMs={codexMs}; processesMs={processesMs}; attributionMs={attributionMs}; registryMs={registryMs}; sessions={found.Count}");
-                return (
-                    Sessions: found,
-                    Hosts: hosts,
-                    Parents: parents,
-                    ClaudeDiscovered: claude.Count,
-                    CodexDiscovered: codex.Count,
-                    ClaudeRows: found.Count(s => s.Provider == SessionProvider.Claude),
-                    CodexRows: found.Count(s => s.Provider == SessionProvider.Codex),
-                    Unowned: unowned);
+                var result = SessionPipeline.Scan();
+                System.Threading.Interlocked.Exchange(ref _lastScanMs, result.ElapsedMs);
+                NoteScan(result.ElapsedMs);
+                return result;
             });
             var apply = Stopwatch.StartNew();
-            var changes = ApplyRefresh(scan.Sessions, scan.Hosts, scan.Parents);
+            var changes = ApplyRefresh(scan);
             _unownedSnapshot = scan.Unowned.ToArray();
             apply.Stop();
             RestartUpdatedIdleSessions();
@@ -949,7 +918,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
                 _ = Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle,
                     () => IsolationTelemetry.FlushRefresh(
                         scan.Sessions.Count, scan.ClaudeDiscovered, scan.CodexDiscovered,
-                        scan.ClaudeRows, scan.CodexRows, applyMs));
+                        scan.Sessions.Count(x => x.Provider == SessionProvider.Claude), scan.Sessions.Count(x => x.Provider == SessionProvider.Codex), applyMs));
             }
             if (DwmDiagnosticOptions.Enabled || apply.ElapsedMilliseconds >= 250)
                 PerformanceLog.Write($"ui-apply {apply.ElapsedMilliseconds}ms sessions={scan.Sessions.Count}");
@@ -993,12 +962,14 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     /// names its own thread). Everything the scan found that belongs to no host is remembered for
     /// the Adopt picker and never becomes a row.
     /// </summary>
-    (int Added, int Removed, int PropertyChanges) ApplyRefresh(List<SessionInfo> live, List<Host.HostRecord> hosts, Dictionary<int, int> parents)
+    (int Added, int Removed, int PropertyChanges) ApplyRefresh(ScanResult scan)
     {
+        var live = scan.Sessions;
+        var hosts = scan.Hosts;
         var claimed = new HashSet<SessionInfo>();
-        var byHost = HostPairing.Pair(hosts, live, (s, h) => DescendsFrom(s.Pid, h.ChildPid, parents), claimed);
-        foreach (var (h, info) in byHost) ApplyHookState(h, info);
-        ApplyAgyNames(byHost, parents);
+        var byHost = SessionPipeline.Pair(scan, claimed);
+        foreach (var (h, info) in byHost)
+            if (h.Provider == "Agy" && info.Name.Length > 0) Deck.FindByHost(h.Id)?.View.Rename(info.Name);
 
         var seen = new HashSet<string>();
         int added = 0;
@@ -1052,75 +1023,6 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
 
         RefreshAccount();
         return (added, removed, propertyChanges);
-    }
-
-    /// <summary>
-    /// What the session's own hooks reported beats what the scanner inferred, whenever it is newer.
-    /// Claude's registry is authoritative for busy/idle and lands within a second, so hooks mostly add
-    /// the tool name there; for Codex the hook is the only live status there is.
-    /// </summary>
-    static void ApplyHookState(Host.HostRecord h, SessionInfo info)
-    {
-        if (h.StatusAt is not DateTime at) return;
-        if (h.AgentStatus == "ended" || h.HasExited) return;
-        bool newer = at > info.StatusUpdatedAt.ToUniversalTime();
-        // Hosts from before protocol 2 called Claude's idle notification "waiting"; read it as idle.
-        string agentStatus = h.Protocol < 2 && h.AgentStatus == "waiting" && h.LastEvent == "Notification" ? "idle" : h.AgentStatus;
-        // Hosts before protocol 3 pinned a turn that ran a background shell as "scheduled"; the app
-        // sees live background work through its output files, so read the hook's word as idle.
-        if (h.Protocol < 3 && agentStatus == "scheduled") agentStatus = "idle";
-        // A SessionStart mid-turn (Codex compaction) must not downgrade a turn the CLI's own record says is open.
-        if (h.LastEvent == "SessionStart" && agentStatus == "idle" && info.Status == "busy") return;
-        // The CLI's own registry says "shell" while a background shell it started still runs, long
-        // after the turn that started it ended and the session began waiting for the person. The
-        // hook's word on the turn wins; the shell shows as a badge, not as the session working.
-        if (agentStatus.Length > 0 && (newer || info.Status.Length == 0 || info.Status == "shell"))
-        {
-            info.Status = agentStatus;
-            info.StatusUpdatedAt = at.ToLocalTime();
-        }
-        // The host stamps StatusAt only when the status changes, so mid-turn the two are equal: the
-        // hook still owns the status then, and its tool name is the live one.
-        bool hookOwns = at >= info.StatusUpdatedAt.ToUniversalTime();
-        if (h.LastTool.Length > 0 && (hookOwns || info.LastTool.Length == 0)) info.LastTool = h.LastTool;
-        if (info.SessionId.Length == 0 && h.SessionId.Length > 0) info.SessionId = h.SessionId;
-        if (info.TranscriptPath.Length == 0 && h.TranscriptPath.Length > 0) info.TranscriptPath = h.TranscriptPath;
-        if (info.Model.Length == 0 && h.Model.Length > 0) info.Model = h.Model;
-        if (info.Effort.Length == 0) info.Effort = SessionRow.EffortOfModel(info.Model);
-    }
-
-    /// <summary>An agy pane shows the conversation's own name (its /rename) in the row and the tab, like Claude and Codex panes do.</summary>
-    void ApplyAgyNames(List<(Host.HostRecord Host, SessionInfo Info)> byHost, Dictionary<int, int> parents)
-    {
-        if (!byHost.Any(x => x.Host.Provider == "Agy")) return;
-        var table = SessionScanner.ProcessTable;
-        foreach (var (h, info) in byHost)
-        {
-            if (h.Provider != "Agy" || h.HasExited) continue;
-            string name = h.SessionId.Length > 0 ? AgyScanner.NameForConversation(h.SessionId) : "";
-            if (h.SessionId.Length == 0)
-            {
-                int agyPid = AgyScanner.AgyPidUnder(h.ChildPid, table);
-                if (agyPid == 0) continue;
-                // A pane started before hooks were wired still gets its conversation from agy's log, so
-                // it can be restarted (onto hooks) and comes back after a reboot.
-                if (info.SessionId.Length == 0) info.SessionId = AgyScanner.ConversationFor(agyPid);
-                name = AgyScanner.NameFor(agyPid);
-            }
-            if (name.Length == 0) continue;
-            info.Name = name;
-            Deck.FindByHost(h.Id)?.View.Rename(name);
-        }
-    }
-
-    static bool DescendsFrom(int pid, int ancestor, Dictionary<int, int> parents)
-    {
-        for (int hops = 0; hops < 12 && pid > 0; hops++)
-        {
-            if (pid == ancestor) return true;
-            if (!parents.TryGetValue(pid, out pid)) return false;
-        }
-        return false;
     }
 
     /// <summary>Is this a session a human is sitting in front of, and could therefore want back?</summary>

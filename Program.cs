@@ -35,22 +35,15 @@ internal static class Program
             // inline so the headless dump sees what the window would. Several passes, because "which
             // subagents are working now" is a size DELTA — one pass has nothing to compare against, and
             // Codex writes in bursts with quiet stretches of several seconds between them.
-            for (int i = 0; i < 4; i++)
-            {
-                CodexScanner.Probe();
-                if (i < 3) Thread.Sleep(3000);
-            }
+            SessionPipeline.WarmUp();
             // Printed BEFORE the scan on purpose: at this point nothing has parsed a live session, so
             // anything here came from the startup seed — the path that has to work when no Codex is running.
             var sb = new System.Text.StringBuilder();
             foreach (var m in CodexScanner.PlanMeters)
                 sb.AppendLine($"PLAN\t{m.Label}\t{m.Percent}%\t{m.Severity}\tresets {m.ResetsAt:g}\t{m.Note}");
 
-            // Folded, like the window: headless Codex threads roll onto the session that started them.
-            var all = CodexAttribution.Fold(SessionScanner.Scan(), CodexScanner.Scan(), Native.BuildParentMap());
-
-            foreach (var s in all)
-                sb.AppendLine($"{s.Provider}\t{s.Pid}\t{(s.ApiError ? "ERROR" : s.Status)}\t{s.ShortId}\t{s.Model}\t{s.Effort}\t{s.ContextDisplay}\t{s.SubagentsActive}/{s.SubagentsTotal}\tcodex-tasks:{s.BackgroundTasks}\t{s.LastTool}\t{s.DisplayName}\t{s.Cwd}");
+            foreach (var (h, s) in SessionPipeline.Pair(SessionPipeline.Scan()))
+                sb.AppendLine($"{s.Provider}	{s.Pid}	{(s.ApiError ? "ERROR" : s.Status)}	{s.ShortId}	{s.Model}	{s.Effort}	{s.ContextDisplay}	{s.SubagentsActive}/{s.SubagentsTotal}	codex-tasks:{s.BackgroundTasks}	{s.LastTool}	{s.DisplayName}	{s.Cwd}	host:{h.Id}");
             System.IO.File.WriteAllText(
                 System.IO.Path.Combine(System.IO.Path.GetTempPath(), "sessiondeck-dump.txt"),
                 sb.ToString());

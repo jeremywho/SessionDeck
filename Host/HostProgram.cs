@@ -407,9 +407,14 @@ internal static class HostProgram
 
         (long start, byte[] data) = _ring.Since(after);
         long end = start + data.Length;
-        client.Out.Writer.TryWrite((true, Encoding.UTF8.GetBytes(SnapshotJson(start, end, _record.Title, _pty.Cols, _pty.Rows))));
-        if (data.Length > 0) client.Out.Writer.TryWrite((false, data));
-        lock (ClientsLock) Clients.Add(client);
+        // Size and registration under one lock: a resize between them would be announced to every
+        // viewer but this one, which would then hold the old size until the next resize.
+        lock (ClientsLock)
+        {
+            client.Out.Writer.TryWrite((true, Encoding.UTF8.GetBytes(SnapshotJson(start, end, _record.Title, _pty.Cols, _pty.Rows))));
+            if (data.Length > 0) client.Out.Writer.TryWrite((false, data));
+            Clients.Add(client);
+        }
         if (_exited)
         {
             client.Out.Writer.TryWrite((true, Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { type = "exit", code = _exitCode }))));
@@ -465,8 +470,11 @@ internal static class HostProgram
                     break;
                 case "resize":
                     if (_exited) return;
-                    _pty.Resize((short)root.GetProperty("cols").GetInt32(), (short)root.GetProperty("rows").GetInt32());
-                    Broadcast(true, Encoding.UTF8.GetBytes(SizeJson(_pty.Cols, _pty.Rows)));
+                    lock (ClientsLock)
+                    {
+                        _pty.Resize((short)root.GetProperty("cols").GetInt32(), (short)root.GetProperty("rows").GetInt32());
+                        Broadcast(true, Encoding.UTF8.GetBytes(SizeJson(_pty.Cols, _pty.Rows)));
+                    }
                     break;
                 case "kill":
                     _pty.KillTree();
