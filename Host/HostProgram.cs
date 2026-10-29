@@ -374,7 +374,7 @@ internal static class HostProgram
         tcp.NoDelay = true;
         using var _ = tcp;
         var stream = tcp.GetStream();
-        var (request, leftover) = await ReadHttpHead(stream);
+        var (request, leftover) = await Gateway.MiniHttp.ReadHead(stream);
         if (request == null) return;
         var lines = request.Split("\r\n");
         var reqLine = lines[0].Split(' ');
@@ -391,16 +391,16 @@ internal static class HostProgram
             if (l.StartsWith("Sec-WebSocket-Key:", StringComparison.OrdinalIgnoreCase)) key = l[18..].Trim();
         if (key == null) return;
 
-        var query = ParseQuery(path);
+        var query = Gateway.MiniHttp.ParseQuery(path);
         if (!query.TryGetValue("token", out var token) || token != _record.Token)
         {
-            await WriteAscii(stream, "HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+            await Gateway.MiniHttp.WriteAscii(stream, "HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
             return;
         }
         long after = query.TryGetValue("after", out var a) && long.TryParse(a, out var parsed) ? parsed : 0;
 
-        string accept = Convert.ToBase64String(SHA1.HashData(Encoding.ASCII.GetBytes(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")));
-        await WriteAscii(stream, $"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n\r\n");
+        string accept = Gateway.MiniHttp.AcceptKey(key);
+        await Gateway.MiniHttp.WriteAscii(stream, $"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n\r\n");
 
         using var ws = WebSocket.CreateFromStream(stream, new WebSocketCreationOptions { IsServer = true, KeepAliveInterval = TimeSpan.FromSeconds(30) });
         var client = new Client();
@@ -484,29 +484,14 @@ internal static class HostProgram
         catch (Exception ex) { Log($"message: {ex.Message}"); }
     }
 
-    static async Task<(string? Head, byte[] Leftover)> ReadHttpHead(NetworkStream s)
-    {
-        var buf = new byte[65536];
-        int len = 0;
-        while (len < buf.Length)
-        {
-            int n = await s.ReadAsync(buf.AsMemory(len));
-            if (n <= 0) return (null, Array.Empty<byte>());
-            len += n;
-            int at = buf.AsSpan(0, len).IndexOf("\r\n\r\n"u8);
-            if (at >= 0) return (Encoding.ASCII.GetString(buf, 0, at), buf.AsSpan(at + 4, len - at - 4).ToArray());
-        }
-        return (null, Array.Empty<byte>());
-    }
-
     /// <summary><c>POST /hook?token=…</c> from <c>SessionDeck.exe --hook</c>: one CLI hook event as
     /// JSON. Updates the record (status, last tool, identity) and tells attached viewers.</summary>
     static async Task ServeHook(NetworkStream stream, string[] lines, string path, byte[] leftover)
     {
-        var query = ParseQuery(path);
+        var query = Gateway.MiniHttp.ParseQuery(path);
         if (!path.StartsWith("/hook") || !query.TryGetValue("token", out var token) || token != _record.Token)
         {
-            await WriteAscii(stream, "HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+            await Gateway.MiniHttp.WriteAscii(stream, "HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
             return;
         }
         int length = 0;
@@ -528,7 +513,7 @@ internal static class HostProgram
             ApplyHook(doc.RootElement, EventFromPath(path));
         }
         catch (Exception ex) { Log($"hook: {ex.Message}"); }
-        await WriteAscii(stream, "HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n");
+        await Gateway.MiniHttp.WriteAscii(stream, "HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n");
     }
 
     /// <summary>The first text frame of an attach: where the bytes that follow start in the ring, and the pty's size so a viewer that may not resize can render it.</summary>
@@ -595,21 +580,6 @@ internal static class HostProgram
     static string Text(JsonElement root, string name) =>
         root.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
 
-    static Dictionary<string, string> ParseQuery(string path)
-    {
-        var d = new Dictionary<string, string>();
-        int q = path.IndexOf('?');
-        if (q < 0) return d;
-        foreach (var part in path[(q + 1)..].Split('&', StringSplitOptions.RemoveEmptyEntries))
-        {
-            int eq = part.IndexOf('=');
-            if (eq < 0) d[Uri.UnescapeDataString(part)] = "";
-            else d[Uri.UnescapeDataString(part[..eq])] = Uri.UnescapeDataString(part[(eq + 1)..]);
-        }
-        return d;
-    }
-
-    static Task WriteAscii(NetworkStream s, string text) => s.WriteAsync(Encoding.ASCII.GetBytes(text)).AsTask();
 
     static string? _lastWritten;
 
