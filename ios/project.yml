@@ -1,0 +1,58 @@
+name: SessionDeckMobile
+options:
+  bundleIdPrefix: com.jeremywho
+  deploymentTarget:
+    iOS: "18.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    CODE_SIGN_STYLE: Automatic
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  SessionDeckMobile:
+    type: application
+    platform: iOS
+    sources:
+      - SessionDeckMobile
+    info:
+      path: SessionDeckMobile/Info.plist
+      properties:
+        CFBundleDisplayName: Session Deck
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        NSLocalNetworkUsageDescription: Session Deck talks to the deck on your own network to list sessions and type into them.
+        NSCameraUsageDescription: The camera reads the pairing code shown in the deck's settings.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jeremywho.sessiondeck
+        TARGETED_DEVICE_FAMILY: "1,2"
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: true
+  SessionDeckMobileTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - SessionDeckMobileTests
+    dependencies:
+      - target: SessionDeckMobile
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jeremywho.sessiondeck.tests
+schemes:
+  SessionDeckMobile:
+    build:
+      targets:
+        SessionDeckMobile: all
+        SessionDeckMobileTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - SessionDeckMobileTests

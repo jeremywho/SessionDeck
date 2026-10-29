@@ -8,3 +8,6 @@ wwwroot/** -text
 *.png binary
 tools/*.py text eol=lf
 tools/*.ps1 text eol=crlf
+*.sh text eol=lf
+*.yml text eol=lf
+*.swift text eol=lf

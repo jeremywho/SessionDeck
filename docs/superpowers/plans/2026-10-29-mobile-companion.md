@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Repo is **public**: no private names, addresses or tokens in committed files. Fixtures use `acme/...`, `192.0.2.x`, `example` tokens.
-- Line endings: CRLF for `*.cs`, `*.xaml`, `*.csproj`, `*.md`, `*.swift`, `*.yml`, `*.sh`; `wwwroot/**` is `-text` and new files there are CRLF like `deck.html`. Verify every written file: `tr -dc '\r' < F | wc -c` equals `tr -dc '\n' < F | wc -c`.
+- Line endings: CRLF for `*.cs`, `*.xaml`, `*.csproj`, `*.md`; LF for `*.swift`, `*.yml`, `*.sh` (they run on the Mac); `wwwroot/**` is `-text` and new files there are CRLF like `deck.html`. Verify every written file: `tr -dc '\r' < F | wc -c` equals `tr -dc '\n' < F | wc -c`.
 - Comments: none unless the code cannot say it. One line.
 - The gateway never writes `settings.json`, host records, or `active-sessions.json`. Its only files are `gateway.json` and `devices.json` under `Settings.DataDir`, written with `AtomicFile.Write`.
 - The gateway forwards exactly one message type from a phone to a host: `{"type":"input"}`. `resize` and `kill` are dropped.
