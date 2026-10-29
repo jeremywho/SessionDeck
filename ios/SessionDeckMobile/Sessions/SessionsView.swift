@@ -3,6 +3,8 @@ import SwiftUI
 struct SessionsView: View {
     @EnvironmentObject var gateway: GatewayStore
     @State private var showForget = false
+    @State private var path: [CatalogEntry] = []
+    @State private var autoOpened = false
 
     private var grouped: [(name: String, order: Int, entries: [CatalogEntry])] {
         var byGroup: [String: (order: Int, entries: [CatalogEntry])] = [:]
@@ -15,7 +17,7 @@ struct SessionsView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             List {
                 if let error = gateway.lastError, !gateway.connected {
                     Section { Label(error, systemImage: "wifi.exclamationmark").foregroundStyle(.orange) }
@@ -56,6 +58,12 @@ struct SessionsView: View {
                 Button("Forget", role: .destructive) { gateway.forgetPairing() }
             }
             .task { await gateway.refresh() }
+            .onChange(of: gateway.sessions) { _, sessions in
+                guard !autoOpened, let hostId = LaunchOptions.open, let entry = sessions.first(where: { $0.hostId == hostId }) else { return }
+                autoOpened = true
+                LaunchOptions.log("listed \(sessions.count) sessions, opening \(hostId)")
+                path = [entry]
+            }
         }
     }
 }

@@ -27,7 +27,17 @@ struct TerminalScreen: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { gateway.markViewed(entry.sessionId) }
         .onDisappear { gateway.markViewed(entry.sessionId) }
+        .onChange(of: bridge.connected) { _, connected in
+            guard connected, !autoSent, let line = LaunchOptions.send else { return }
+            autoSent = true
+            Task {
+                let ok = await bridge.input(line + "\r")
+                LaunchOptions.log("sent \(ok ? "ok" : "failed"): \(line)")
+            }
+        }
     }
+
+    @State private var autoSent = false
 
     private func send() {
         let line = text
@@ -56,6 +66,7 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler {
     @Published var note: String?
     @Published var selecting = false
     @Published var hasSelection = false
+    @Published var connected = false
     weak var webView: WKWebView?
 
     /// Sends to the page; false when the page had no open socket and dropped it.
@@ -93,8 +104,8 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler {
             hasSelection = false
         case "selection": hasSelection = body["has"] as? Bool ?? false
         case "selecting": selecting = body["on"] as? Bool ?? false
-        case "connected": note = nil
-        case "disconnected": note = "Reconnecting…"
+        case "connected": note = nil; connected = true; LaunchOptions.log("terminal connected")
+        case "disconnected": note = "Reconnecting…"; connected = false
         case "revoked": note = "This phone was revoked from the deck."
         case "exit": note = "The session ended."
         default: break
