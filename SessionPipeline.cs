@@ -34,7 +34,7 @@ internal static class SessionPipeline
         }
     }
 
-    public static ScanResult Scan()
+    public static ScanResult Scan(bool prune = true)
     {
         var total = Stopwatch.StartNew();
         var phase = Stopwatch.StartNew();
@@ -51,7 +51,7 @@ internal static class SessionPipeline
         var found = CodexAttribution.Fold(claude, codex, parents, unowned);
         long attributionMs = phase.ElapsedMilliseconds;
         phase.Restart();
-        var hosts = HostManager.Discover();
+        var hosts = HostManager.Discover(prune);
         long registryMs = phase.ElapsedMilliseconds;
         total.Stop();
         if (DwmDiagnosticOptions.Enabled || total.ElapsedMilliseconds >= 1000)

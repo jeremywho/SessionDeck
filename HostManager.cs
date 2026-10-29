@@ -215,23 +215,26 @@ internal static class HostManager
              .ToList();
 
     /// <summary>Every host record on disk whose process is still alive. Dead hosts' records are
-    /// removed as they are found, so the folder is self-cleaning.</summary>
-    public static List<HostRecord> Discover()
+    /// removed as they are found, so the folder is self-cleaning; a reader that does not own the
+    /// folder (the gateway) passes <paramref name="prune"/> false and deletes nothing.</summary>
+    public static List<HostRecord> Discover(bool prune = true) => Discover(HostsDir, prune);
+
+    internal static List<HostRecord> Discover(string hostsDir, bool prune)
     {
         var list = new List<HostRecord>();
-        if (!Directory.Exists(HostsDir)) return list;
+        if (!Directory.Exists(hostsDir)) return list;
         long boot = HostLiveness.BootTicksUtc();
-        foreach (var f in Directory.GetFiles(HostsDir, "*.json"))
+        foreach (var f in Directory.GetFiles(hostsDir, "*.json"))
         {
             var rec = ReadRecord(f);
             if (rec == null)
             {
                 // Unreadable and older than this boot: whatever wrote it died with the previous one.
-                try { if (File.GetLastWriteTimeUtc(f).Ticks < boot) File.Delete(f); } catch { }
+                if (prune) try { if (File.GetLastWriteTimeUtc(f).Ticks < boot) File.Delete(f); } catch { }
                 continue;
             }
             if (IsAlive(rec)) list.Add(rec);
-            else { try { File.Delete(f); } catch { } }
+            else if (prune) { try { File.Delete(f); } catch { } }
         }
         return list;
     }

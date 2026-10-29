@@ -1,3 +1,4 @@
+using System.IO;
 using SessionDeck.Host;
 using Xunit;
 
@@ -40,5 +41,46 @@ public class SessionPipelineTests
         Assert.Same(tui, pairs.Single().Info);
         Assert.Contains(tui, claimed);
         Assert.DoesNotContain(elsewhere, claimed);
+    }
+}
+
+public class ReadOnlyReadersTests : IDisposable
+{
+    readonly string _dir = Path.Combine(Path.GetTempPath(), "sd-ro-" + Guid.NewGuid().ToString("N"));
+    public ReadOnlyReadersTests() => Directory.CreateDirectory(_dir);
+    public void Dispose() => Directory.Delete(_dir, true);
+
+    [Fact]
+    public void Peek_never_writes_and_load_does()
+    {
+        string path = Path.Combine(_dir, "settings.json");
+        File.WriteAllText(path, "{\"FlagsVersion\":0,\"CodexFlags\":\"\",\"Theme\":\"Light\"}");
+        byte[] before = File.ReadAllBytes(path);
+        var peeked = Settings.Peek(path);
+        Assert.Equal("Light", peeked.Theme);
+        Assert.Equal("", peeked.CodexFlags);
+        Assert.Equal(before, File.ReadAllBytes(path));
+        Assert.Empty(Directory.GetFiles(_dir).Where(f => f != path));
+
+        File.WriteAllText(path, "not json");
+        Assert.Equal("Dark", Settings.Peek(path).Theme);
+        Assert.Equal("not json", File.ReadAllText(path));
+
+        var loaded = Settings.Load(Path.Combine(_dir, "other.json"));
+        Assert.True(File.Exists(Path.Combine(_dir, "other.json")));
+        Assert.Equal(Settings.DefaultCodexFlags, loaded.CodexFlags);
+    }
+
+    [Fact]
+    public void Discover_without_prune_leaves_dead_records_and_with_prune_removes_them()
+    {
+        string hosts = Path.Combine(_dir, "hosts");
+        Directory.CreateDirectory(hosts);
+        string dead = Path.Combine(hosts, "dead.json");
+        File.WriteAllText(dead, System.Text.Json.JsonSerializer.Serialize(new Host.HostRecord { Id = "dead", HostPid = 1, HostStartTicks = 1, StartedAt = new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc) }));
+        Assert.Empty(HostManager.Discover(hosts, prune: false));
+        Assert.True(File.Exists(dead));
+        Assert.Empty(HostManager.Discover(hosts, prune: true));
+        Assert.False(File.Exists(dead));
     }
 }

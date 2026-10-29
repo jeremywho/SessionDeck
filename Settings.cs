@@ -87,6 +87,24 @@ internal sealed class Settings
 
     public static Settings Load() => Load(FilePath);
 
+    /// <summary>The settings as they are on disk, for a reader that does not own the file (the gateway):
+    /// no defaults filled in, no save, no setting aside of a file that does not parse.</summary>
+    public static Settings Peek() => Peek(FilePath);
+
+    internal static Settings Peek(string path)
+    {
+        foreach (var candidate in new[] { path, path + ".bak" })
+        {
+            try
+            {
+                if (!File.Exists(candidate)) continue;
+                if (JsonSerializer.Deserialize<Settings>(File.ReadAllText(candidate)) is { } s) return s;
+            }
+            catch (Exception ex) when (ex is JsonException or IOException) { }
+        }
+        return new Settings();
+    }
+
     /// <summary>A file that does not parse is kept aside and its last good copy loaded; see <see cref="AtomicFile.Read"/>.</summary>
     internal static Settings Load(string path)
     {
