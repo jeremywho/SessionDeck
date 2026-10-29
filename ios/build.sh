@@ -37,12 +37,15 @@ build_device() {
   generate
   unlock_keychain
   rm -rf "$APP"
+  mkdir -p "$DERIVED"
+  set +e
   xcodebuild build -project "$PROJECT" -scheme SessionDeckMobile -configuration Debug \
     -destination "generic/platform=iOS" -derivedDataPath "$DERIVED" \
-    -allowProvisioningUpdates -allowProvisioningDeviceRegistration DEVELOPMENT_TEAM="$SD_TEAM" 2>&1 \
-    | grep -E "error:|BUILD|Signing Identity|Provisioning Profile" || true
-  local rc=${pipestatus[1]}
-  [[ $rc -eq 0 ]] || { echo "xcodebuild failed with $rc"; exit $rc; }
+    -allowProvisioningUpdates -allowProvisioningDeviceRegistration DEVELOPMENT_TEAM="$SD_TEAM" > "$DERIVED/build.log" 2>&1
+  local rc=$?
+  set -e
+  grep -E "error:|BUILD|Signing Identity|Provisioning Profile" "$DERIVED/build.log" || true
+  [[ $rc -eq 0 ]] || { echo "xcodebuild failed with $rc (see $DERIVED/build.log)"; exit $rc; }
   [[ -d "$APP" ]] || { echo "build produced no app"; exit 1; }
 }
 
@@ -50,11 +53,15 @@ case "${1:-install}" in
   test)
     generate
     SIM="$(simulator_udid)"
+    mkdir -p "$DERIVED"
+    set +e
     xcodebuild test -project "$PROJECT" -scheme SessionDeckMobile -configuration Debug \
       -destination "platform=iOS Simulator,id=$SIM" -derivedDataPath "$DERIVED" \
-      CODE_SIGNING_ALLOWED=NO 2>&1 | grep -E "error:|Test Suite|Executed|TEST |BUILD" || true
-    rc=${pipestatus[1]}
-    [[ $rc -eq 0 ]] || { echo "xcodebuild test failed with $rc"; exit $rc; }
+      CODE_SIGNING_ALLOWED=NO > "$DERIVED/test.log" 2>&1
+    rc=$?
+    set -e
+    grep -E "error:|Test Suite|Executed|TEST |BUILD" "$DERIVED/test.log" || true
+    [[ $rc -eq 0 ]] || { echo "xcodebuild test failed with $rc (see $DERIVED/test.log)"; exit $rc; }
     ;;
   build)
     build_device
