@@ -36,10 +36,13 @@ sys.exit(1)'
 build_device() {
   generate
   unlock_keychain
+  rm -rf "$APP"
   xcodebuild build -project "$PROJECT" -scheme SessionDeckMobile -configuration Debug \
     -destination "generic/platform=iOS" -derivedDataPath "$DERIVED" \
     -allowProvisioningUpdates -allowProvisioningDeviceRegistration DEVELOPMENT_TEAM="$SD_TEAM" 2>&1 \
     | grep -E "error:|BUILD|Signing Identity|Provisioning Profile" || true
+  local status=${pipestatus[1]}
+  [[ $status -eq 0 ]] || { echo "xcodebuild failed with $status"; exit $status; }
   [[ -d "$APP" ]] || { echo "build produced no app"; exit 1; }
 }
 
@@ -50,6 +53,8 @@ case "${1:-install}" in
     xcodebuild test -project "$PROJECT" -scheme SessionDeckMobile -configuration Debug \
       -destination "platform=iOS Simulator,id=$SIM" -derivedDataPath "$DERIVED" \
       CODE_SIGNING_ALLOWED=NO 2>&1 | grep -E "error:|Test Suite|Executed|TEST |BUILD" || true
+    status=${pipestatus[1]}
+    [[ $status -eq 0 ]] || { echo "xcodebuild test failed with $status"; exit $status; }
     ;;
   build)
     build_device

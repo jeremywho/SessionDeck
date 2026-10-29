@@ -21,8 +21,17 @@ final class GatewayStore: ObservableObject {
 
     // MARK: pairing
 
+    /// A host is an IPv4/IPv6 literal or a hostname; anything else would make a URL that cannot be built.
+    static func validHost(_ host: String) -> Bool {
+        let trimmed = host.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, trimmed.count <= 253 else { return false }
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: ".-:"))
+        return trimmed.unicodeScalars.allSatisfy { allowed.contains($0) } && URL(string: "http://\(trimmed):1/") != nil
+    }
+
     func pair(host: String, port: Int, code: String, deviceName: String) async throws {
-        var request = URLRequest(url: URL(string: "http://\(host):\(port)/pair")!)
+        guard Self.validHost(host), (1...65535).contains(port), let url = URL(string: "http://\(host):\(port)/pair") else { throw GatewayError.badAddress }
+        var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(["code": code, "deviceName": deviceName])
@@ -118,7 +127,9 @@ final class GatewayStore: ObservableObject {
             }
         } catch {
             connected = false
-            if task.closeCode.rawValue == 4401 {
+            // A revoked phone is told at the handshake (401) or, if it was already connected, by close code 4401.
+            let handshake = (task.response as? HTTPURLResponse)?.statusCode
+            if task.closeCode.rawValue == 4401 || handshake == 401 {
                 forgetPairing()
                 lastError = "This phone was revoked from the deck."
             } else if !Task.isCancelled {
@@ -131,10 +142,12 @@ final class GatewayStore: ObservableObject {
 enum GatewayError: LocalizedError {
     case badResponse
     case badCode
+    case badAddress
     case status(Int)
 
     var errorDescription: String? {
         switch self {
+        case .badAddress: return "Address is host:port, for example 192.168.1.10:7420."
         case .badResponse: return "The gateway did not answer."
         case .badCode: return "That code was not accepted. Codes last five minutes and work once."
         case .status(let code): return "The gateway answered \(code)."

@@ -36,7 +36,11 @@
 
   let ws = null, seq = SD.after || 0, retries = 0, retryTimer = null, ended = false, selecting = false;
 
-  function send(obj) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj)); }
+  function send(obj) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    ws.send(JSON.stringify(obj));
+    return true;
+  }
 
   // The page is as wide as the terminal. Without an initial scale the web view fits that width to
   // the screen on first paint; pinch-zoom and pan come from the scroll view.

@@ -20,7 +20,7 @@ struct TerminalScreen: View {
                 Text(note).font(.caption).foregroundStyle(.orange).frame(maxWidth: .infinity).padding(4).background(Color(white: 0.12))
             }
             InputBar(text: $text, focused: $focused, selecting: bridge.selecting, hasSelection: bridge.hasSelection,
-                     onSend: send, onKey: { bridge.input($0.bytes) }, onPaste: paste, onCopy: copy, onSelect: { bridge.select(!bridge.selecting) })
+                     onSend: send, onKey: { key in Task { await bridge.input(key.bytes) } }, onPaste: paste, onCopy: copy, onSelect: { bridge.select(!bridge.selecting) })
         }
         .background(Color(red: 0.047, green: 0.047, blue: 0.047))
         .navigationTitle(entry.name.isEmpty ? entry.provider : entry.name)
@@ -32,12 +32,17 @@ struct TerminalScreen: View {
     private func send() {
         let line = text
         text = ""
-        bridge.input(line + "\r")
+        Task {
+            if await bridge.input(line + "\r") == false {
+                text = line
+                bridge.note = "Not connected. The line was kept."
+            }
+        }
     }
 
     private func paste() {
         guard let s = UIPasteboard.general.string, !s.isEmpty else { return }
-        bridge.input(s)
+        Task { if await bridge.input(s) == false { bridge.note = "Not connected. Nothing was pasted." } }
     }
 
     private func copy() {
@@ -53,9 +58,17 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler {
     @Published var hasSelection = false
     weak var webView: WKWebView?
 
-    func input(_ text: String) {
-        webView?.evaluateJavaScript("window.sdInput(\(Keys.jsLiteral(text)))")
+    /// Sends to the page; false when the page had no open socket and dropped it.
+    @discardableResult
+    func input(_ text: String) async -> Bool {
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        guard let webView else { return false }
+        do {
+            let result = try await webView.evaluateJavaScript("window.sdInput(\(Keys.jsLiteral(text)))")
+            return (result as? Bool) ?? false
+        } catch {
+            return false
+        }
     }
 
     func select(_ on: Bool) {

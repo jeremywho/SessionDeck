@@ -17,6 +17,8 @@ struct QRScannerView: UIViewControllerRepresentable {
 final class ScannerController: UIViewController, AVCaptureMetadataOutputObjectsDelegate {
     var found: ((String) -> Void)?
     private let session = AVCaptureSession()
+    // Starting and stopping capture block until the camera obeys; both stay off the main thread.
+    private let camera = DispatchQueue(label: "sessiondeck.camera", qos: .userInitiated)
     private var preview: AVCaptureVideoPreviewLayer?
     private var done = false
 
@@ -35,7 +37,7 @@ final class ScannerController: UIViewController, AVCaptureMetadataOutputObjectsD
         layer.frame = view.bounds
         view.layer.addSublayer(layer)
         preview = layer
-        DispatchQueue.global(qos: .userInitiated).async { [session] in session.startRunning() }
+        camera.async { [session] in session.startRunning() }
     }
 
     override func viewDidLayoutSubviews() {
@@ -45,13 +47,13 @@ final class ScannerController: UIViewController, AVCaptureMetadataOutputObjectsD
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        if session.isRunning { session.stopRunning() }
+        camera.async { [session] in if session.isRunning { session.stopRunning() } }
     }
 
     func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput objects: [AVMetadataObject], from connection: AVCaptureConnection) {
         guard !done, let object = objects.first as? AVMetadataMachineReadableCodeObject, let text = object.stringValue else { return }
         done = true
-        session.stopRunning()
+        camera.async { [session] in session.stopRunning() }
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         found?(text)
     }
