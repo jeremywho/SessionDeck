@@ -78,4 +78,16 @@ public class HostRecordWriteTests : IDisposable
         releaser.Wait();
         Assert.Equal("new", File.ReadAllText(dst));
     }
+
+    [Fact]
+    public void A_snapshot_carries_the_pty_size_and_a_resize_announces_the_new_one()
+    {
+        using var snap = System.Text.Json.JsonDocument.Parse(HostProgram.SnapshotJson(10, 20, "t", 132, 40));
+        Assert.Equal("snapshot", snap.RootElement.GetProperty("type").GetString());
+        Assert.Equal(10, snap.RootElement.GetProperty("start").GetInt64());
+        Assert.Equal(20, snap.RootElement.GetProperty("end").GetInt64());
+        Assert.Equal(132, snap.RootElement.GetProperty("cols").GetInt32());
+        Assert.Equal(40, snap.RootElement.GetProperty("rows").GetInt32());
+        Assert.Equal("{\"type\":\"size\",\"cols\":80,\"rows\":24}", HostProgram.SizeJson(80, 24));
+    }
 }

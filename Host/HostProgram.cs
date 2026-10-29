@@ -199,7 +199,7 @@ internal static class HostProgram
             HostStartTicks = self.StartTime.ToUniversalTime().Ticks,
             HostBin = Path.GetDirectoryName(Environment.ProcessPath ?? "") ?? "",
             Profile = spec.Profile,
-            Protocol = 3,
+            Protocol = 4,
             ChildPid = _pty.Pid,
             Port = port,
             Token = token,
@@ -407,7 +407,7 @@ internal static class HostProgram
 
         (long start, byte[] data) = _ring.Since(after);
         long end = start + data.Length;
-        client.Out.Writer.TryWrite((true, Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { type = "snapshot", start, end, title = _record.Title }))));
+        client.Out.Writer.TryWrite((true, Encoding.UTF8.GetBytes(SnapshotJson(start, end, _record.Title, _pty.Cols, _pty.Rows))));
         if (data.Length > 0) client.Out.Writer.TryWrite((false, data));
         lock (ClientsLock) Clients.Add(client);
         if (_exited)
@@ -466,6 +466,7 @@ internal static class HostProgram
                 case "resize":
                     if (_exited) return;
                     _pty.Resize((short)root.GetProperty("cols").GetInt32(), (short)root.GetProperty("rows").GetInt32());
+                    Broadcast(true, Encoding.UTF8.GetBytes(SizeJson(_pty.Cols, _pty.Rows)));
                     break;
                 case "kill":
                     _pty.KillTree();
@@ -521,6 +522,13 @@ internal static class HostProgram
         catch (Exception ex) { Log($"hook: {ex.Message}"); }
         await WriteAscii(stream, "HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n");
     }
+
+    /// <summary>The first text frame of an attach: where the bytes that follow start in the ring, and the pty's size so a viewer that may not resize can render it.</summary>
+    internal static string SnapshotJson(long start, long end, string title, int cols, int rows) =>
+        JsonSerializer.Serialize(new { type = "snapshot", start, end, title, cols, rows });
+
+    internal static string SizeJson(int cols, int rows) =>
+        JsonSerializer.Serialize(new { type = "size", cols, rows });
 
     /// <summary><c>/hook/Stop?token=…</c> names the event in the path; <c>/hook?token=…</c> names none.</summary>
     internal static string EventFromPath(string path)

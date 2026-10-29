@@ -142,9 +142,13 @@ internal sealed class ConPty : IDisposable
     public int Pid { get; }
     public FileStream Input { get; }
     public FileStream Output { get; }
+    public short Cols { get; private set; }
+    public short Rows { get; private set; }
 
     public ConPty(string commandLine, string cwd, short cols, short rows)
     {
+        Cols = Math.Max(cols, (short)2);
+        Rows = Math.Max(rows, (short)2);
         var sa = new SECURITY_ATTRIBUTES { nLength = Marshal.SizeOf<SECURITY_ATTRIBUTES>() };
         if (!CreatePipe(out var inRead, out _ptyIn, ref sa, 0)) throw new Win32Exception();
         if (!CreatePipe(out _ptyOut, out var outWrite, ref sa, 0)) throw new Win32Exception();
@@ -210,7 +214,9 @@ internal sealed class ConPty : IDisposable
     public void Resize(short cols, short rows)
     {
         if (_pc == IntPtr.Zero) return;
-        ResizePseudoConsole(_pc, new COORD { X = Math.Max(cols, (short)2), Y = Math.Max(rows, (short)2) });
+        Cols = Math.Max(cols, (short)2);
+        Rows = Math.Max(rows, (short)2);
+        ResizePseudoConsole(_pc, new COORD { X = Cols, Y = Rows });
     }
 
     /// <summary>Block until the child exits; returns its exit code.</summary>
