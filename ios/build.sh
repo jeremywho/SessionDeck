@@ -41,8 +41,8 @@ build_device() {
     -destination "generic/platform=iOS" -derivedDataPath "$DERIVED" \
     -allowProvisioningUpdates -allowProvisioningDeviceRegistration DEVELOPMENT_TEAM="$SD_TEAM" 2>&1 \
     | grep -E "error:|BUILD|Signing Identity|Provisioning Profile" || true
-  local status=${pipestatus[1]}
-  [[ $status -eq 0 ]] || { echo "xcodebuild failed with $status"; exit $status; }
+  local rc=${pipestatus[1]}
+  [[ $rc -eq 0 ]] || { echo "xcodebuild failed with $rc"; exit $rc; }
   [[ -d "$APP" ]] || { echo "build produced no app"; exit 1; }
 }
 
@@ -53,8 +53,8 @@ case "${1:-install}" in
     xcodebuild test -project "$PROJECT" -scheme SessionDeckMobile -configuration Debug \
       -destination "platform=iOS Simulator,id=$SIM" -derivedDataPath "$DERIVED" \
       CODE_SIGNING_ALLOWED=NO 2>&1 | grep -E "error:|Test Suite|Executed|TEST |BUILD" || true
-    status=${pipestatus[1]}
-    [[ $status -eq 0 ]] || { echo "xcodebuild test failed with $status"; exit $status; }
+    rc=${pipestatus[1]}
+    [[ $rc -eq 0 ]] || { echo "xcodebuild test failed with $rc"; exit $rc; }
     ;;
   build)
     build_device
