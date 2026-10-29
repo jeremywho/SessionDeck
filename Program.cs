@@ -14,6 +14,12 @@ internal static class Program
 
         // A CLI hook: forward the event JSON on stdin to this session's host. Never fails the CLI:
         // any error is swallowed and the exit code is 0.
+        if (args.Length > 0 && args[0] == "--gateway")
+        {
+            Environment.Exit(Gateway.GatewayProcess.Run());
+            return;
+        }
+
         if (args.Length == 3 && args[0] == "--hook")
         {
             try

@@ -29,6 +29,7 @@ internal sealed class App : Application
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
         Settings = Settings.Load();
         ApplyRunOnLogin();   // also refreshes the registered path if the install dir ever moves
+        if (Settings.Gateway.Enabled) System.Threading.Tasks.Task.Run(Gateway.GatewayProcess.EnsureRunning);
 
         // Opt-in DWM investigation only. Normal launches never create the timer or telemetry file.
         DwmDiagnostics.Start(() => Dispatcher.BeginInvoke(() =>

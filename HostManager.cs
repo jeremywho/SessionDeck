@@ -134,7 +134,7 @@ internal static class HostManager
     /// by the app exe's write time, and hosts run from there. Stale stamped folders whose hosts
     /// have all exited are removed on the way.
     /// </summary>
-    static string HostExe()
+    internal static string HostExe()
     {
         string src = Environment.ProcessPath!;
         string srcDir = Path.GetDirectoryName(src)!;
