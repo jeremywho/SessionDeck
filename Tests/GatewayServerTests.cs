@@ -143,6 +143,21 @@ public class GatewayServerTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task A_device_revoked_while_its_socket_is_still_being_set_up_is_cut()
+    {
+        string token = await PairAsync();
+        string deviceId = _devices.Devices.Single().Id;
+        _devices.Revoke(deviceId);
+        using var ws = new ClientWebSocket();
+        try
+        {
+            await ws.ConnectAsync(Ws($"/events?token={token}"), CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal("<close 4401>", await NextText(ws));
+        }
+        catch (WebSocketException) { }
+    }
+
+    [Fact]
     public async Task Static_files_come_from_the_embedded_site_and_stay_inside_it()
     {
         using var c = Client();
@@ -196,8 +211,8 @@ public class GatewayServerTests : IAsyncDisposable
     {
         using var anon = Client();
         Assert.Equal(HttpStatusCode.Unauthorized, (await anon.PostAsync("/admin/pair-code", new StringContent(""))).StatusCode);
-        bool quit = false;
-        _server.QuitRequested += () => quit = true;
+        var quit = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _server.QuitRequested += () => quit.TrySetResult();
         using var admin = Client();
         admin.DefaultRequestHeaders.Add("X-Admin-Token", "ADMINSECRET");
         var res = await admin.PostAsync("/admin/pair-code", new StringContent(""));
@@ -207,7 +222,15 @@ public class GatewayServerTests : IAsyncDisposable
         Assert.NotNull(_devices.Redeem(code, "phone", DateTime.UtcNow));
         Assert.Equal(HttpStatusCode.OK, (await admin.GetAsync("/devices")).StatusCode);
         Assert.Equal(HttpStatusCode.NoContent, (await admin.PostAsync("/admin/quit", new StringContent(""))).StatusCode);
-        Assert.True(quit);
+        await quit.Task.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public void The_qr_payload_carries_address_port_and_code()
+    {
+        Assert.Equal("sessiondeck://pair?host=192.0.2.10&port=7420&code=ABCD2345", QrPayload.For("192.0.2.10", 7420, "ABCD2345"));
+        string lan = QrPayload.LanAddress();
+        Assert.True(lan.Length == 0 || System.Net.IPAddress.TryParse(lan, out _));
     }
 
     [Fact]

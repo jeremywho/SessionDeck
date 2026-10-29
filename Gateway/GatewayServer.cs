@@ -212,6 +212,7 @@ internal sealed class GatewayServer : IAsyncDisposable
         _connections[conn] = 0;
         try
         {
+            if (!await StillPaired(conn)) return;
             conn.Events.Writer.TryWrite(EventsFrame());
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(conn.Cancel.Token, _stop.Token);
             var send = Task.Run(async () =>
@@ -254,11 +255,20 @@ internal sealed class GatewayServer : IAsyncDisposable
         _connections[conn] = 0;
         try
         {
+            if (!await StillPaired(conn)) return;
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(conn.Cancel.Token, _stop.Token);
             await AttachRelay.RunAsync(ws, host, after, linked.Token);
         }
         catch (WebSocketException) { await CloseAsync(ws, WebSocketCloseStatus.EndpointUnavailable, "host unreachable"); }
         finally { _connections.TryRemove(conn, out _); }
+    }
+
+    /// <summary>A revoke between authentication and registration would miss this socket; checked again once it is registered.</summary>
+    async Task<bool> StillPaired(Connection conn)
+    {
+        if (_devices.Devices.Any(d => d.Id == conn.DeviceId) && !conn.Cancel.IsCancellationRequested) return true;
+        await CloseAsync(conn.Socket, (WebSocketCloseStatus)RevokedClose, "revoked");
+        return false;
     }
 
     static string? BearerToken(MiniHttp.Request r)
