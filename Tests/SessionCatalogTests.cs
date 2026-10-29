@@ -59,6 +59,7 @@ public class SessionCatalogTests
         Assert.False(exited.MobileReady);
         var shell = entries.Single(e => e.HostId == "h4");
         Assert.Equal("Terminal", shell.Name);
+        Assert.Equal("Shell", shell.Provider);
         Assert.True(shell.MobileReady);
     }
 

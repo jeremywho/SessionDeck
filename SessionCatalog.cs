@@ -58,7 +58,7 @@ internal sealed class SessionCatalog
     static CatalogEntry Entry(SessionRow r) => new(
         r.Host.Id,
         r.LiveSessionId,
-        r.Provider.ToString(),
+        string.Equals(r.Host.Provider, "Shell", StringComparison.OrdinalIgnoreCase) ? "Shell" : r.Provider.ToString(),
         r.Name,
         r.ModelChip,
         r.Effort,
