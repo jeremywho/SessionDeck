@@ -24,6 +24,30 @@ public class GatewayProcessTests : IDisposable
     }
 
     [Fact]
+    public void The_deck_starts_a_gateway_when_none_runs_keeps_a_current_one_and_replaces_an_old_one()
+    {
+        var spawned = new List<string>();
+        var quitAsked = new List<int>();
+        var r = new GatewayRecord(42, 1, 7420, @"C:\old\SessionDeck.exe", "t");
+
+        Assert.Equal(GatewayProcess.Outcome.Started, GatewayProcess.EnsureRunning(null, @"C:\new\SessionDeck.exe", _ => false, q => quitAsked.Add(q.Pid), spawned.Add, TimeSpan.Zero));
+        Assert.Equal(new[] { @"C:\new\SessionDeck.exe" }, spawned);
+        Assert.Empty(quitAsked);
+
+        Assert.Equal(GatewayProcess.Outcome.Started, GatewayProcess.EnsureRunning(r, @"C:\new\SessionDeck.exe", _ => false, q => quitAsked.Add(q.Pid), spawned.Add, TimeSpan.Zero));
+        Assert.Equal(2, spawned.Count);
+
+        Assert.Equal(GatewayProcess.Outcome.Kept, GatewayProcess.EnsureRunning(r, @"C:\old\SessionDeck.exe", _ => true, q => quitAsked.Add(q.Pid), spawned.Add, TimeSpan.Zero));
+        Assert.Equal(2, spawned.Count);
+        Assert.Empty(quitAsked);
+
+        bool alive = true;
+        Assert.Equal(GatewayProcess.Outcome.Replaced, GatewayProcess.EnsureRunning(r, @"C:\new\SessionDeck.exe", _ => alive, q => { quitAsked.Add(q.Pid); alive = false; }, spawned.Add, TimeSpan.FromSeconds(2)));
+        Assert.Equal(new[] { 42 }, quitAsked);
+        Assert.Equal(3, spawned.Count);
+    }
+
+    [Fact]
     public void A_damaged_or_missing_record_reads_as_none()
     {
         string path = Path.Combine(_dir, "gateway.json");

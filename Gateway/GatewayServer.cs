@@ -209,6 +209,7 @@ internal sealed class GatewayServer : IAsyncDisposable
         await MiniHttp.WriteUpgrade(s, r.WebSocketKey);
         using var ws = WebSocket.CreateFromStream(s, new WebSocketCreationOptions { IsServer = true, KeepAliveInterval = TimeSpan.FromSeconds(30) });
         var conn = new Connection { DeviceId = device.Id, Socket = ws, Cancel = new CancellationTokenSource(), Events = Channel.CreateUnbounded<string>() };
+        if (BeforeRegisterForTests != null) await BeforeRegisterForTests();
         _connections[conn] = 0;
         try
         {
@@ -252,6 +253,7 @@ internal sealed class GatewayServer : IAsyncDisposable
         await MiniHttp.WriteUpgrade(s, r.WebSocketKey);
         using var ws = WebSocket.CreateFromStream(s, new WebSocketCreationOptions { IsServer = true, KeepAliveInterval = TimeSpan.FromSeconds(30) });
         var conn = new Connection { DeviceId = device.Id, Socket = ws, Cancel = new CancellationTokenSource() };
+        if (BeforeRegisterForTests != null) await BeforeRegisterForTests();
         _connections[conn] = 0;
         try
         {
@@ -262,6 +264,9 @@ internal sealed class GatewayServer : IAsyncDisposable
         catch (WebSocketException) { await CloseAsync(ws, WebSocketCloseStatus.EndpointUnavailable, "host unreachable"); }
         finally { _connections.TryRemove(conn, out _); }
     }
+
+    /// <summary>Test seam: runs after a socket is authenticated and before it is registered, where a revoke used to slip through.</summary>
+    internal Func<Task>? BeforeRegisterForTests;
 
     /// <summary>A revoke between authentication and registration would miss this socket; checked again once it is registered.</summary>
     async Task<bool> StillPaired(Connection conn)

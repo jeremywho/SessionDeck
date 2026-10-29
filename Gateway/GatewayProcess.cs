@@ -54,23 +54,28 @@ internal static class GatewayProcess
 
     public static string Spawnable() => HostManager.HostExe();
 
+    public enum Outcome { Kept, Started, Replaced }
+
     /// <summary>Called by the deck at startup: start a gateway when none runs; replace one from an older exe.</summary>
     public static void EnsureRunning()
     {
-        try
-        {
-            string exe = Spawnable();
-            var record = ReadRecord();
-            if (record != null && IsAlive(record))
-            {
-                if (!ShouldReplace(record, exe)) return;
-                AskToQuit(record);
-                var deadline = DateTime.UtcNow.AddSeconds(5);
-                while (DateTime.UtcNow < deadline && IsAlive(record)) Thread.Sleep(100);
-            }
-            Spawn(exe);
-        }
+        try { EnsureRunning(ReadRecord(), Spawnable(), IsAlive, AskToQuit, exe => { Spawn(exe); }, TimeSpan.FromSeconds(5)); }
         catch (Exception ex) { App.LogError(ex); }
+    }
+
+    internal static Outcome EnsureRunning(GatewayRecord? record, string exe, Func<GatewayRecord, bool> isAlive, Action<GatewayRecord> askToQuit, Action<string> spawn, TimeSpan quitWait)
+    {
+        if (record != null && isAlive(record))
+        {
+            if (!ShouldReplace(record, exe)) return Outcome.Kept;
+            askToQuit(record);
+            var deadline = DateTime.UtcNow + quitWait;
+            while (DateTime.UtcNow < deadline && isAlive(record)) Thread.Sleep(20);
+            spawn(exe);
+            return Outcome.Replaced;
+        }
+        spawn(exe);
+        return Outcome.Started;
     }
 
     public static void AskToQuit(GatewayRecord r)

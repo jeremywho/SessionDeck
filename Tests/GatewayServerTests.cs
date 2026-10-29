@@ -143,18 +143,27 @@ public class GatewayServerTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task A_device_revoked_while_its_socket_is_still_being_set_up_is_cut()
+    public async Task A_device_revoked_while_its_socket_is_still_being_set_up_is_cut_and_types_nothing()
     {
+        await using var host = new FakeHost();
+        _hosts[host.Record.Id] = host.Record;
         string token = await PairAsync();
         string deviceId = _devices.Devices.Single().Id;
-        _devices.Revoke(deviceId);
+        var paused = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var resume = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _server.BeforeRegisterForTests = async () => { paused.TrySetResult(); await resume.Task; };
+
         using var ws = new ClientWebSocket();
-        try
-        {
-            await ws.ConnectAsync(Ws($"/events?token={token}"), CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
-            Assert.Equal("<close 4401>", await NextText(ws));
-        }
-        catch (WebSocketException) { }
+        var connecting = ws.ConnectAsync(Ws($"/sessions/{host.Record.Id}/attach?token={token}"), CancellationToken.None);
+        await paused.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(_server.Revoke(deviceId));
+        resume.TrySetResult();
+        await connecting.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal("<close 4401>", await NextText(ws));
+        try { await ws.SendAsync(Encoding.UTF8.GetBytes("{\"type\":\"input\",\"data\":\"typed\"}"), WebSocketMessageType.Text, true, CancellationToken.None); } catch (WebSocketException) { }
+        await Task.Delay(300);
+        Assert.Empty(host.Received);
+        _server.BeforeRegisterForTests = null;
     }
 
     [Fact]

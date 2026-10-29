@@ -129,9 +129,11 @@ internal partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
     {
         int port = GatewayPortBox.Value is double gp && gp >= 1024 ? (int)gp : _app.Settings.Gateway.Port;
         string script = $"netsh advfirewall firewall delete rule name=\"SessionDeck gateway\" ; netsh advfirewall firewall add rule name=\"SessionDeck gateway\" dir=in action=allow protocol=TCP localport={port} profile=private";
+        // Encoded, not quoted: nested quotes inside -Command split the rule name into two arguments.
+        string encoded = Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(script));
         try
         {
-            Process.Start(new ProcessStartInfo("powershell.exe", $"-NoProfile -WindowStyle Hidden -Command \"{script}\"") { UseShellExecute = true, Verb = "runas" });
+            Process.Start(new ProcessStartInfo("powershell.exe", $"-NoProfile -WindowStyle Hidden -EncodedCommand {encoded}") { UseShellExecute = true, Verb = "runas" });
             PairNote.Text = $"Firewall rule requested for port {port} on private networks.";
         }
         catch (Exception ex) { PairNote.Text = "Firewall rule not added: " + ex.Message; }

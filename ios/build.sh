@@ -42,7 +42,7 @@ case "${1:-install}" in
     SIM="$(simulator_udid)"
     xcodebuild test -project "$PROJECT" -scheme SessionDeckMobile -configuration Debug \
       -destination "platform=iOS Simulator,id=$SIM" -derivedDataPath "$DERIVED" \
-      CODE_SIGNING_ALLOWED=NO -quiet 2>&1 | grep -E "error:|Test Suite|Executed|passed|failed|BUILD" || true
+      CODE_SIGNING_ALLOWED=NO 2>&1 | grep -E "error:|Test Suite|Executed|TEST |BUILD" || true
     ;;
   build|install)
     generate
@@ -51,7 +51,7 @@ case "${1:-install}" in
     [[ -n "$UDID" ]] || { echo "no iPhone paired; set SD_UDID"; exit 1; }
     xcodebuild build -project "$PROJECT" -scheme SessionDeckMobile -configuration Debug \
       -destination "id=$UDID" -derivedDataPath "$DERIVED" \
-      -allowProvisioningUpdates -allowProvisioningDeviceRegistration DEVELOPMENT_TEAM="$SD_TEAM" -quiet 2>&1 | grep -E "error:|warning: .*deprecated|BUILD" || true
+      -allowProvisioningUpdates -allowProvisioningDeviceRegistration DEVELOPMENT_TEAM="$SD_TEAM" 2>&1 | grep -E "error:|BUILD|Signing Identity|Provisioning Profile" || true
     APP="$DERIVED/Build/Products/Debug-iphoneos/SessionDeckMobile.app"
     [[ -d "$APP" ]] || { echo "build produced no app"; exit 1; }
     if [[ "${1:-install}" == "install" ]]; then
