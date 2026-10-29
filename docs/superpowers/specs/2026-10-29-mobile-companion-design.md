@@ -102,7 +102,7 @@ shell, never from a URL the user sees.
 | `GET /sessions` | The catalog as the phone sees it (no ports, no host tokens). |
 | `WS /events` | Pushes `{type:"sessions", sessions:[…]}` on every catalog change. |
 | `WS /sessions/{hostId}/attach?after=<seq>` | Relays the host's attach stream both ways. |
-| `GET /mobile/term.html`, `/mobile/*.js`, `/mobile/*.css` | The terminal page and xterm assets, from the embedded `wwwroot`. |
+| `GET /mobile/mobile.html`, `/mobile/*.js`, `/mobile/*.css` | The terminal page and xterm assets, from the embedded `wwwroot`. |
 | `DELETE /devices/{id}` | Revoke (used by the deck's settings page, same token rules). |
 
 Attach relay rules, enforced in the gateway, not trusted to the phone:
@@ -138,7 +138,7 @@ settings page calls the gateway to list and revoke.
      Completed, Idle, Error), unread tint, subagent badge. Live via `/events`; pull to refresh.
      A banner when the gateway is unreachable.
   3. **Session**: `WKWebView` filling the screen above an input area, loading
-     `/mobile/term.html?host=<id>` from the gateway. The page opens the attach relay, sets xterm
+     `/mobile/mobile.html?host=<id>` from the gateway. The page opens the attach relay, sets xterm
      to the host's `cols`×`rows`, scales the terminal element so the full width fits the screen,
      and supports pinch-zoom and two-finger pan. Below it: a native text field (autocorrect and
      smart punctuation off, so `/` and quotes arrive as typed) with Send, and a key bar: Esc, Tab,

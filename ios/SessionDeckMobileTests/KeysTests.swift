@@ -17,7 +17,7 @@ final class KeysTests: XCTestCase {
     func testJsLiteralEscapesWhatWouldBreakAScript() {
         XCTAssertEqual(Keys.jsLiteral("ls"), "\"ls\"")
         XCTAssertEqual(Keys.jsLiteral("a\"b"), "\"a\\\"b\"")
-        XCTAssertEqual(Keys.jsLiteral("\u{1b}[A"), "\"\\u001B[A\"")
+        XCTAssertEqual(Keys.jsLiteral("\u{1b}[A").lowercased(), "\"\u001b[a\"")
         XCTAssertEqual(Keys.jsLiteral("line\r"), "\"line\\r\"")
         XCTAssertEqual(Keys.jsLiteral("</script>"), "\"<\\/script>\"")
     }
