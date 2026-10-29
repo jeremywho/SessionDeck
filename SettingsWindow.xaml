@@ -90,6 +90,44 @@
         <TextBlock Text="Font (size in points), opacity and colors follow Windows Terminal; applied to open tabs on save." FontSize="11.5"
                    Foreground="{DynamicResource Fg3Brush}" Margin="0,4,0,0"/>
 
+        <TextBlock Text="Phone" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource FgBrush}" Margin="0,20,0,0"/>
+        <Grid Margin="0,8,0,0">
+          <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+          <StackPanel Grid.Column="0">
+            <TextBlock Text="Session gateway" Foreground="{DynamicResource FgBrush}"/>
+            <TextBlock Text="Lets a paired iPhone on this network list sessions and type into them, with the deck window closed too." FontSize="11.5" Foreground="{DynamicResource Fg3Brush}"/>
+          </StackPanel>
+          <ui:ToggleSwitch x:Name="GatewayToggle" Grid.Column="1" VerticalAlignment="Center"/>
+        </Grid>
+        <Grid Margin="0,8,0,0">
+          <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="110"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+          <TextBlock Grid.Column="0" Text="Port" VerticalAlignment="Center" Margin="0,0,10,0" Foreground="{DynamicResource FgBrush}"/>
+          <ui:NumberBox x:Name="GatewayPortBox" Grid.Column="1" Minimum="1024" Maximum="65535" SmallChange="1" ClearButtonEnabled="False" SpinButtonPlacementMode="Hidden"/>
+          <ui:Button x:Name="FirewallButton" Grid.Column="3" Content="Allow through firewall" Appearance="Secondary" Click="Firewall_Click"
+                     ToolTip="Adds a Windows Firewall rule for this port on private networks. Asks for administrator approval once."/>
+        </Grid>
+        <Grid Margin="0,10,0,0">
+          <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+          <Image x:Name="QrImage" Grid.Column="0" Width="132" Height="132" Visibility="Collapsed" RenderOptions.BitmapScalingMode="NearestNeighbor"/>
+          <StackPanel Grid.Column="2" VerticalAlignment="Center">
+            <ui:Button x:Name="PairButton" Content="Show pairing code" Appearance="Secondary" Click="Pair_Click" HorizontalAlignment="Left"/>
+            <TextBlock x:Name="PairText" FontSize="12" Margin="0,6,0,0" Foreground="{DynamicResource FgBrush}" TextWrapping="Wrap"/>
+            <TextBlock x:Name="PairNote" FontSize="11.5" Margin="0,2,0,0" Foreground="{DynamicResource Fg3Brush}" TextWrapping="Wrap"/>
+          </StackPanel>
+        </Grid>
+        <ItemsControl x:Name="DevicesList" Margin="0,8,0,0">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate>
+              <Grid Margin="0,2,0,2">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="{Binding Name}" VerticalAlignment="Center" Foreground="{DynamicResource FgBrush}"/>
+                <TextBlock Grid.Column="1" Text="{Binding Seen}" VerticalAlignment="Center" Margin="10,0" FontSize="11.5" Foreground="{DynamicResource Fg3Brush}"/>
+                <ui:Button Grid.Column="2" Content="Revoke" Appearance="Secondary" Tag="{Binding Id}" Click="Revoke_Click"/>
+              </Grid>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
         <TextBlock Text="Claude flags" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource FgBrush}" Margin="0,20,0,0"/>
         <TextBlock Text="Appended to every new or resumed Claude session (space-separated)." FontSize="11.5"
                    Foreground="{DynamicResource Fg3Brush}" Margin="0,2,0,6"/>

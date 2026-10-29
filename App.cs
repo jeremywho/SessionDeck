@@ -192,6 +192,22 @@ internal sealed class App : Application
     }
 
     /// <summary>Sync the HKCU Run registration. Installed instance only — dev builds leave the key alone.</summary>
+    /// <summary>The gateway was turned on, off, or moved to another port: the running one is asked to quit and, when wanted, a new one starts.</summary>
+    public void ApplyGatewaySettings()
+    {
+        System.Threading.Tasks.Task.Run(() =>
+        {
+            var record = Gateway.GatewayProcess.ReadRecord();
+            if (record != null && Gateway.GatewayProcess.IsAlive(record))
+            {
+                Gateway.GatewayProcess.AskToQuit(record);
+                var deadline = DateTime.UtcNow.AddSeconds(5);
+                while (DateTime.UtcNow < deadline && Gateway.GatewayProcess.IsAlive(record)) System.Threading.Thread.Sleep(100);
+            }
+            if (Settings.Gateway.Enabled) Gateway.GatewayProcess.EnsureRunning();
+        });
+    }
+
     public void ApplyRunOnLogin()
     {
         if (Installer.IsInstalledInstance()) Installer.SyncRunAtLogin(Settings.RunOnLogin);
