@@ -105,6 +105,8 @@ internal static class HostProgram
 
     static readonly List<Client> Clients = new();
     static readonly object ClientsLock = new();
+    /// <summary>Orders a resize against an attach so no viewer misses one; never taken by the output reader, which only needs <see cref="ClientsLock"/>.</summary>
+    static readonly object SizeLock = new();
     static Ring _ring = null!;
     static ConPty _pty = null!;
     static HostRecord _record = null!;
@@ -409,11 +411,11 @@ internal static class HostProgram
         long end = start + data.Length;
         // Size and registration under one lock: a resize between them would be announced to every
         // viewer but this one, which would then hold the old size until the next resize.
-        lock (ClientsLock)
+        lock (SizeLock)
         {
             client.Out.Writer.TryWrite((true, Encoding.UTF8.GetBytes(SnapshotJson(start, end, _record.Title, _pty.Cols, _pty.Rows))));
             if (data.Length > 0) client.Out.Writer.TryWrite((false, data));
-            Clients.Add(client);
+            lock (ClientsLock) Clients.Add(client);
         }
         if (_exited)
         {
@@ -470,7 +472,7 @@ internal static class HostProgram
                     break;
                 case "resize":
                     if (_exited) return;
-                    lock (ClientsLock)
+                    lock (SizeLock)
                     {
                         _pty.Resize((short)root.GetProperty("cols").GetInt32(), (short)root.GetProperty("rows").GetInt32());
                         Broadcast(true, Encoding.UTF8.GetBytes(SizeJson(_pty.Cols, _pty.Rows)));

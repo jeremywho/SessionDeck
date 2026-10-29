@@ -69,7 +69,8 @@ internal sealed class Settings
         RecentFolders.Insert(0, cwd);
         if (RecentFolders.Count > 12) RecentFolders.RemoveRange(12, RecentFolders.Count - 12);
     }
-    public bool RunOnLogin { get; set; } = true;                            // HKCU Run registration (installed instance only)
+    public bool RunOnLogin { get; set; } = true;
+    public GatewaySettings Gateway { get; set; } = new();                   // the LAN gateway phones talk to; see Gateway/GatewayServer.cs                            // HKCU Run registration (installed instance only)
 
     /// <summary>Where this instance keeps its state. <c>SD_DATA_DIR</c> moves all of it, so a test instance never shares a file with the installed one.</summary>
     internal static string DataDir =>
@@ -98,7 +99,9 @@ internal sealed class Settings
             try
             {
                 if (!File.Exists(candidate)) continue;
-                if (JsonSerializer.Deserialize<Settings>(File.ReadAllText(candidate)) is { } s) return s;
+                // Shared with the deck's atomic replace: a plain ReadAllText would hold the file against File.Replace and lose the deck's save.
+                using var fs = new FileStream(candidate, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                if (JsonSerializer.Deserialize<Settings>(fs) is { } s) return s;
             }
             catch (Exception ex) when (ex is JsonException or IOException) { }
         }
@@ -135,4 +138,11 @@ internal sealed class Settings
         try { AtomicFile.Write(path, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true })); }
         catch (Exception ex) { App.LogError(ex); }
     }
+}
+
+/// <summary>The LAN gateway that lets a paired phone see and type into sessions while the deck window is closed.</summary>
+internal sealed class GatewaySettings
+{
+    public bool Enabled { get; set; } = true;
+    public int Port { get; set; } = 7420;
 }
