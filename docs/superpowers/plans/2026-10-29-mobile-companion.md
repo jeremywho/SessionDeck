@@ -471,4 +471,6 @@ public void Only_hosts_that_report_their_size_are_mobile_ready()
 
 ## Rehearsal log
 
-(filled in by Task 12)
+**2026-10-29, Talon, isolated (`SD_DATA_DIR=C:\Temp\sd-e2e`, gateway on 7422, a throwaway `--host` running `pwsh -NoLogo`; no live host touched).** A scripted phone (`C:\Temp\sd-e2e\phone.py`, raw WebSocket): admin pair-code 200 → `/pair` 200 → `/sessions` listed the throwaway host as `mobileReady` → attach 101, first frame `snapshot` with `cols:100,rows:28` → a `resize` from the phone side changed nothing (host record still protocol 4, size untouched) → `input` of a `Write-Output` line came back in the binary stream → `/mobile/mobile.html` 200 → `/admin/quit` 204, gateway exited 0, `settings.json` byte-identical. Earlier the same day: `--gateway` alone wrote `gateway.json`, answered 401 without a token, and removed its record on quit.
+
+**Still to run with the phone in hand:** pair by QR from Settings, open a session, Send / Esc / arrows / Ctrl+C, Copy a selection into Notes, background 30 s and resume, and the gateway-unreachable banner. The iPhone 16 Pro Max was `unavailable` to the Mac Studio while this was built (asleep or off the network), so the device install (`ios/build.sh install`) is the first step when it is awake.
