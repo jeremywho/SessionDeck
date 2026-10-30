@@ -51,7 +51,6 @@ struct TerminalScreen: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { gateway.markViewed(entry.sessionId); bridge.sessionId = entry.sessionId.isEmpty ? entry.hostId : entry.sessionId; bridge.provider = entry.provider; bridge.proxy?.unit = DeleteUnit.forProvider(entry.provider) }
         .onDisappear { gateway.markViewed(entry.sessionId); speech.stop(); bridge.manualInput = nil; speech.onStopped = nil }
-        .sheet(item: $bridge.linkToOpen) { url in SafariView(url: url).ignoresSafeArea() }
         .onChange(of: bridge.connected) { _, connected in
             if connected, let z = LaunchOptions.zoom, !autoZoomed {
                 autoZoomed = true
@@ -95,7 +94,6 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
     @Published var hasSelection = false
     @Published var connected = false
     @Published var keyboardShown = false
-    @Published var linkToOpen: URL?
     /// What the user asked for last, apart from what the editing callbacks report: WebKit can take first
     /// responder on the same tap, which would read as "hidden" and make a hide-tap reopen the keyboard.
     private var wantKeyboard = false
@@ -110,9 +108,25 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
     /// Anything that moves the terminal's cursor on its own makes the typed buffer stale; typing then starts afresh.
     func resetTyping() { proxy?.resetBaseline() }
 
+    private var raisedAt = Date.distantPast
+
     func focus(_ on: Bool) {
         wantKeyboard = on
-        if on { proxy?.becomeFirstResponder() } else { proxy?.resignFirstResponder() }
+        LaunchOptions.log("keyboard \(on ? "raise" : "lower") requested")
+        if on { raisedAt = Date(); proxy?.becomeFirstResponder() } else { proxy?.resignFirstResponder() }
+    }
+
+    /// The keyboard field lost focus. If that is within a moment of our own raise and the user still
+    /// wants the keyboard, something else (WebKit on the same tap) took it: take it back once.
+    func editingEnded() {
+        keyboardShown = false
+        LaunchOptions.log("keyboard field ended editing (wanted \(wantKeyboard))")
+        guard wantKeyboard, Date().timeIntervalSince(raisedAt) < 1.0 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            guard let self, self.wantKeyboard, self.proxy?.isFirstResponder == false else { return }
+            LaunchOptions.log("keyboard re-raised after a focus steal")
+            self.proxy?.becomeFirstResponder()
+        }
     }
 
     func keyboardCameUp() {
@@ -265,7 +279,7 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
         case "size": applySavedZoom()
         case "replayed": DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.scrollToBottom() }
         case "tap": if !selecting { toggleKeyboard() }
-        case "open": if let s = body["uri"] as? String, let url = URL(string: s), ["http", "https"].contains(url.scheme ?? "") { linkToOpen = url }
+        case "open": if let s = body["uri"] as? String, let url = URL(string: s), ["http", "https"].contains(url.scheme ?? "") { UIApplication.shared.open(url) }
         case "connected": note = nil; connected = true; LaunchOptions.log("terminal connected")
         case "disconnected": note = "Reconnecting…"; connected = false
         case "revoked": note = "This phone was revoked from the deck."

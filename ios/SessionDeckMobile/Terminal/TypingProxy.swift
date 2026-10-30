@@ -37,8 +37,8 @@ struct TypingProxy: UIViewRepresentable {
         let bridge: TerminalBridge
         init(_ bridge: TerminalBridge) { self.bridge = bridge }
 
-        func textViewDidBeginEditing(_ textView: UITextView) { bridge.keyboardShown = true; bridge.keyboardCameUp() }
-        func textViewDidEndEditing(_ textView: UITextView) { bridge.keyboardShown = false }
+        func textViewDidBeginEditing(_ textView: UITextView) { bridge.keyboardShown = true; LaunchOptions.log("keyboard field began editing"); bridge.keyboardCameUp() }
+        func textViewDidEndEditing(_ textView: UITextView) { bridge.editingEnded() }
 
         func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
             guard text == "\n", let proxy = textView as? ProxyTextView else { return true }

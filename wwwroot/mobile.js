@@ -211,11 +211,14 @@
     const t = ev.changedTouches[0];
     const moved = Math.hypot(t.clientX - tapStart.x, t.clientY - tapStart.y);
     if (moved < 12 && Date.now() - tapStart.t < 400) {
+      // No synthetic click after a tap we handled: WebKit's click would take focus from the app's
+      // keyboard field and the keyboard would close right after opening.
+      ev.preventDefault();
       const uri = linkAt(t);
       post(uri ? { type: 'open', uri } : { type: 'tap' });
     }
     tapStart = null;
-  });
+  }, { passive: false });
 
   // Where the text ends: the bottom edge (CSS px, page coordinates) of the last row with anything on
   // it, so the app can scroll to the end of the output rather than to xterm's blank spare rows.
