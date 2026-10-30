@@ -11,8 +11,8 @@ final class TypingProxyTests: XCTestCase {
     }
 
     func testADictationRewriteBecomesBackspacesAndTheCorrectedTail() {
-        // iOS replaces "I wanted to" with "I want to": three backspaces, then " to".
-        XCTAssertEqual(D.delta(from: "I wanted to", to: "I want to"), "\u{7f}\u{7f}\u{7f}\u{7f}\u{7f}\u{7f}" + " to")
+        // iOS replaces "I wanted to" with "I want to": back over "ed to" (five), then " to".
+        XCTAssertEqual(D.delta(from: "I wanted to", to: "I want to"), String(repeating: "\u{7f}", count: 5) + " to")
         XCTAssertEqual(D.delta(from: "The problem", to: "The problem is"), " is")
         XCTAssertEqual(D.delta(from: "abc", to: "ab"), "\u{7f}")
         XCTAssertEqual(D.delta(from: "abc", to: ""), "\u{7f}\u{7f}\u{7f}")
