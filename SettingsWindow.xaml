@@ -4,8 +4,8 @@
                  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
                  Title="Settings"
-                 Width="470" Height="660"
-                 ResizeMode="NoResize"
+                 Width="470" Height="720" MinWidth="420" MinHeight="420"
+                 ResizeMode="CanResize"
                  WindowStartupLocation="CenterScreen"
                  ExtendsContentIntoTitleBar="True"
                  WindowBackdropType="Mica"
@@ -20,6 +20,7 @@
     <ui:TitleBar Grid.Row="0" Title="Settings" Height="36"/>
 
     <Border Grid.Row="1" Background="{DynamicResource SurfaceBrush}">
+      <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,6,0">
       <StackPanel Margin="18,14">
         <TextBlock Text="Appearance" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource FgBrush}"/>
         <Grid Margin="0,8,0,0">
@@ -151,6 +152,7 @@
           </StackPanel>
         </Grid>
       </StackPanel>
+      </ScrollViewer>
     </Border>
   </Grid>
 </ui:FluentWindow>

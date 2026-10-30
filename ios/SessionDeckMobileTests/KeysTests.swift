@@ -14,6 +14,12 @@ final class KeysTests: XCTestCase {
         XCTAssertEqual(Keys.bytes(for: .enter), "\r")
     }
 
+    func testAPasteWrapsTextInBracketedPasteMarkersWithTerminalNewlines() {
+        XCTAssertEqual(Keys.pasteSequence("one\ntwo"), "\u{1b}[200~one\rtwo\u{1b}[201~")
+        XCTAssertEqual(Keys.pasteSequence("a\r\nb"), "\u{1b}[200~a\rb\u{1b}[201~")
+        XCTAssertEqual(Keys.pasteSequence("plain"), "\u{1b}[200~plain\u{1b}[201~")
+    }
+
     func testLaunchArgumentEscapesSpellKeyBytes() {
         XCTAssertEqual(LaunchOptions.unescape("abc\\e"), "abc\u{1b}")
         XCTAssertEqual(LaunchOptions.unescape("\\x03"), "\u{03}")

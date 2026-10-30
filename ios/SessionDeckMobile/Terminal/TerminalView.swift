@@ -42,20 +42,23 @@ struct TerminalScreen: View {
 
     @State private var autoSent = false
 
+    /// One line is typed; a draft with newlines goes as a terminal paste so the CLI takes it whole.
     private func send() {
-        let line = text
+        let draft = text
+        guard !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         text = ""
+        let bytes = draft.contains("\n") ? Keys.pasteSequence(draft) + "\r" : draft + "\r"
         Task {
-            if await bridge.input(line + "\r") == false {
-                text = line
-                bridge.note = "Not connected. The line was kept."
+            if await bridge.input(bytes) == false {
+                text = draft
+                bridge.note = "Not connected. The text was kept."
             }
         }
     }
 
     private func paste() {
         guard let s = UIPasteboard.general.string, !s.isEmpty else { return }
-        Task { if await bridge.input(s) == false { bridge.note = "Not connected. Nothing was pasted." } }
+        Task { if await bridge.input(Keys.pasteSequence(s)) == false { bridge.note = "Not connected. Nothing was pasted." } }
     }
 
     private func copy() {

@@ -87,6 +87,12 @@ final class GatewayStore: ObservableObject {
 
     // MARK: events feed
 
+    /// Drop the backoff and try the gateway again now.
+    func reconnectNow() async {
+        startEvents()
+        await refresh()
+    }
+
     private func startEvents() {
         eventsTask?.cancel()
         eventsTask = Task { [weak self] in

@@ -145,6 +145,10 @@ internal static class GatewayProcess
         server.QuitRequested += () => quit.TrySetResult();
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; quit.TrySetResult(); };
 
+        // Listen only once there is a list to serve: a phone that connects during the Codex warm-up
+        // would otherwise be shown an empty deck for ten seconds.
+        SessionPipeline.WarmUp();
+        try { loop.Tick(); } catch (Exception ex) { App.LogError(ex); }
         try
         {
             server.StartAsync().GetAwaiter().GetResult();
@@ -159,11 +163,7 @@ internal static class GatewayProcess
         Log($"listening on port {server.Port}");
 
         using var cts = new CancellationTokenSource();
-        var running = Task.Run(async () =>
-        {
-            SessionPipeline.WarmUp();
-            await loop.RunAsync(cts.Token);
-        });
+        var running = loop.RunAsync(cts.Token);
         quit.Task.GetAwaiter().GetResult();
         Log("quit requested");
         cts.Cancel();

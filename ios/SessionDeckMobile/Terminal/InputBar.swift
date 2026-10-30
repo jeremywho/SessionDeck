@@ -1,7 +1,8 @@
 import SwiftUI
 import UIKit
 
-/// What a prompt needs from a phone: a line of text with Send, and the keys the keyboard lacks.
+/// What a prompt needs from a phone: a draft of one or more lines with Send, and the keys the
+/// keyboard lacks. Return sends; the newline key (or Shift+Return on a hardware keyboard) adds a line.
 struct InputBar: View {
     @Binding var text: String
     var focused: FocusState<Bool>.Binding
@@ -22,6 +23,7 @@ struct InputBar: View {
                             .buttonStyle(.bordered)
                             .font(.system(size: 13, weight: .medium, design: .monospaced))
                     }
+                    Button("newline") { text += "\n" }.buttonStyle(.bordered).font(.system(size: 13, design: .monospaced))
                     Divider().frame(height: 20)
                     Button("paste") { onPaste() }.buttonStyle(.bordered).font(.system(size: 13, design: .monospaced))
                     Button(selecting ? (hasSelection ? "copy" : "cancel") : "select") { selecting && hasSelection ? onCopy() : onSelect() }
@@ -30,14 +32,15 @@ struct InputBar: View {
                 }
                 .padding(.horizontal, 8)
             }
-            HStack(spacing: 8) {
-                PlainTextField(text: $text, placeholder: "Type to the session", onSubmit: onSend)
-                    .frame(height: 36)
-                    .padding(.horizontal, 10)
+            HStack(alignment: .bottom, spacing: 8) {
+                DraftField(text: $text, placeholder: "Type to the session, return sends", onSubmit: onSend)
+                    .frame(minHeight: 36, maxHeight: 132)
+                    .padding(.horizontal, 6)
                     .background(Color(white: 0.14), in: RoundedRectangle(cornerRadius: 10))
                     .focused(focused)
                 Button(action: onSend) { Image(systemName: "arrow.up.circle.fill").font(.system(size: 30)) }
-                    .disabled(text.isEmpty)
+                    .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .padding(.bottom, 3)
             }
             .padding(.horizontal, 8)
         }
@@ -46,46 +49,97 @@ struct InputBar: View {
     }
 }
 
-/// A text field that sends exactly what was typed: no autocorrect, no smart quotes or dashes, no capitalisation.
-struct PlainTextField: UIViewRepresentable {
+/// A growing text view that sends exactly what was typed: no autocorrect, smart quotes or dashes,
+/// no capitalisation. Return sends, Shift+Return (hardware keyboard) or the newline key adds a line,
+/// and the keyboard's dictation key works as it does anywhere else.
+struct DraftField: UIViewRepresentable {
     @Binding var text: String
     let placeholder: String
     let onSubmit: () -> Void
 
-    func makeUIView(context: Context) -> UITextField {
-        let f = UITextField()
-        f.placeholder = placeholder
-        f.autocorrectionType = .no
-        f.autocapitalizationType = .none
-        f.spellCheckingType = .no
-        f.smartQuotesType = .no
-        f.smartDashesType = .no
-        f.smartInsertDeleteType = .no
-        f.returnKeyType = .send
-        f.enablesReturnKeyAutomatically = true
-        f.font = UIFont.monospacedSystemFont(ofSize: 15, weight: .regular)
-        f.textColor = .white
-        f.delegate = context.coordinator
-        f.addTarget(context.coordinator, action: #selector(Coordinator.changed(_:)), for: .editingChanged)
-        f.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        return f
+    func makeUIView(context: Context) -> DraftTextView {
+        let v = DraftTextView()
+        v.delegate = context.coordinator
+        v.onSubmit = onSubmit
+        v.placeholderLabel.text = placeholder
+        v.autocorrectionType = .no
+        v.autocapitalizationType = .none
+        v.spellCheckingType = .no
+        v.smartQuotesType = .no
+        v.smartDashesType = .no
+        v.smartInsertDeleteType = .no
+        v.returnKeyType = .send
+        v.enablesReturnKeyAutomatically = true
+        v.font = UIFont.monospacedSystemFont(ofSize: 15, weight: .regular)
+        v.textColor = .white
+        v.backgroundColor = .clear
+        v.isScrollEnabled = true
+        v.textContainerInset = UIEdgeInsets(top: 8, left: 2, bottom: 8, right: 2)
+        v.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return v
     }
 
-    func updateUIView(_ uiView: UITextField, context: Context) {
+    func updateUIView(_ uiView: DraftTextView, context: Context) {
         if uiView.text != text { uiView.text = text }
+        uiView.placeholderLabel.isHidden = !text.isEmpty
+        uiView.invalidateIntrinsicContentSize()
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
-    final class Coordinator: NSObject, UITextFieldDelegate {
-        var parent: PlainTextField
-        init(_ parent: PlainTextField) { self.parent = parent }
+    final class Coordinator: NSObject, UITextViewDelegate {
+        var parent: DraftField
+        init(_ parent: DraftField) { self.parent = parent }
 
-        @objc func changed(_ field: UITextField) { parent.text = field.text ?? "" }
-
-        func textFieldShouldReturn(_ textField: UITextField) -> Bool {
-            parent.onSubmit()
-            return false
+        func textViewDidChange(_ textView: UITextView) {
+            parent.text = textView.text ?? ""
+            (textView as? DraftTextView)?.placeholderLabel.isHidden = !textView.text.isEmpty
+            textView.invalidateIntrinsicContentSize()
         }
+
+        func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
+            // The on-screen return key: send. Newlines come from the newline key or Shift+Return.
+            if text == "\n" && !(textView as? DraftTextView)!.shiftHeld {
+                parent.onSubmit()
+                return false
+            }
+            return true
+        }
+    }
+}
+
+final class DraftTextView: UITextView {
+    var onSubmit: (() -> Void)?
+    var shiftHeld = false
+    let placeholderLabel = UILabel()
+
+    override init(frame: CGRect, textContainer: NSTextContainer?) {
+        super.init(frame: frame, textContainer: textContainer)
+        placeholderLabel.font = UIFont.monospacedSystemFont(ofSize: 15, weight: .regular)
+        placeholderLabel.textColor = UIColor(white: 0.55, alpha: 1)
+        placeholderLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(placeholderLabel)
+        NSLayoutConstraint.activate([
+            placeholderLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 7),
+            placeholderLabel.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    override var intrinsicContentSize: CGSize {
+        let fitted = sizeThatFits(CGSize(width: bounds.width > 0 ? bounds.width : 300, height: .greatestFiniteMagnitude))
+        return CGSize(width: UIView.noIntrinsicMetric, height: min(max(fitted.height, 36), 132))
+    }
+
+    override var keyCommands: [UIKeyCommand]? {
+        [UIKeyCommand(input: "\r", modifierFlags: .shift, action: #selector(insertNewline))]
+    }
+
+    @objc private func insertNewline() {
+        shiftHeld = true
+        insertText("\n")
+        shiftHeld = false
+        delegate?.textViewDidChange?(self)
     }
 }

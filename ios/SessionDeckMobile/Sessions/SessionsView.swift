@@ -19,8 +19,14 @@ struct SessionsView: View {
     var body: some View {
         NavigationStack(path: $path) {
             List {
-                if let error = gateway.lastError, !gateway.connected {
-                    Section { Label(error, systemImage: "wifi.exclamationmark").foregroundStyle(.orange) }
+                if !gateway.connected {
+                    Section {
+                        HStack {
+                            Label(gateway.lastError ?? "Connecting to the gateway…", systemImage: "wifi.exclamationmark").foregroundStyle(.orange)
+                            Spacer()
+                            Button("Retry") { Task { await gateway.reconnectNow() } }.buttonStyle(.bordered)
+                        }
+                    }
                 }
                 ForEach(grouped, id: \.name) { group in
                     Section(group.name.isEmpty ? "" : group.name) {

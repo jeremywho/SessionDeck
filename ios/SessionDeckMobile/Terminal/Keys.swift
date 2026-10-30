@@ -38,6 +38,12 @@ enum Key: CaseIterable, Identifiable {
 enum Keys {
     static func bytes(for key: Key) -> String { key.bytes }
 
+    /// Text as a terminal paste: the bracketed-paste markers let Claude Code and PSReadLine take a
+    /// multi-line draft as one block instead of running each line.
+    static func pasteSequence(_ text: String) -> String {
+        "\u{1b}[200~" + text.replacingOccurrences(of: "\r\n", with: "\r").replacingOccurrences(of: "\n", with: "\r") + "\u{1b}[201~"
+    }
+
     /// A JavaScript string literal for `text`, safe for any character.
     static func jsLiteral(_ text: String) -> String {
         let data = try! JSONSerialization.data(withJSONObject: [text])
