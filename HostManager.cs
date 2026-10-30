@@ -177,7 +177,7 @@ internal static class HostManager
     static void PruneHostBins(string root, string keep)
     {
         var inUse = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { Path.GetFullPath(keep) };
-        foreach (var rec in Discover())
+        foreach (var rec in Discover(prune: false))
             if (rec.HostBin.Length > 0) inUse.Add(Path.GetFullPath(rec.HostBin));
         foreach (var dir in Directory.GetDirectories(root))
         {

@@ -120,13 +120,11 @@ internal static class GatewayProcess
 
         GatewayServer? server = null;
         var quit = new TaskCompletionSource();
-        var sampler = new MachineLoadSampler();
-        MachineLoad? machine = null;
+        var machine = new MachineLoadMonitor();
         var loop = new CatalogLoop(
             () =>
             {
                 CodexScanner.Probe();
-                try { machine = sampler.Sample(); } catch (Exception ex) { App.LogError(ex); }
                 var pairs = SessionPipeline.Pair(SessionPipeline.Scan(prune: false));
                 var built = catalog.Build(pairs, Settings.Peek(), DateTime.UtcNow);
                 lock (gate)
@@ -138,7 +136,8 @@ internal static class GatewayProcess
                 return built;
             },
             _ => server?.CatalogChanged(),
-            () => server?.Subscribers ?? 0);
+            () => server?.Subscribers ?? 0,
+            alsoWatch: () => machine.Signature);
 
         server = new GatewayServer(IPAddress.Any, settings.Gateway.Port, devices,
             () => { lock (gate) return current; },
@@ -147,7 +146,7 @@ internal static class GatewayProcess
             adminToken);
         server.QuitRequested += () => quit.TrySetResult();
         server.Folders = () => SessionStarter.Folders(Settings.Peek());
-        server.Machine = () => machine;
+        server.Machine = () => machine.Latest;
         server.StartSession = request =>
         {
             var plan = SessionStarter.Plan(request, Settings.Peek());

@@ -51,16 +51,28 @@ public class SessionStarterTests
     }
 
     [Fact]
-    public void The_machine_load_sampler_reports_memory_at_once_and_cpu_after_two_samples()
+    public void Cpu_and_memory_come_at_once_and_cpu_needs_two_samples()
     {
         var sampler = new MachineLoadSampler();
-        var first = sampler.Sample();
+        var first = sampler.SampleCpuAndMemory(-1);
         Assert.True(first.MemoryTotalGb > 1);
         Assert.InRange(first.MemoryPercent, 0, 100);
         Assert.Equal(-1, first.CpuPercent);
-        Thread.Sleep(200);
-        var second = sampler.Sample();
+        Assert.Equal(-1, first.GpuPercent);
+        Thread.Sleep(300);
+        var second = sampler.SampleCpuAndMemory(7);
         Assert.InRange(second.CpuPercent, 0, 100);
-        Assert.InRange(second.GpuPercent, -1, 100);
+        Assert.Equal(7, second.GpuPercent);
+    }
+
+    [Fact]
+    public void The_monitor_publishes_cpu_and_memory_before_the_gpu_counters_have_opened()
+    {
+        var monitor = new MachineLoadMonitor(TimeSpan.FromMilliseconds(100));
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (monitor.Latest == null && DateTime.UtcNow < deadline) Thread.Sleep(20);
+        Assert.NotNull(monitor.Latest);
+        Assert.True(monitor.Latest!.MemoryTotalGb > 1);
+        Assert.Matches(@"^-?\d+/-?\d+/-?\d+$", monitor.Signature);
     }
 }

@@ -12,10 +12,12 @@ internal sealed class CatalogLoop
     readonly TimeSpan _busy;
     readonly TimeSpan _idle;
     readonly Func<TimeSpan, CancellationToken, Task> _delay;
+    readonly Func<string> _alsoWatch;
+    readonly object _gate = new();
     string _lastJson = "";
 
     public CatalogLoop(Func<List<CatalogEntry>> build, Action<List<CatalogEntry>> changed, Func<int> subscribers, TimeSpan? busy = null, TimeSpan? idle = null,
-                       Func<TimeSpan, CancellationToken, Task>? delay = null)
+                       Func<TimeSpan, CancellationToken, Task>? delay = null, Func<string>? alsoWatch = null)
     {
         _build = build;
         _changed = changed;
@@ -23,20 +25,24 @@ internal sealed class CatalogLoop
         _busy = busy ?? TimeSpan.FromSeconds(5);
         _idle = idle ?? TimeSpan.FromSeconds(30);
         _delay = delay ?? Task.Delay;
+        _alsoWatch = alsoWatch ?? (() => "");
     }
 
     public List<CatalogEntry> Current { get; private set; } = new();
 
-    /// <summary>One rebuild now; true when the list changed.</summary>
+    /// <summary>One rebuild now, serialized against the running loop; true when the list (or what else is watched) changed.</summary>
     public bool Tick()
     {
-        var entries = _build();
-        Current = entries;
-        string json = SessionCatalog.ToJson(entries);
-        if (json == _lastJson) return false;
-        _lastJson = json;
-        _changed(entries);
-        return true;
+        lock (_gate)
+        {
+            var entries = _build();
+            Current = entries;
+            string json = SessionCatalog.ToJson(entries) + "|" + _alsoWatch();
+            if (json == _lastJson) return false;
+            _lastJson = json;
+            _changed(entries);
+            return true;
+        }
     }
 
     public async Task RunAsync(CancellationToken ct)

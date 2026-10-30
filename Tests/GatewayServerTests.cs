@@ -297,13 +297,15 @@ public class GatewayServerTests : IAsyncDisposable
         using var cts = new CancellationTokenSource();
         var busy = TimeSpan.FromSeconds(5);
         var idle = TimeSpan.FromSeconds(30);
+        string watched = "a";
         var loop = new CatalogLoop(
             () => builds.Count > 0 ? builds.Dequeue() : new List<CatalogEntry> { _catalog[0] with { Name = "beta" } },
             _ => pushes++, () => subscribers, busy, idle,
-            (wait, _) => { waits.Add(wait); if (waits.Count == 2) subscribers = 0; if (waits.Count == 4) cts.Cancel(); return Task.CompletedTask; });
+            (wait, _) => { waits.Add(wait); if (waits.Count == 2) subscribers = 0; if (waits.Count == 3) watched = "b"; if (waits.Count == 5) cts.Cancel(); return Task.CompletedTask; },
+            () => watched);
         await loop.RunAsync(cts.Token);
-        Assert.Equal(2, pushes);
-        Assert.Equal(new[] { busy, busy, idle, idle }, waits);
+        Assert.Equal(3, pushes);
+        Assert.Equal(new[] { busy, busy, idle, idle, idle }, waits);
         Assert.Equal("beta", loop.Current.Single().Name);
     }
 }
