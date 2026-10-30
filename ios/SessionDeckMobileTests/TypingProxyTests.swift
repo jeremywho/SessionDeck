@@ -19,10 +19,19 @@ final class TypingProxyTests: XCTestCase {
         XCTAssertEqual(P.delta(from: "abc", to: ""), String(repeating: del, count: 3))
     }
 
-    func testErasuresAreCountedInUtf16UnitsAsTheTerminalDeletesThem() {
-        XCTAssertEqual(P.delta(from: "a\u{0301}", to: "b"), del + del + "b")
-        XCTAssertEqual(P.delta(from: "x😀", to: "x"), del + del)
-        XCTAssertEqual(P.delta(from: "é", to: "e"), del + "e")
+    func testErasuresAreCountedTheWayEachProgramDeletes() {
+        // A Node prompt (Claude Code) deletes a code point per backspace: the emoji goes, x stays.
+        XCTAssertEqual(P.delta(from: "x😀", to: "x", unit: .scalar), del)
+        XCTAssertEqual(P.delta(from: "a\u{0301}", to: "b", unit: .scalar), del + del + "b")
+        // PSReadLine deletes a UTF-16 unit: an emoji is two.
+        XCTAssertEqual(P.delta(from: "x😀", to: "x", unit: .utf16), del + del)
+        // The Codex TUI deletes a whole grapheme.
+        XCTAssertEqual(P.delta(from: "a\u{0301}", to: "b", unit: .grapheme), del + "b")
+        XCTAssertEqual(P.delta(from: "é", to: "e", unit: .grapheme), del + "e")
+        XCTAssertEqual(DeleteUnit.forProvider("Codex"), .grapheme)
+        XCTAssertEqual(DeleteUnit.forProvider("Shell"), .utf16)
+        XCTAssertEqual(DeleteUnit.forProvider("Claude"), .scalar)
+        XCTAssertEqual(DeleteUnit.forProvider("Agy"), .scalar)
     }
 
     func testTheGrowingInterimResultsFromTheBugReportCollapseToOnePhrase() {

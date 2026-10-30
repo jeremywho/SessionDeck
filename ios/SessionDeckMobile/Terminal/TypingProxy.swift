@@ -24,6 +24,7 @@ struct TypingProxy: UIViewRepresentable {
         v.backgroundColor = .clear
         v.textColor = .clear
         v.tintColor = .clear
+        v.unit = DeleteUnit.forProvider(bridge.provider)
         bridge.proxy = v
         return v
     }
@@ -51,26 +52,48 @@ struct TypingProxy: UIViewRepresentable {
     }
 }
 
+/// What one backspace removes in the program at the other end. PSReadLine deletes a UTF-16 unit, a
+/// Node prompt (Claude Code) a code point, the Codex TUI a whole grapheme.
+enum DeleteUnit {
+    case utf16, scalar, grapheme
+
+    static func forProvider(_ provider: String) -> DeleteUnit {
+        switch provider {
+        case "Codex": return .grapheme
+        case "Shell": return .utf16
+        default: return .scalar
+        }
+    }
+
+    func count(_ s: Substring) -> Int {
+        switch self {
+        case .utf16: return s.utf16.count
+        case .scalar: return s.unicodeScalars.count
+        case .grapheme: return s.count
+        }
+    }
+}
+
 final class ProxyTextView: UITextView {
     var send: ((String) -> Void)?
+    var unit: DeleteUnit = .scalar
     private(set) var sent = ""
 
     /// What differs between the text the terminal has and the text here: backspaces for the part
     /// that changed, then the new tail. Comparison is by grapheme so a rewrite of "wanted" to "want"
-    /// lands on the right spot; erasures are counted in UTF-16 units, which is what PSReadLine and a
-    /// Node prompt delete per backspace (a combining mark or an emoji's halves each need their own).
-    static func delta(from old: String, to new: String) -> String {
+    /// lands on the right spot; erasures are counted in the unit the program deletes per backspace.
+    static func delta(from old: String, to new: String, unit: DeleteUnit = .scalar) -> String {
         let o = Array(old), n = Array(new)
         var p = 0
         while p < o.count && p < n.count && o[p] == n[p] { p += 1 }
-        let erase = String(o[p...]).utf16.count
+        let erase = unit.count(Substring(String(o[p...])))
         return String(repeating: "\u{7f}", count: erase) + String(n[p...])
     }
 
     func flush() {
         let now = text ?? ""
         guard now != sent else { return }
-        let bytes = Self.delta(from: sent, to: now)
+        let bytes = Self.delta(from: sent, to: now, unit: unit)
         sent = now
         if !bytes.isEmpty { send?(bytes) }
     }

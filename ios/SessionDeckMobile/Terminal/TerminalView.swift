@@ -27,7 +27,7 @@ struct TerminalScreen: View {
         .background(Color(red: 0.047, green: 0.047, blue: 0.047))
         .navigationTitle(entry.name.isEmpty ? entry.provider : entry.name)
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { gateway.markViewed(entry.sessionId); bridge.sessionId = entry.sessionId.isEmpty ? entry.hostId : entry.sessionId }
+        .onAppear { gateway.markViewed(entry.sessionId); bridge.sessionId = entry.sessionId.isEmpty ? entry.hostId : entry.sessionId; bridge.provider = entry.provider; bridge.proxy?.unit = DeleteUnit.forProvider(entry.provider) }
         .onDisappear { gateway.markViewed(entry.sessionId) }
         .onChange(of: bridge.connected) { _, connected in
             if connected, let z = LaunchOptions.zoom, !autoZoomed {
@@ -101,6 +101,7 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
         }
     }
     var sessionId = ""
+    var provider = ""
     private let zooms = ZoomStore()
     private var zoomObservation: NSKeyValueObservation?
     private var pinch: UIPinchGestureRecognizer?
