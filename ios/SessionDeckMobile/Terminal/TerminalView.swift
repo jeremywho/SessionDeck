@@ -201,12 +201,16 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
 
     /// WebKit sets an offset computed for its own refit scale after the zoom observer returns, which
     /// would leave the reader on other lines; their offset is put back once WebKit has had its turn.
+    private var keepGeneration = 0
+
     private func keepReadersPlace(_ reason: String, y: CGFloat) {
+        keepGeneration += 1
+        let generation = keepGeneration
         for delay in [0.0, 0.15, 0.3] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                guard let self, let scroll = self.webView?.scrollView, !self.userIsZooming else { return }
-                // A finger on the page wins: the reader is choosing a new place, not WebKit.
-                if scroll.isTracking || scroll.isDragging || scroll.isDecelerating { self.keepingUntil = .distantPast; return }
+                guard let self, generation == self.keepGeneration, let scroll = self.webView?.scrollView, !self.userIsZooming else { return }
+                // A finger on the page wins: the reader is choosing a new place, not WebKit, and the later restores stand down too.
+                if scroll.isTracking || scroll.isDragging || scroll.isDecelerating { self.keepGeneration += 1; self.keepingUntil = .distantPast; return }
                 let visible = scroll.bounds.height - scroll.adjustedContentInset.bottom
                 let target = min(y, max(0, scroll.contentSize.height - visible))
                 if abs(scroll.contentOffset.y - target) > 0.5 {

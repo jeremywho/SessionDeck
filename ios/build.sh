@@ -25,8 +25,8 @@ write_secrets() {
   local dir=SessionDeckMobile/Generated url="nil" key="nil" env="$HOME/.sessiondeck-mobile/relay.env" u k
   mkdir -p "$dir"
   if [[ -f "$env" ]]; then
-    u="$(grep -E '^RELAY_URL=' "$env" | head -1 | cut -d= -f2-)"
-    k="$(grep -E '^RELAY_KEY=' "$env" | head -1 | cut -d= -f2-)"
+    u="$(grep -E '^RELAY_URL=' "$env" | head -1 | cut -d= -f2- | tr -d '\r' | sed -e 's/[[:space:]]*$//' -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
+    k="$(grep -E '^RELAY_KEY=' "$env" | head -1 | cut -d= -f2- | tr -d '\r' | sed -e 's/[[:space:]]*$//' -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
     [[ -n "$u" ]] && url="\"$u\""
     [[ -n "$k" ]] && key="\"$k\""
   fi
