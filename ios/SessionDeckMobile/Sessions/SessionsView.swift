@@ -88,7 +88,11 @@ struct SessionsView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         Text(Self.buildLabel)
-                        Button(role: .destructive) { showForget = true } label: { Label("Forget this deck", systemImage: "xmark.circle") }
+                        if gateway.usesRelay {
+                            Text("via \(gateway.pairing?.host ?? "")")
+                        } else {
+                            Button(role: .destructive) { showForget = true } label: { Label("Forget this deck", systemImage: "xmark.circle") }
+                        }
                     } label: { Image(systemName: "ellipsis.circle") }
                 }
                 ToolbarItem(placement: .topBarLeading) {

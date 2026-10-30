@@ -1,4 +1,5 @@
 bin/
 obj/
+ios/SessionDeckMobile/Generated/
 *.user
 __pycache__/

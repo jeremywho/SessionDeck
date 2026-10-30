@@ -15,9 +15,26 @@ final class GatewayStore: ObservableObject {
     private let ledger = ViewedLedger()
 
     init() {
-        pairing = Keychain.loadPairing()
+        pairing = Self.relay() ?? Keychain.loadPairing()
         viewed = ledger.all()
         if pairing != nil { startEvents() }
+    }
+
+    /// The build's own way in: when `RelaySecrets` carry a URL and key, the deck is reached through the
+    /// relay with that key and the pairing screen never shows.
+    static func relay() -> Pairing? { relay(url: RelaySecrets.url, key: RelaySecrets.key) }
+
+    static func relay(url: String?, key: String?) -> Pairing? {
+        guard let url, let key, !key.isEmpty, let parsed = URL(string: url), let host = parsed.host, let scheme = parsed.scheme else { return nil }
+        return Pairing(host: host, port: parsed.port ?? (scheme == "https" ? 443 : 80), token: key, deviceId: "relay", scheme: scheme)
+    }
+
+    var usesRelay: Bool { pairing?.isRelay == true }
+
+    /// The deck said 401. A LAN pairing is gone for good; the relay key is a build-time fact, so the
+    /// app says so and keeps trying rather than dropping to a pairing screen that cannot help.
+    private func rejected(_ lanMessage: String) {
+        if usesRelay { connected = false; lastError = "Relay key rejected" } else { forgetPairing(); lastError = lanMessage }
     }
 
     // MARK: pairing
@@ -65,7 +82,7 @@ final class GatewayStore: ObservableObject {
         request.timeoutInterval = 8
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
-            if let http = response as? HTTPURLResponse, http.statusCode == 401 { forgetPairing(); lastError = "This phone is no longer paired."; return }
+            if let http = response as? HTTPURLResponse, http.statusCode == 401 { rejected("This phone is no longer paired."); return }
             sessions = try JSONDecoder().decode([CatalogEntry].self, from: data)
             lastError = nil
         } catch {
@@ -95,7 +112,7 @@ final class GatewayStore: ObservableObject {
         guard let request = authorized("sessions", method: "POST", body: body) else { throw GatewayError.badResponse }
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw GatewayError.badResponse }
-        if http.statusCode == 401 { forgetPairing(); throw GatewayError.status(401) }
+        if http.statusCode == 401 { rejected("This phone is no longer paired."); throw GatewayError.status(401) }
         guard http.statusCode == 201 else {
             if let err = try? JSONDecoder().decode([String: String].self, from: data), let text = err["error"] { throw GatewayError.message(text) }
             throw GatewayError.status(http.statusCode)
@@ -168,8 +185,7 @@ final class GatewayStore: ObservableObject {
             // A revoked phone is told at the handshake (401) or, if it was already connected, by close code 4401.
             let handshake = (task.response as? HTTPURLResponse)?.statusCode
             if task.closeCode.rawValue == 4401 || handshake == 401 {
-                forgetPairing()
-                lastError = "This phone was revoked from the deck."
+                rejected("This phone was revoked from the deck.")
             } else if !Task.isCancelled {
                 lastError = "Gateway unreachable at \(pairing.host):\(pairing.port)"
             }

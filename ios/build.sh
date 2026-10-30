@@ -19,8 +19,29 @@ unlock_keychain() {
   fi
 }
 
+# The relay's URL and key come from ~/.sessiondeck-mobile/relay.env on the build machine (RELAY_URL=, RELAY_KEY=),
+# never from the repository; without the file the app is the LAN app.
+write_secrets() {
+  local dir=SessionDeckMobile/Generated url="nil" key="nil" env="$HOME/.sessiondeck-mobile/relay.env" u k
+  mkdir -p "$dir"
+  if [[ -f "$env" ]]; then
+    u="$(grep -E '^RELAY_URL=' "$env" | head -1 | cut -d= -f2-)"
+    k="$(grep -E '^RELAY_KEY=' "$env" | head -1 | cut -d= -f2-)"
+    [[ -n "$u" ]] && url="\"$u\""
+    [[ -n "$k" ]] && key="\"$k\""
+  fi
+  cat > "$dir/RelaySecrets.swift" <<EOF
+enum RelaySecrets {
+    static let url: String? = $url
+    static let key: String? = $key
+}
+EOF
+  echo "relay secrets: $([[ $url == nil ]] && echo none || echo "$u")"
+}
+
 # The build carries its commit: CFBundleVersion is the commit count, SDCommit the short hash.
 generate() {
+  write_secrets
   xcodegen generate --quiet
   local sha count
   sha="$(git rev-parse --short HEAD)"; count="$(git rev-list --count HEAD)"

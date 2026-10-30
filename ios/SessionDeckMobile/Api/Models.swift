@@ -66,9 +66,30 @@ struct Pairing: Codable, Equatable {
     let port: Int
     let token: String
     let deviceId: String
+    /// `http` on the LAN, `https` through the relay. Pairings saved before the relay existed have none and mean `http`.
+    let scheme: String
 
-    var baseURL: URL { URL(string: "http://\(host):\(port)")! }
-    var wsBaseURL: URL { URL(string: "ws://\(host):\(port)")! }
+    init(host: String, port: Int, token: String, deviceId: String, scheme: String = "http") {
+        self.host = host
+        self.port = port
+        self.token = token
+        self.deviceId = deviceId
+        self.scheme = scheme
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        host = try c.decode(String.self, forKey: .host)
+        port = try c.decode(Int.self, forKey: .port)
+        token = try c.decode(String.self, forKey: .token)
+        deviceId = try c.decode(String.self, forKey: .deviceId)
+        scheme = try c.decodeIfPresent(String.self, forKey: .scheme) ?? "http"
+    }
+
+    var baseURL: URL { URL(string: "\(scheme)://\(host):\(port)")! }
+    var wsBaseURL: URL { URL(string: "\(scheme == "https" ? "wss" : "ws")://\(host):\(port)")! }
+    /// The relay pairing is baked into the build, not granted by the deck, so it is never forgotten on a 401.
+    var isRelay: Bool { deviceId == "relay" }
 
     /// `sessiondeck://pair?host=…&port=…&code=…` as the deck's QR encodes it.
     static func parseQR(_ text: String) -> (host: String, port: Int, code: String)? {
