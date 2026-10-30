@@ -7,6 +7,7 @@ struct TerminalScreen: View {
     @EnvironmentObject var gateway: GatewayStore
     let entry: CatalogEntry
     @StateObject private var bridge = TerminalBridge()
+    @StateObject private var speech = SpeechTyper()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -14,21 +15,34 @@ struct TerminalScreen: View {
                 TerminalWebView(bridge: bridge, pairing: pairing, hostId: entry.hostId)
                     .ignoresSafeArea(.container, edges: .bottom)
             }
-            if let note = bridge.note {
+            if let note = bridge.note ?? speech.problem {
                 Text(note).font(.caption).foregroundStyle(.orange).frame(maxWidth: .infinity).padding(4).background(Color(white: 0.12))
             }
+            if speech.listening {
+                HStack(spacing: 6) {
+                    Image(systemName: "waveform").foregroundStyle(.red)
+                    Text(speech.transcript.isEmpty ? "Listening…" : speech.transcript).lineLimit(2).font(.callout)
+                    Spacer()
+                }
+                .padding(.horizontal, 10).padding(.vertical, 6).frame(maxWidth: .infinity).background(Color(white: 0.12))
+            }
             TypingProxy(bridge: bridge).frame(height: 1)
-            InputBar(selecting: bridge.selecting, hasSelection: bridge.hasSelection, keyboardShown: bridge.keyboardShown,
+            InputBar(selecting: bridge.selecting, hasSelection: bridge.hasSelection, keyboardShown: bridge.keyboardShown, listening: speech.listening,
                      onKey: { key in bridge.resetTyping(); Task { await bridge.input(key.bytes) } },
                      onNewline: { bridge.resetTyping(); Task { await bridge.input("\\\r") } },
                      onPaste: paste, onCopy: copy, onSelect: { bridge.select(!bridge.selecting) },
-                     onKeyboard: { bridge.focus(!bridge.keyboardShown) })
+                     onKeyboard: { bridge.focus(!bridge.keyboardShown) },
+                     onMic: {
+                         // Speech appends at the cursor; whatever the keyboard had typed is left as it is.
+                         bridge.resetTyping()
+                         speech.toggle(unit: DeleteUnit.forProvider(entry.provider)) { bytes in Task { await bridge.input(bytes) } }
+                     })
         }
         .background(Color(red: 0.047, green: 0.047, blue: 0.047))
         .navigationTitle(entry.name.isEmpty ? entry.provider : entry.name)
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { gateway.markViewed(entry.sessionId); bridge.sessionId = entry.sessionId.isEmpty ? entry.hostId : entry.sessionId; bridge.provider = entry.provider; bridge.proxy?.unit = DeleteUnit.forProvider(entry.provider) }
-        .onDisappear { gateway.markViewed(entry.sessionId) }
+        .onDisappear { gateway.markViewed(entry.sessionId); speech.stop() }
         .onChange(of: bridge.connected) { _, connected in
             if connected, let z = LaunchOptions.zoom, !autoZoomed {
                 autoZoomed = true

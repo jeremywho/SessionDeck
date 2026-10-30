@@ -6,12 +6,14 @@ struct InputBar: View {
     let selecting: Bool
     let hasSelection: Bool
     let keyboardShown: Bool
+    let listening: Bool
     let onKey: (Key) -> Void
     let onNewline: () -> Void
     let onPaste: () -> Void
     let onCopy: () -> Void
     let onSelect: () -> Void
     let onKeyboard: () -> Void
+    let onMic: () -> Void
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -19,6 +21,10 @@ struct InputBar: View {
                 Button { onKeyboard() } label: { Image(systemName: keyboardShown ? "keyboard.chevron.compact.down" : "keyboard") }
                     .buttonStyle(.bordered)
                     .accessibilityLabel(keyboardShown ? "Hide keyboard" : "Show keyboard")
+                Button { onMic() } label: { Image(systemName: listening ? "mic.fill" : "mic") }
+                    .buttonStyle(.bordered)
+                    .tint(listening ? .red : nil)
+                    .accessibilityLabel(listening ? "Stop listening" : "Speak into the terminal")
                 Divider().frame(height: 20)
                 ForEach(Key.allCases) { key in
                     Button(key.label) { onKey(key) }
