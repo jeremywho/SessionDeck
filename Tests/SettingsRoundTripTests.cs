@@ -93,4 +93,38 @@ public class SettingsRoundTripTests
         var s = new Settings { PrCollapsedSections = { "Draft" } };
         Assert.Equal(new[] { "Draft" }, JsonSerializer.Deserialize<Settings>(JsonSerializer.Serialize(s))!.PrCollapsedSections);
     }
+
+    [Fact]
+    public void Relay_settings_round_trip()
+    {
+        var s = new Settings();
+        s.Gateway.Relay.Enabled = true;
+        s.Gateway.Relay.Key = new string('a', 32) + new string('b', 32);
+        s.Gateway.Relay.PublicUrl = "https://x.example";
+        var back = JsonSerializer.Deserialize<Settings>(JsonSerializer.Serialize(s))!;
+        Assert.True(back.Gateway.Relay.Enabled);
+        Assert.Equal(new string('a', 32) + new string('b', 32), back.Gateway.Relay.Key);
+        Assert.Equal("https://x.example", back.Gateway.Relay.PublicUrl);
+    }
+
+    [Fact]
+    public void Gateway_settings_keep_keys_this_build_does_not_know()
+    {
+        var s = JsonSerializer.Deserialize<Settings>("{\"Gateway\":{\"Enabled\":true,\"Port\":7420,\"Future\":{\"a\":1}}}")!;
+        using var doc = JsonDocument.Parse(JsonSerializer.Serialize(s));
+        Assert.Equal(1, doc.RootElement.GetProperty("Gateway").GetProperty("Future").GetProperty("a").GetInt32());
+    }
+
+    [Fact]
+    public void Relay_defaults_match_the_deployment()
+    {
+        var r = new RelaySettings();
+        Assert.False(r.Enabled);
+        Assert.Equal("0a.gg", r.SshHost);
+        Assert.Equal(2222, r.SshPort);
+        Assert.Equal("sdtunnel", r.SshUser);
+        Assert.Equal(8103, r.RemotePort);
+        Assert.Equal("https://sessiondeck.0a.gg", r.PublicUrl);
+        Assert.Equal("", r.Key);
+    }
 }

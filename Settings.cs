@@ -145,4 +145,25 @@ internal sealed class GatewaySettings
 {
     public bool Enabled { get; set; } = true;
     public int Port { get; set; } = 7420;
+    public RelaySettings Relay { get; set; } = new();
+
+    /// <summary>Kept as written for the same reason as <see cref="Settings.Unknown"/>: an older build saving this file must not drop what a newer one added here.</summary>
+    [System.Text.Json.Serialization.JsonExtensionData]
+    public Dictionary<string, JsonElement>? Unknown { get; set; }
+}
+
+/// <summary>
+/// The way out of the house: the gateway keeps an SSH reverse tunnel to a server of Jeremy's, Caddy
+/// there fronts it with TLS at <see cref="PublicUrl"/>, and the phone presents <see cref="Key"/> as
+/// its credential. The SSH identity lives next to the settings as <c>relay_ed25519</c>.
+/// </summary>
+internal sealed class RelaySettings
+{
+    public bool Enabled { get; set; } = false;
+    public string SshHost { get; set; } = "0a.gg";
+    public int SshPort { get; set; } = 2222;
+    public string SshUser { get; set; } = "sdtunnel";
+    public int RemotePort { get; set; } = 8103;
+    public string PublicUrl { get; set; } = "https://sessiondeck.0a.gg";
+    public string Key { get; set; } = "";
 }
