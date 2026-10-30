@@ -180,20 +180,27 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
         readerAtBottom = ScrollFollow.atBottom(offsetY: Double(scroll.contentOffset.y), maxY: Double(maxY), lastLandedY: lastLandedY.map(Double.init))
     }
 
-    private func afterZoomRestore(_ reason: String) {
-        switch ScrollFollow.decide(landing: Date() < landUntil, readerAtBottom: readerAtBottom) {
+    private struct ReaderPlace {
+        let y: CGFloat
+        let atBottom: Bool
+    }
+
+    /// Putting the zoom back moves the offset synchronously and would be sampled as the reader's own
+    /// scrolling, so the reader's place is taken before the zoom is touched and sampling pauses.
+    private func restoreZoom(_ saved: Double, on scroll: UIScrollView, _ reason: String) {
+        let place = ReaderPlace(y: readerOffsetY, atBottom: readerAtBottom)
+        keepingUntil = Date().addingTimeInterval(0.4)
+        setZoom(saved, on: scroll)
+        switch ScrollFollow.decide(landing: Date() < landUntil, readerAtBottom: place.atBottom) {
         case .land: scrollToBottom(reason + ", landing")
         case .follow: scrollToBottom(reason + ", reader was at the bottom", resetViewport: false)
-        case .keep: keepReadersPlace(reason)
+        case .keep: keepReadersPlace(reason, y: place.y)
         }
     }
 
     /// WebKit sets an offset computed for its own refit scale after the zoom observer returns, which
-    /// would leave the reader on other lines; their offset is put back once WebKit has had its turn,
-    /// and the reader's place is not re-sampled from WebKit's values in the meantime.
-    private func keepReadersPlace(_ reason: String) {
-        let y = readerOffsetY
-        keepingUntil = Date().addingTimeInterval(0.4)
+    /// would leave the reader on other lines; their offset is put back once WebKit has had its turn.
+    private func keepReadersPlace(_ reason: String, y: CGFloat) {
         for delay in [0.0, 0.15, 0.3] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 guard let self, let scroll = self.webView?.scrollView, !self.userIsZooming else { return }
@@ -236,8 +243,7 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
                 if Date() < self.restoreUntil {
                     // WebKit refitting after the page's viewport settled or the view changed size: put the user's zoom back.
                     LaunchOptions.log(String(format: "zoom refit %.3f -> restoring %.3f", scale, saved))
-                    self.setZoom(saved, on: scrollView)
-                    self.afterZoomRestore("refit undone")
+                    self.restoreZoom(saved, on: scrollView, "refit undone")
                 } else {
                     LaunchOptions.log(String(format: "zoom changed to %.3f outside a restore window (saved %.3f)", scale, saved))
                 }
@@ -285,8 +291,7 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
                 guard let saved = self.zooms.zoom(for: self.sessionId) else { LaunchOptions.log("zoom none saved"); return }
                 guard abs(Double(scroll.zoomScale) - saved) > 0.01 else { return }
                 LaunchOptions.log(String(format: "zoom restore %.3f (was %.3f)", saved, Double(scroll.zoomScale)))
-                self.setZoom(saved, on: scroll)
-                self.afterZoomRestore("zoom restored")
+                self.restoreZoom(saved, on: scroll, "zoom restored")
             }
         }
     }
