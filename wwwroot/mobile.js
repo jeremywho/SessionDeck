@@ -172,13 +172,38 @@
   // textarea never raises it. A tap on the terminal asks the app for the keyboard.
   term.textarea.setAttribute('inputmode', 'none');
   term.textarea.setAttribute('readonly', 'readonly');
+  // A short, still, one-finger touch is a tap: on a link it opens the link, elsewhere it toggles the
+  // keyboard. A pinch has two fingers and a scroll moves, so neither counts. Links are found in the
+  // buffer text under the finger rather than through xterm's hover-based link addon, which a touch
+  // never triggers.
+  const URL_RE = /https?:\/\/[^\s<>"'`)\]]+/g;
+  function linkAt(touch) {
+    const cell = term._core._renderService.dimensions.css.cell;
+    const rect = term.element.getBoundingClientRect();
+    const col = Math.floor((touch.clientX - rect.left) / cell.width);
+    const row = Math.floor((touch.clientY - rect.top) / cell.height);
+    if (row < 0 || row >= term.rows) return null;
+    const line = term.buffer.active.getLine(term.buffer.active.viewportY + row);
+    if (!line) return null;
+    const text = line.translateToString(false);
+    let m;
+    while ((m = URL_RE.exec(text)) !== null) {
+      const end = m.index + m[0].length;
+      if (col >= m.index && col < end) { URL_RE.lastIndex = 0; return m[0].replace(/[.,;:!?]+$/, ''); }
+    }
+    return null;
+  }
   let tapStart = null;
-  el.addEventListener('touchstart', ev => { if (!selecting && ev.touches.length === 1) tapStart = { x: ev.touches[0].clientX, y: ev.touches[0].clientY, t: Date.now() }; }, { passive: true });
+  el.addEventListener('touchstart', ev => { tapStart = (!selecting && ev.touches.length === 1) ? { x: ev.touches[0].clientX, y: ev.touches[0].clientY, t: Date.now() } : null; }, { passive: true });
+  el.addEventListener('touchmove', () => { if (tapStart && event.touches.length > 1) tapStart = null; }, { passive: true });
   el.addEventListener('touchend', ev => {
-    if (!tapStart || selecting) { tapStart = null; return; }
+    if (!tapStart || selecting || ev.touches.length > 0) { tapStart = null; return; }
     const t = ev.changedTouches[0];
     const moved = Math.hypot(t.clientX - tapStart.x, t.clientY - tapStart.y);
-    if (moved < 12 && Date.now() - tapStart.t < 400) post({ type: 'tap' });
+    if (moved < 12 && Date.now() - tapStart.t < 400) {
+      const uri = linkAt(t);
+      post(uri ? { type: 'open', uri } : { type: 'tap' });
+    }
     tapStart = null;
   });
 

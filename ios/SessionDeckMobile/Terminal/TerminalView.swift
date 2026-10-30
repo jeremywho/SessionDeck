@@ -51,6 +51,7 @@ struct TerminalScreen: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { gateway.markViewed(entry.sessionId); bridge.sessionId = entry.sessionId.isEmpty ? entry.hostId : entry.sessionId; bridge.provider = entry.provider; bridge.proxy?.unit = DeleteUnit.forProvider(entry.provider) }
         .onDisappear { gateway.markViewed(entry.sessionId); speech.stop(); bridge.manualInput = nil; speech.onStopped = nil }
+        .sheet(item: $bridge.linkToOpen) { url in SafariView(url: url).ignoresSafeArea() }
         .onChange(of: bridge.connected) { _, connected in
             if connected, let z = LaunchOptions.zoom, !autoZoomed {
                 autoZoomed = true
@@ -94,6 +95,7 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
     @Published var hasSelection = false
     @Published var connected = false
     @Published var keyboardShown = false
+    @Published var linkToOpen: URL?
     weak var webView: WKWebView?
     weak var proxy: ProxyTextView?
 
@@ -256,7 +258,8 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
         case "selecting": selecting = body["on"] as? Bool ?? false
         case "size": applySavedZoom()
         case "replayed": DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.scrollToBottom() }
-        case "tap": if !selecting { focus(true) }
+        case "tap": if !selecting { focus(!keyboardShown) }
+        case "open": if let s = body["uri"] as? String, let url = URL(string: s), ["http", "https"].contains(url.scheme ?? "") { linkToOpen = url }
         case "connected": note = nil; connected = true; LaunchOptions.log("terminal connected")
         case "disconnected": note = "Reconnecting…"; connected = false
         case "revoked": note = "This phone was revoked from the deck."
