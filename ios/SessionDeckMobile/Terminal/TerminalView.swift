@@ -56,6 +56,7 @@ struct TerminalScreen: View {
                 autoZoomed = true
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { bridge.testPinch(to: z) }
                 if LaunchOptions.focus { DispatchQueue.main.asyncAfter(deadline: .now() + 6.0) { LaunchOptions.log("raising keyboard"); bridge.focus(true) } }
+                if LaunchOptions.scrollTest { DispatchQueue.main.asyncAfter(deadline: .now() + 6.0) { bridge.scrollTest() } }
             }
             guard connected, !autoSent, !LaunchOptions.sends.isEmpty else { return }
             autoSent = true
@@ -131,13 +132,14 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
     }
 
     func keyboardCameUp() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.scrollToBottom() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.scrollToBottom("keyboard up") }
     }
 
     /// The newest output is what matters: xterm's viewport goes to its end and the page scrolls so the
     /// last row with text on it sits at the bottom of the screen, not xterm's blank spare rows.
-    func scrollToBottom() {
+    func scrollToBottom(_ reason: String = "unspecified") {
         guard let webView else { return }
+        LaunchOptions.log("scroll to bottom (\(reason))")
         webView.evaluateJavaScript("window.sdScrollToBottom(); window.sdTextBottom()") { [weak self] result, _ in
             guard let self, let webView = self.webView else { return }
             let scroll = webView.scrollView
@@ -178,7 +180,7 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
                     // WebKit refitting after the page's viewport settled or the view changed size: put the user's zoom back.
                     LaunchOptions.log(String(format: "zoom refit %.3f -> restoring %.3f", scale, saved))
                     self.setZoom(saved, on: scrollView)
-                    self.scrollToBottom()
+                    self.scrollToBottom("refit undone")
                 } else {
                     LaunchOptions.log(String(format: "zoom changed to %.3f outside a restore window (saved %.3f)", scale, saved))
                 }
@@ -227,7 +229,26 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
                     LaunchOptions.log(String(format: "zoom restore %.3f (was %.3f)", saved, Double(scroll.zoomScale)))
                     self.setZoom(saved, on: scroll)
                 }
-                self.scrollToBottom()
+                self.scrollToBottom("zoom restore pass")
+            }
+        }
+    }
+
+    /// Debug driving: raise the keyboard, scroll the page to its top as a reader would, lower the
+    /// keyboard, and report where the page sits for the next few seconds. A reader's place must survive.
+    func scrollTest() {
+        func at(_ t: Double, _ work: @escaping () -> Void) { DispatchQueue.main.asyncAfter(deadline: .now() + t, execute: work) }
+        at(0) { [weak self] in LaunchOptions.log("scroll-test: raising keyboard"); self?.focus(true) }
+        at(3.5) { [weak self] in
+            guard let scroll = self?.webView?.scrollView else { return }
+            scroll.setContentOffset(CGPoint(x: scroll.contentOffset.x, y: 0), animated: false)
+            LaunchOptions.log(String(format: "scroll-test: reader scrolled to top (content %.0f, visible %.0f)", scroll.contentSize.height, scroll.bounds.height))
+        }
+        at(4.0) { [weak self] in LaunchOptions.log("scroll-test: lowering keyboard"); self?.focus(false) }
+        for i in 1...10 {
+            at(4.0 + Double(i) * 0.5) { [weak self] in
+                guard let scroll = self?.webView?.scrollView else { return }
+                LaunchOptions.log(String(format: "scroll-test: t+%.1fs page y=%.0f zoom=%.3f", Double(i) * 0.5, scroll.contentOffset.y, scroll.zoomScale))
             }
         }
     }
@@ -278,7 +299,7 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
         case "selection": hasSelection = body["has"] as? Bool ?? false
         case "selecting": selecting = body["on"] as? Bool ?? false
         case "size": applySavedZoom()
-        case "replayed": DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.scrollToBottom() }
+        case "replayed": DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.scrollToBottom("replay finished") }
         case "tap": if !selecting { toggleKeyboard() }
         case "open": if let s = body["uri"] as? String, let url = URL(string: s), ["http", "https"].contains(url.scheme ?? "") { UIApplication.shared.open(url) }
         case "connected": note = nil; connected = true; LaunchOptions.log("terminal connected")

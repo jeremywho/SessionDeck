@@ -19,6 +19,14 @@ enum LaunchOptions {
 
     static var open: String? { value("--open") }
     static var zoom: Double? { value("--zoom").flatMap(Double.init) }
+    static var scrollTest: Bool {
+        #if DEBUG
+        return arguments.contains("--scroll-test")
+        #else
+        return false
+        #endif
+    }
+
     static var focus: Bool {
         #if DEBUG
         return arguments.contains("--focus")
