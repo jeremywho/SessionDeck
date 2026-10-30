@@ -250,24 +250,20 @@ public class GatewayServerTests : IAsyncDisposable
             new List<CatalogEntry> { _catalog[0] },
             new List<CatalogEntry> { _catalog[0] },
             new List<CatalogEntry> { _catalog[0] with { Name = "beta" } },
+            new List<CatalogEntry> { _catalog[0] with { Name = "beta" } },
         });
-        var times = new List<DateTime>();
+        var waits = new List<TimeSpan>();
         int pushes = 0, subscribers = 1;
-        var loop = new CatalogLoop(() => { times.Add(DateTime.UtcNow); return builds.Count > 0 ? builds.Dequeue() : new List<CatalogEntry> { _catalog[0] with { Name = "beta" } }; },
-                                   _ => pushes++, () => subscribers, TimeSpan.FromMilliseconds(20), TimeSpan.FromMilliseconds(300));
         using var cts = new CancellationTokenSource();
-        var run = loop.RunAsync(cts.Token);
-        var deadline = DateTime.UtcNow.AddSeconds(5);
-        while (times.Count < 3 && DateTime.UtcNow < deadline) await Task.Delay(10);
+        var busy = TimeSpan.FromSeconds(5);
+        var idle = TimeSpan.FromSeconds(30);
+        var loop = new CatalogLoop(
+            () => builds.Count > 0 ? builds.Dequeue() : new List<CatalogEntry> { _catalog[0] with { Name = "beta" } },
+            _ => pushes++, () => subscribers, busy, idle,
+            (wait, _) => { waits.Add(wait); if (waits.Count == 2) subscribers = 0; if (waits.Count == 4) cts.Cancel(); return Task.CompletedTask; });
+        await loop.RunAsync(cts.Token);
         Assert.Equal(2, pushes);
-        subscribers = 0;
-        await Task.Delay(100);
-        int before = times.Count;
-        await Task.Delay(120);
-        Assert.Equal(before, times.Count);
-        await Task.Delay(300);
-        Assert.True(times.Count > before);
-        cts.Cancel();
-        await run;
+        Assert.Equal(new[] { busy, busy, idle, idle }, waits);
+        Assert.Equal("beta", loop.Current.Single().Name);
     }
 }
