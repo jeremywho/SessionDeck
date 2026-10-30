@@ -20,7 +20,11 @@ time. No pairing flow is needed for the remote path.
   behaviour as on the LAN (tap to type, key bar, dictation, zoom, links, start new sessions, load header).
 - Nothing new listens on the home network's edge. Only an outbound SSH connection leaves Talon.
 - A stranger who finds `sessiondeck.0a.gg` gets 401/404 for everything useful and cannot pair.
-- The remote path survives Talon reboots, VPS reboots, and Wi-Fi drops without anyone touching it.
+- The remote path survives Talon reboots, VPS reboots, and Wi-Fi drops without anyone touching it,
+  within the lifetime of Jeremy's Windows session: the deck, the hosts and therefore the sessions all
+  live in that interactive session, so after a reboot nothing exists to show until Jeremy logs in at
+  Talon (no auto-logon there, and turning it on is a machine security change outside this work).
+  The relay comes back with the deck, which the HKCU Run entry starts at login.
 
 ## Non-goals
 
@@ -82,14 +86,25 @@ Everything the gateway serves today is served unchanged through the tunnel: `/se
   `PublicUrl` ("https://sessiondeck.0a.gg"), `Key` (the relay key, 64 hex chars). The SSH private
   key lives at `%APPDATA%\SessionDeck\relay_ed25519` (created by `ssh-keygen` during deployment,
   never in the repo); known hosts at `%APPDATA%\SessionDeck\relay_known_hosts`.
+  `GatewaySettings` gets a `[JsonExtensionData]` bag like the outer `Settings` has, so a build that
+  does not know `Relay` (the Updater's rollback to `.old` relaunches v0.5.54, which rewrites
+  `settings.json` on launch) carries it through instead of dropping it. One-time hazard: a rollback
+  to a build older than this change loses the `Relay` object; re-enter the key in Settings (the ssh
+  key file and the Mac's `relay.env` survive, so no app rebuild).
 - New `Gateway/RelayTunnel.cs`, owned by the gateway process (not the deck UI), starts and babysits:
   ```
-  ssh -N -T -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=20 -o ServerAliveCountMax=3
+  ssh -F none -N -T -o BatchMode=yes -o IdentitiesOnly=yes -o ExitOnForwardFailure=yes
+      -o ServerAliveInterval=20 -o ServerAliveCountMax=3
       -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=<datadir>\relay_known_hosts
       -i <datadir>\relay_ed25519 -p 2222 -R 127.0.0.1:8103:127.0.0.1:<gateway port> sdtunnel@0a.gg
   ```
-  Windows' bundled OpenSSH client (`C:\Windows\System32\OpenSSH\ssh.exe`, 10.3 on Talon). Restart
-  on exit with backoff 2 s doubling to 60 s; the last stderr line is kept as the failure reason.
+  Windows' bundled OpenSSH client (`C:\Windows\System32\OpenSSH\ssh.exe`, 10.3 on Talon). `-F none`
+  and `IdentitiesOnly` keep Jeremy's own `~/.ssh/config` entry for `0a.gg` and his agent keys out
+  of it: every wrong key offered is a failed publickey attempt in sshd's log, and fail2ban watches
+  that log. Exits are sorted by stderr: network and forward failures restart with backoff 2 s
+  doubling to 60 s; `Permission denied`, host-key mismatch and a missing key file are terminal
+  (`down: key rejected` and so on) with no retry until the relay settings change or the gateway
+  restarts, so a stale key can never get Talon's home IP banned from the VPS.
   The child is placed in a job object that kills it when the gateway dies (same mechanism
   `Host/ConPty.cs` uses for ptys), so a replaced gateway never leaves an orphan holding 8103.
 - Reachability is measured end to end, not inferred from the child being alive: every 30 s the
@@ -98,7 +113,11 @@ Everything the gateway serves today is served unchanged through the tunnel: `/se
   `GET /health` is a new unauthenticated route returning 204 (it exposes nothing).
 - Auth: a bearer token equal to `Relay.Key` (constant-time compare) authenticates as a synthetic
   device `{Id: "relay", Name: "Relay"}` that is not stored in `devices.json` and cannot be revoked
-  from the devices list (rotate the key instead). Everything else about devices is unchanged.
+  from the devices list (rotate the key instead). The two places that consult the device list for
+  live sockets, `StillPaired` and `Revoke`, treat the relay device as always paired, so its sockets
+  are not closed on connect and `DELETE /devices/relay` is a 404. Everything else is unchanged.
+- The Caddyfile has no access logging (checked 2026-10-30), so the `?token=` query on the sockets is
+  not written to disk on the VPS; keep it that way for this vhost.
 - Requests that arrived through Caddy (`X-Forwarded-For` present) get 404 for `POST /pair` and for
   `/admin/*`, so the public URL has no guessable pairing code and no admin surface. LAN clients are
   unaffected.
@@ -106,7 +125,7 @@ Everything the gateway serves today is served unchanged through the tunnel: `/se
   Caddy the page's origin is `https://sessiondeck.0a.gg`, so the expected scheme comes from
   `X-Forwarded-Proto` when present, else `http`.
 - Settings window, Phone section: a "Remote" group with the public URL, a password box for the relay
-  key with a "Generate" button (32 random bytes, hex), an on/off toggle, and a status line fed from
+  key with "Generate" (32 random bytes, hex) and "Copy" buttons, an on/off toggle, and a status line fed from
   `gateway.json` (`connected since …` / `down: reason`). Saving applies like other gateway changes
   (the gateway restarts).
 
