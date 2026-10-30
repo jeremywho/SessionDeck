@@ -136,6 +136,8 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
     private var landUntil = Date.distantPast
     private var lastLandedY: CGFloat?
     private var readerAtBottom = true
+    private var readerOffsetY: CGFloat = 0
+    private var keepingUntil = Date.distantPast
     private var offsetObservation: NSKeyValueObservation?
 
     /// A session opening or the keyboard rising lands the page at the newest output, and for the next
@@ -171,9 +173,10 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
     /// WebKit's refit moves the offset on its own, and that is not the reader scrolling.
     private func noteOffset(_ scroll: UIScrollView) {
         let saved = zooms.zoom(for: sessionId) ?? Double(scroll.zoomScale)
-        guard abs(Double(scroll.zoomScale) - saved) < 0.01, !userIsZooming else { return }
+        guard abs(Double(scroll.zoomScale) - saved) < 0.01, !userIsZooming, Date() >= keepingUntil else { return }
         let visible = scroll.bounds.height - scroll.adjustedContentInset.bottom
         let maxY = max(0, scroll.contentSize.height - visible)
+        readerOffsetY = scroll.contentOffset.y
         readerAtBottom = ScrollFollow.atBottom(offsetY: Double(scroll.contentOffset.y), maxY: Double(maxY), lastLandedY: lastLandedY.map(Double.init))
     }
 
@@ -181,7 +184,26 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
         switch ScrollFollow.decide(landing: Date() < landUntil, readerAtBottom: readerAtBottom) {
         case .land: scrollToBottom(reason + ", landing")
         case .follow: scrollToBottom(reason + ", reader was at the bottom", resetViewport: false)
-        case .keep: LaunchOptions.log("\(reason): the reader scrolled up, keeping their place")
+        case .keep: keepReadersPlace(reason)
+        }
+    }
+
+    /// WebKit sets an offset computed for its own refit scale after the zoom observer returns, which
+    /// would leave the reader on other lines; their offset is put back once WebKit has had its turn,
+    /// and the reader's place is not re-sampled from WebKit's values in the meantime.
+    private func keepReadersPlace(_ reason: String) {
+        let y = readerOffsetY
+        keepingUntil = Date().addingTimeInterval(0.4)
+        for delay in [0.0, 0.15, 0.3] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self, let scroll = self.webView?.scrollView, !self.userIsZooming else { return }
+                let visible = scroll.bounds.height - scroll.adjustedContentInset.bottom
+                let target = min(y, max(0, scroll.contentSize.height - visible))
+                if abs(scroll.contentOffset.y - target) > 0.5 {
+                    LaunchOptions.log(String(format: "%@: the reader scrolled up, putting y=%.0f back (WebKit left it at %.0f)", reason, target, scroll.contentOffset.y))
+                    scroll.setContentOffset(CGPoint(x: scroll.contentOffset.x, y: target), animated: false)
+                }
+            }
         }
     }
     var sessionId = ""
@@ -273,11 +295,16 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
     /// keyboard, and report where the page sits for the next few seconds. A reader's place must survive.
     func scrollTest() {
         func at(_ t: Double, _ work: @escaping () -> Void) { DispatchQueue.main.asyncAfter(deadline: .now() + t, execute: work) }
-        at(0) { [weak self] in LaunchOptions.log("scroll-test: raising keyboard"); self?.focus(true) }
+        at(0) { [weak self] in
+            guard let scroll = self?.webView?.scrollView else { return }
+            let maxY = max(0, scroll.contentSize.height - scroll.bounds.height)
+            LaunchOptions.log(String(format: "scroll-test: after open page y=%.0f of max %.0f (landed at %@)", scroll.contentOffset.y, maxY, self?.lastLandedY.map { String(format: "%.0f", $0) } ?? "nothing"))
+        }
+        at(0.1) { [weak self] in LaunchOptions.log("scroll-test: raising keyboard"); self?.focus(true) }
         at(3.5) { [weak self] in
             guard let scroll = self?.webView?.scrollView else { return }
-            scroll.setContentOffset(CGPoint(x: scroll.contentOffset.x, y: 0), animated: false)
-            LaunchOptions.log(String(format: "scroll-test: reader scrolled to top (content %.0f, visible %.0f)", scroll.contentSize.height, scroll.bounds.height))
+            scroll.setContentOffset(CGPoint(x: scroll.contentOffset.x, y: 1000), animated: false)
+            LaunchOptions.log(String(format: "scroll-test: reader scrolled up to y=1000 (content %.0f, visible %.0f)", scroll.contentSize.height, scroll.bounds.height))
         }
         at(4.0) { [weak self] in LaunchOptions.log("scroll-test: lowering keyboard"); self?.focus(false) }
         for i in 1...10 {
