@@ -15,11 +15,13 @@ internal sealed class MachineLoadMonitor
 {
     readonly MachineLoadSampler _sampler = new();
     readonly TimeSpan _every;
+    readonly Func<int> _gpu;
     volatile MachineLoad? _latest;
 
-    public MachineLoadMonitor(TimeSpan? every = null)
+    public MachineLoadMonitor(TimeSpan? every = null, Func<int>? gpu = null)
     {
         _every = every ?? TimeSpan.FromSeconds(5);
+        _gpu = gpu ?? _sampler.SampleGpu;
         new Thread(Run) { IsBackground = true, Name = "machine-load" }.Start();
     }
 
@@ -36,7 +38,7 @@ internal sealed class MachineLoadMonitor
             try
             {
                 _latest = _sampler.SampleCpuAndMemory(gpu);
-                gpu = _sampler.SampleGpu();
+                gpu = _gpu();
                 _latest = _latest with { GpuPercent = gpu };
             }
             catch (Exception ex) { App.LogError(ex); }

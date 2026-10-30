@@ -68,11 +68,17 @@ public class SessionStarterTests
     [Fact]
     public void The_monitor_publishes_cpu_and_memory_before_the_gpu_counters_have_opened()
     {
-        var monitor = new MachineLoadMonitor(TimeSpan.FromMilliseconds(100));
+        using var gpuGate = new ManualResetEventSlim(false);
+        var monitor = new MachineLoadMonitor(TimeSpan.FromMilliseconds(100), gpu: () => { gpuGate.Wait(); return 42; });
         var deadline = DateTime.UtcNow.AddSeconds(10);
         while (monitor.Latest == null && DateTime.UtcNow < deadline) Thread.Sleep(20);
         Assert.NotNull(monitor.Latest);
         Assert.True(monitor.Latest!.MemoryTotalGb > 1);
-        Assert.Matches(@"^-?\d+/-?\d+/-?\d+$", monitor.Signature);
+        Assert.Equal(-1, monitor.Latest.GpuPercent);
+        Assert.Matches(@"^-?\d+/-?\d+/-1$", monitor.Signature);
+        gpuGate.Set();
+        deadline = DateTime.UtcNow.AddSeconds(10);
+        while (monitor.Latest?.GpuPercent != 42 && DateTime.UtcNow < deadline) Thread.Sleep(20);
+        Assert.Equal(42, monitor.Latest?.GpuPercent);
     }
 }
