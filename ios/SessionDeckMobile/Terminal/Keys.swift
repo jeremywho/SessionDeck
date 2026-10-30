@@ -2,7 +2,8 @@ import Foundation
 
 /// The few keys a prompt needs that the iOS keyboard does not have, as the bytes a terminal expects.
 enum Key: CaseIterable, Identifiable {
-    case esc, tab, shiftTab, up, down, left, right, ctrlC, enter
+    // Enter first: after dictating, it sits right beside the mic.
+    case enter, esc, tab, shiftTab, up, down, left, right, ctrlC
 
     var id: Self { self }
 
