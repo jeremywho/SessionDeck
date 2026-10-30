@@ -181,6 +181,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
 
     readonly DispatcherTimer _layoutSave = new() { Interval = TimeSpan.FromMilliseconds(500) };
     bool _deckRestored;
+    readonly DateTime _openedAtUtc = DateTime.UtcNow;
     readonly DispatcherTimer _saveSoon = new() { Interval = TimeSpan.FromMilliseconds(600) };
     string _sessionMap = "";
 
@@ -645,13 +646,13 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     {
         var dlg = new NewSessionWindow(this, _app.Settings, initial);
         if (dlg.ShowDialog() != true || dlg.Result is not { } r) return;
-        if (r.Provider == SessionProvider.Codex)
-            SpawnIntoDeck("", SessionProvider.Codex, HostManager.NewCodexCommand(_app.Settings.CodexFlags, r.Model, r.Effort), r.Cwd, null, r.Prompt);
-        else
+        var plan = SessionStarter.Plan(new StartRequest(r.Provider.ToString(), r.Cwd, r.Name ?? "", r.Prompt ?? "", r.Model ?? "", r.Effort ?? ""), _app.Settings);
+        if (plan == null) { LiveLabel.Text = "That folder does not exist."; return; }
+        try { Deck.Open(SessionStarter.Start(plan)); }
+        catch (Exception ex)
         {
-            string sessionId = Guid.NewGuid().ToString();
-            SpawnIntoDeck(sessionId, SessionProvider.Claude,
-                HostManager.NewClaudeCommand(sessionId, r.Name, _app.Settings.ResumeFlags, r.Model, r.Effort), r.Cwd, r.Name, r.Prompt);
+            App.LogError(ex);
+            LiveLabel.Text = "Could not start the session host: " + ex.Message;
         }
     }
 
@@ -990,6 +991,9 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
                     _rowsById[h.Id] = row;
                     Rows.Add(row);
                     added++;
+                    // Started elsewhere (a phone through the gateway) while this deck runs: give it a tab in the
+                    // focused column, without stealing the one in front.
+                    if (_deckRestored && !h.HasExited && h.StartedAt > _openedAtUtc && Deck.FindByHost(h.Id) == null) Deck.Open(h, activate: false);
                 }
             }
             for (int i = Rows.Count - 1; i >= 0; i--)

@@ -31,9 +31,28 @@ struct CatalogEntry: Codable, Identifiable, Hashable {
     }
 }
 
+struct MachineLoad: Codable, Equatable {
+    let cpuPercent: Int
+    let memoryPercent: Int
+    let memoryUsedGb: Double
+    let memoryTotalGb: Double
+    let gpuPercent: Int
+}
+
 struct EventsFrame: Codable {
     let type: String
     let sessions: [CatalogEntry]
+    let machine: MachineLoad?
+}
+
+struct Meta: Codable {
+    let folders: [String]
+    let providers: [String]
+    let machine: MachineLoad?
+}
+
+struct StartResponse: Codable {
+    let hostId: String
 }
 
 struct PairResponse: Codable {

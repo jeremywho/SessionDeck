@@ -33,6 +33,13 @@ internal sealed class GatewayServer : IAsyncDisposable
     readonly Func<string, Stream?> _embedded;
     readonly string _adminToken;
     readonly ConcurrentDictionary<Connection, byte> _connections = new();
+
+    /// <summary>Starts a session for a phone and returns its host id; null when the request cannot be honoured. Set by the process.</summary>
+    public Func<StartRequest, string?>? StartSession;
+    /// <summary>Folders a phone may start a session in.</summary>
+    public Func<List<string>> Folders = () => new();
+    /// <summary>The latest machine load sample, or null before the first.</summary>
+    public Func<MachineLoad?> Machine = () => null;
     readonly CancellationTokenSource _stop = new();
     TcpListener? _listener;
     Task? _accept;
@@ -90,7 +97,7 @@ internal sealed class GatewayServer : IAsyncDisposable
         return removed;
     }
 
-    string EventsFrame() => JsonSerializer.Serialize(new { type = "sessions", sessions = _catalog() }, Json);
+    string EventsFrame() => JsonSerializer.Serialize(new { type = "sessions", sessions = _catalog(), machine = Machine() }, Json);
 
     async Task AcceptLoop()
     {
@@ -157,6 +164,12 @@ internal sealed class GatewayServer : IAsyncDisposable
             case ("GET", "/sessions"):
                 await MiniHttp.WriteJson(s, 200, "OK", SessionCatalog.ToJson(_catalog()));
                 return;
+            case ("GET", "/meta"):
+                await MiniHttp.WriteJson(s, 200, "OK", JsonSerializer.Serialize(new { folders = Folders(), providers = SessionStarter.Providers, machine = Machine() }, Json));
+                return;
+            case ("POST", "/sessions"):
+                await Start(s, r);
+                return;
             case ("GET", "/devices"):
                 await MiniHttp.WriteJson(s, 200, "OK", JsonSerializer.Serialize(_devices.Devices.Select(d => new { d.Id, d.Name, d.PairedAtUtc, d.LastSeenUtc }), Json));
                 return;
@@ -169,6 +182,18 @@ internal sealed class GatewayServer : IAsyncDisposable
             return;
         }
         await MiniHttp.WriteStatus(s, 404, "Not Found");
+    }
+
+    async Task Start(NetworkStream s, MiniHttp.Request r)
+    {
+        if (StartSession == null) { await MiniHttp.WriteJson(s, 501, "Not Implemented", "{\"error\":\"starting sessions is off\"}"); return; }
+        var body = await MiniHttp.ReadBody(s, r, MaxBody);
+        StartRequest? request = null;
+        try { request = JsonSerializer.Deserialize<StartRequest>(body, Json); } catch (JsonException) { }
+        if (request == null || string.IsNullOrWhiteSpace(request.Provider)) { await MiniHttp.WriteJson(s, 400, "Bad Request", "{\"error\":\"provider and cwd are required\"}"); return; }
+        string? hostId = StartSession(request);
+        if (hostId == null) { await MiniHttp.WriteJson(s, 400, "Bad Request", "{\"error\":\"unknown provider or folder\"}"); return; }
+        await MiniHttp.WriteJson(s, 201, "Created", JsonSerializer.Serialize(new { hostId }, Json));
     }
 
     async Task Pair(NetworkStream s, MiniHttp.Request r, DateTime now)

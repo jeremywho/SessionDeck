@@ -6,6 +6,7 @@ import Combine
 final class GatewayStore: ObservableObject {
     @Published private(set) var pairing: Pairing?
     @Published private(set) var sessions: [CatalogEntry] = []
+    @Published private(set) var machine: MachineLoad?
     @Published private(set) var connected = false
     @Published private(set) var lastError: String?
     @Published private(set) var viewed: [String: Date]
@@ -72,6 +73,36 @@ final class GatewayStore: ObservableObject {
         }
     }
 
+    private func authorized(_ path: String, method: String = "GET", body: Data? = nil) -> URLRequest? {
+        guard let pairing else { return nil }
+        var request = URLRequest(url: pairing.baseURL.appendingPathComponent(path))
+        request.httpMethod = method
+        request.setValue("Bearer \(pairing.token)", forHTTPHeaderField: "Authorization")
+        if let body { request.httpBody = body; request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
+        request.timeoutInterval = 10
+        return request
+    }
+
+    func meta() async -> Meta? {
+        guard let request = authorized("meta") else { return nil }
+        guard let (data, _) = try? await URLSession.shared.data(for: request) else { return nil }
+        return try? JSONDecoder().decode(Meta.self, from: data)
+    }
+
+    /// Start a session on the deck; returns the new host id, which the list will show once the gateway sees it.
+    func startSession(provider: String, cwd: String, name: String, prompt: String) async throws -> String {
+        let body = try JSONEncoder().encode(["provider": provider, "cwd": cwd, "name": name, "prompt": prompt])
+        guard let request = authorized("sessions", method: "POST", body: body) else { throw GatewayError.badResponse }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw GatewayError.badResponse }
+        if http.statusCode == 401 { forgetPairing(); throw GatewayError.status(401) }
+        guard http.statusCode == 201 else {
+            if let err = try? JSONDecoder().decode([String: String].self, from: data), let text = err["error"] { throw GatewayError.message(text) }
+            throw GatewayError.status(http.statusCode)
+        }
+        return try JSONDecoder().decode(StartResponse.self, from: data).hostId
+    }
+
     func markViewed(_ sessionId: String) {
         guard !sessionId.isEmpty else { return }
         let now = Date()
@@ -129,6 +160,7 @@ final class GatewayStore: ObservableObject {
                 }
                 if let frame = try? JSONDecoder().decode(EventsFrame.self, from: data), frame.type == "sessions" {
                     sessions = frame.sessions
+                    if let m = frame.machine { machine = m }
                 }
             }
         } catch {
@@ -150,9 +182,11 @@ enum GatewayError: LocalizedError {
     case badCode
     case badAddress
     case status(Int)
+    case message(String)
 
     var errorDescription: String? {
         switch self {
+        case .message(let text): return text
         case .badAddress: return "Address is host:port, for example 192.168.1.10:7420."
         case .badResponse: return "The gateway did not answer."
         case .badCode: return "That code was not accepted. Codes last five minutes and work once."

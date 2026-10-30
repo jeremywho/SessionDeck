@@ -5,6 +5,8 @@ struct SessionsView: View {
     @State private var showForget = false
     @State private var path: [CatalogEntry] = []
     @State private var autoOpened = false
+    @State private var showNew = false
+    @State private var awaitingHost: String?
 
     private var grouped: [(name: String, order: Int, entries: [CatalogEntry])] {
         var byGroup: [String: (order: Int, entries: [CatalogEntry])] = [:]
@@ -27,6 +29,12 @@ struct SessionsView: View {
                             Button("Retry") { Task { await gateway.reconnectNow() } }.buttonStyle(.bordered)
                         }
                     }
+                }
+                if let load = gateway.machine {
+                    Section { MachineLoadView(load: load).padding(.vertical, 2) }
+                }
+                if let awaitingHost, !gateway.sessions.contains(where: { $0.hostId == awaitingHost }) {
+                    Section { Label("Starting the session on the deck…", systemImage: "hourglass").foregroundStyle(.secondary) }
                 }
                 ForEach(grouped, id: \.name) { group in
                     Section(group.name.isEmpty ? "" : group.name) {
@@ -51,6 +59,11 @@ struct SessionsView: View {
             .refreshable { await gateway.refresh() }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
+                    Button { showNew = true } label: { Image(systemName: "plus") }
+                        .disabled(!gateway.connected)
+                        .accessibilityLabel("New session")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         Button(role: .destructive) { showForget = true } label: { Label("Forget this deck", systemImage: "xmark.circle") }
                     } label: { Image(systemName: "ellipsis.circle") }
@@ -63,8 +76,16 @@ struct SessionsView: View {
             .confirmationDialog("Forget this deck?", isPresented: $showForget, titleVisibility: .visible) {
                 Button("Forget", role: .destructive) { gateway.forgetPairing() }
             }
+            .sheet(isPresented: $showNew) {
+                NewSessionSheet { hostId in awaitingHost = hostId }
+                    .environmentObject(gateway)
+            }
             .task { await gateway.refresh() }
             .onChange(of: gateway.sessions) { _, sessions in
+                if let hostId = awaitingHost, let entry = sessions.first(where: { $0.hostId == hostId }) {
+                    awaitingHost = nil
+                    if entry.mobileReady { path = [entry] }
+                }
                 guard !autoOpened, let hostId = LaunchOptions.open, let entry = sessions.first(where: { $0.hostId == hostId }) else { return }
                 autoOpened = true
                 LaunchOptions.log("listed \(sessions.count) sessions, opening \(hostId)")

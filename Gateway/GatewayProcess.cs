@@ -120,10 +120,13 @@ internal static class GatewayProcess
 
         GatewayServer? server = null;
         var quit = new TaskCompletionSource();
+        var sampler = new MachineLoadSampler();
+        MachineLoad? machine = null;
         var loop = new CatalogLoop(
             () =>
             {
                 CodexScanner.Probe();
+                try { machine = sampler.Sample(); } catch (Exception ex) { App.LogError(ex); }
                 var pairs = SessionPipeline.Pair(SessionPipeline.Scan(prune: false));
                 var built = catalog.Build(pairs, Settings.Peek(), DateTime.UtcNow);
                 lock (gate)
@@ -143,6 +146,17 @@ internal static class GatewayProcess
             name => typeof(GatewayServer).Assembly.GetManifestResourceStream("www/" + name),
             adminToken);
         server.QuitRequested += () => quit.TrySetResult();
+        server.Folders = () => SessionStarter.Folders(Settings.Peek());
+        server.Machine = () => machine;
+        server.StartSession = request =>
+        {
+            var plan = SessionStarter.Plan(request, Settings.Peek());
+            if (plan == null) return null;
+            var host = SessionStarter.Start(plan);
+            Log($"started {plan.Provider} host {host.Id} in {plan.Cwd} for a phone");
+            Task.Run(() => { Thread.Sleep(1500); try { loop.Tick(); } catch (Exception ex) { App.LogError(ex); } });
+            return host.Id;
+        };
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; quit.TrySetResult(); };
 
         // Listen only once there is a list to serve: a phone that connects during the Codex warm-up

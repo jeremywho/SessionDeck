@@ -216,6 +216,46 @@ public class GatewayServerTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task A_phone_can_start_a_session_and_read_folders_and_machine_load()
+    {
+        string token = await PairAsync();
+        using var c = Client(token);
+        var off = await c.PostAsync("/sessions", new StringContent("{\"provider\":\"claude\",\"cwd\":\"C:/x\"}", Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.NotImplemented, off.StatusCode);
+
+        StartRequest? seen = null;
+        _server.StartSession = r => { seen = r; return r.Provider == "agy" ? "newhost00001" : null; };
+        _server.Folders = () => new() { "C:/home", "C:/x" };
+        _server.Machine = () => new MachineLoad(12, 40, 51.2, 128.0, 3, DateTime.UtcNow);
+
+        var created = await c.PostAsync("/sessions", new StringContent("{\"provider\":\"agy\",\"cwd\":\"C:/x\",\"name\":\"\",\"prompt\":\"hi\"}", Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        Assert.Contains("\"hostId\":\"newhost00001\"", await created.Content.ReadAsStringAsync());
+        Assert.Equal("agy", seen!.Provider);
+        Assert.Equal("C:/x", seen.Cwd);
+        Assert.Equal("hi", seen.Prompt);
+
+        var refused = await c.PostAsync("/sessions", new StringContent("{\"provider\":\"vim\",\"cwd\":\"C:/x\"}", Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        var garbage = await c.PostAsync("/sessions", new StringContent("nope", Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.BadRequest, garbage.StatusCode);
+
+        using var anon = Client();
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anon.PostAsync("/sessions", new StringContent("{}", Encoding.UTF8, "application/json"))).StatusCode);
+
+        var meta = JsonDocument.Parse(await c.GetStringAsync("/meta")).RootElement;
+        Assert.Equal("C:/home", meta.GetProperty("folders")[0].GetString());
+        Assert.Contains("Agy", meta.GetProperty("providers").EnumerateArray().Select(p => p.GetString()));
+        Assert.Equal(12, meta.GetProperty("machine").GetProperty("cpuPercent").GetInt32());
+
+        using var ws = new ClientWebSocket();
+        await ws.ConnectAsync(Ws($"/events?token={token}"), CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
+        var frame = JsonDocument.Parse(await NextText(ws)).RootElement;
+        Assert.Equal(3, frame.GetProperty("machine").GetProperty("gpuPercent").GetInt32());
+        await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", CancellationToken.None);
+    }
+
+    [Fact]
     public async Task Admin_routes_need_the_admin_token()
     {
         using var anon = Client();
