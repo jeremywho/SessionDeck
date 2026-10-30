@@ -26,15 +26,25 @@
     cursorStyle: 'bar',
     cursorInactiveStyle: 'none',
     allowProposedApi: true,
-    disableStdin: true,
+    disableStdin: false,
     cols: 120,
     rows: 30,
   });
   term.loadAddon(new Unicode11Addon.Unicode11Addon());
   term.unicode.activeVersion = '11';
   term.open(el);
-  // The page answers none of the program's terminal queries: it attaches as a passive viewer and
-  // the host answers for it, so a replayed snapshot or a second phone never produces a reply.
+  // Typing goes through xterm's own input (its hidden textarea takes the phone keyboard), and so do
+  // dictation and the keys the native bar sends. The program's terminal queries are swallowed here:
+  // the page attaches as a passive viewer and the host answers them, so a replayed snapshot or a
+  // second phone never produces a reply.
+  let replaying = false;
+  term.onData(d => { if (!replaying) send({ type: 'input', data: d }); });
+  term.onBinary(d => { if (!replaying) send({ type: 'input', data: d }); });
+  const swallow = () => true;
+  term.parser.registerCsiHandler({ final: 'n' }, swallow);
+  term.parser.registerCsiHandler({ final: 'c' }, swallow);
+  term.parser.registerCsiHandler({ prefix: '>', final: 'c' }, swallow);
+  term.parser.registerCsiHandler({ prefix: '?', final: 'u' }, swallow);
 
   let ws = null, seq = SD.after || 0, retries = 0, retryTimer = null, ended = false, selecting = false;
 
@@ -85,7 +95,13 @@
         return;
       }
       const bytes = new Uint8Array(ev.data);
-      if (expectSnapshot) { expectSnapshot = false; seq = snapStart; }
+      if (expectSnapshot) {
+        // The snapshot is history: nothing in it may make xterm answer, and the view lands at its end.
+        expectSnapshot = false; seq = snapStart; replaying = true;
+        seq += bytes.length;
+        term.write(bytes, () => { replaying = false; term.scrollToBottom(); post({ type: 'replayed' }); });
+        return;
+      }
       seq += bytes.length;
       term.write(bytes);
     };
@@ -147,6 +163,9 @@
     return text;
   };
   window.sdScrollToBottom = () => term.scrollToBottom();
+  window.sdFocus = on => { if (on) term.focus(); else term.blur(); };
+  term.textarea.addEventListener('focus', () => post({ type: 'keyboard', on: true }));
+  term.textarea.addEventListener('blur', () => post({ type: 'keyboard', on: false }));
   window.sdReconnect = () => { if (!ended) { retries = 0; connect(); } };
 
   term.onSelectionChange(() => { if (selecting) post({ type: 'selection', has: term.hasSelection() }); });

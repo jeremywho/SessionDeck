@@ -7,8 +7,6 @@ struct TerminalScreen: View {
     @EnvironmentObject var gateway: GatewayStore
     let entry: CatalogEntry
     @StateObject private var bridge = TerminalBridge()
-    @State private var text = ""
-    @FocusState private var focused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -19,8 +17,11 @@ struct TerminalScreen: View {
             if let note = bridge.note {
                 Text(note).font(.caption).foregroundStyle(.orange).frame(maxWidth: .infinity).padding(4).background(Color(white: 0.12))
             }
-            InputBar(text: $text, focused: $focused, selecting: bridge.selecting, hasSelection: bridge.hasSelection,
-                     onSend: send, onKey: { key in Task { await bridge.input(key.bytes) } }, onPaste: paste, onCopy: copy, onSelect: { bridge.select(!bridge.selecting) })
+            InputBar(selecting: bridge.selecting, hasSelection: bridge.hasSelection, keyboardShown: bridge.keyboardShown,
+                     onKey: { key in Task { await bridge.input(key.bytes) } },
+                     onNewline: { Task { await bridge.input("\\\r") } },
+                     onPaste: paste, onCopy: copy, onSelect: { bridge.select(!bridge.selecting) },
+                     onKeyboard: { bridge.focus(!bridge.keyboardShown) })
         }
         .background(Color(red: 0.047, green: 0.047, blue: 0.047))
         .navigationTitle(entry.name.isEmpty ? entry.provider : entry.name)
@@ -47,20 +48,6 @@ struct TerminalScreen: View {
     @State private var autoSent = false
     @State private var autoZoomed = false
 
-    /// One line is typed; a draft with newlines goes as a terminal paste so the CLI takes it whole.
-    private func send() {
-        let draft = text
-        guard !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        text = ""
-        let bytes = draft.contains("\n") ? Keys.pasteSequence(draft) + "\r" : draft + "\r"
-        Task {
-            if await bridge.input(bytes) == false {
-                text = draft
-                bridge.note = "Not connected. The text was kept."
-            }
-        }
-    }
-
     private func paste() {
         guard let s = UIPasteboard.general.string, !s.isEmpty else { return }
         Task { if await bridge.input(Keys.pasteSequence(s)) == false { bridge.note = "Not connected. Nothing was pasted." } }
@@ -80,7 +67,17 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
     @Published var selecting = false
     @Published var hasSelection = false
     @Published var connected = false
+    @Published var keyboardShown = false
     weak var webView: WKWebView?
+
+    func focus(_ on: Bool) { webView?.evaluateJavaScript("window.sdFocus(\(on ? "true" : "false"))") }
+
+    /// The newest output is what matters: the web view scrolls to its bottom edge.
+    func scrollToBottom() {
+        guard let scroll = webView?.scrollView else { return }
+        let y = max(0, scroll.contentSize.height - scroll.bounds.height + scroll.adjustedContentInset.bottom)
+        scroll.setContentOffset(CGPoint(x: scroll.contentOffset.x, y: y), animated: false)
+    }
     var sessionId = ""
     private let zooms = ZoomStore()
     private var zoomObservation: NSKeyValueObservation?
@@ -107,6 +104,7 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
                 // WebKit refitting after the page's viewport settled: put the user's zoom back.
                 LaunchOptions.log(String(format: "zoom refit %.3f -> restoring %.3f", scale, saved))
                 self.setZoom(saved, on: scrollView)
+                self.scrollToBottom()
             }
         }
     }
@@ -145,6 +143,7 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
                     LaunchOptions.log(String(format: "zoom restore %.3f (was %.3f)", saved, Double(scroll.zoomScale)))
                     self.setZoom(saved, on: scroll)
                 }
+                self.scrollToBottom()
             }
         }
     }
@@ -195,6 +194,8 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
         case "selection": hasSelection = body["has"] as? Bool ?? false
         case "selecting": selecting = body["on"] as? Bool ?? false
         case "size": applySavedZoom()
+        case "replayed": DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.scrollToBottom() }
+        case "keyboard": keyboardShown = body["on"] as? Bool ?? false; if keyboardShown { DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.scrollToBottom() } }
         case "connected": note = nil; connected = true; LaunchOptions.log("terminal connected")
         case "disconnected": note = "Reconnecting…"; connected = false
         case "revoked": note = "This phone was revoked from the deck."
