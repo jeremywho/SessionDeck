@@ -47,6 +47,17 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.jeremywho.sessiondeck.tests
+  SessionDeckMobileUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - SessionDeckMobileUITests
+    dependencies:
+      - target: SessionDeckMobile
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jeremywho.sessiondeck.uitests
+        TEST_TARGET_NAME: SessionDeckMobile
 schemes:
   SessionDeckMobile:
     build:
@@ -59,3 +70,12 @@ schemes:
       config: Debug
       targets:
         - SessionDeckMobileTests
+  SessionDeckMobileUI:
+    build:
+      targets:
+        SessionDeckMobile: all
+        SessionDeckMobileUITests: [test]
+    test:
+      config: Debug
+      targets:
+        - SessionDeckMobileUITests
