@@ -176,8 +176,16 @@ internal sealed class RelayTunnel : IAsyncDisposable
 
     public static string StatusPath(string dataDir) => Path.Combine(dataDir, "relay.json");
 
-    public static RelayStatus? ReadStatus(string dataDir) =>
-        AtomicFile.Read(StatusPath(dataDir), text => JsonSerializer.Deserialize<RelayStatus>(text));
+    /// <summary>A plain shared read: this file is rewritten every half minute by the gateway, so a reader that hits the swap must come back empty, never set the file aside as corrupt.</summary>
+    public static RelayStatus? ReadStatus(string dataDir)
+    {
+        try
+        {
+            using var fs = new FileStream(StatusPath(dataDir), FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            return JsonSerializer.Deserialize<RelayStatus>(fs);
+        }
+        catch { return null; }
+    }
 
     public static void WriteStatus(string dataDir, RelayStatus status) =>
         AtomicFile.Write(StatusPath(dataDir), JsonSerializer.Serialize(status, new JsonSerializerOptions { WriteIndented = true }));
