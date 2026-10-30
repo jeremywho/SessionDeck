@@ -28,8 +28,8 @@ struct TerminalScreen: View {
             }
             TypingProxy(bridge: bridge).frame(height: 1)
             InputBar(selecting: bridge.selecting, hasSelection: bridge.hasSelection, keyboardShown: bridge.keyboardShown, listening: speech.listening,
-                     onKey: { key in bridge.resetTyping(); Task { await bridge.input(key.bytes) } },
-                     onNewline: { bridge.resetTyping(); Task { await bridge.input("\\\r") } },
+                     onKey: { key in speech.stop(); bridge.resetTyping(); Task { await bridge.input(key.bytes) } },
+                     onNewline: { speech.stop(); bridge.resetTyping(); Task { await bridge.input("\\\r") } },
                      onPaste: paste, onCopy: copy, onSelect: { bridge.select(!bridge.selecting) },
                      onKeyboard: { bridge.focus(!bridge.keyboardShown) },
                      onMic: {
@@ -37,6 +37,11 @@ struct TerminalScreen: View {
                          bridge.resetTyping()
                          speech.toggle(unit: DeleteUnit.forProvider(entry.provider)) { bytes in Task { await bridge.input(bytes) } }
                      })
+            .onAppear {
+                // Keyboard typing, a paste or a key while speech runs would corrupt its baseline: speech yields first.
+                bridge.manualInput = { speech.stop() }
+                speech.onStopped = { bridge.resetTyping() }
+            }
         }
         .background(Color(red: 0.047, green: 0.047, blue: 0.047))
         .navigationTitle(entry.name.isEmpty ? entry.provider : entry.name)
@@ -65,6 +70,7 @@ struct TerminalScreen: View {
 
     private func paste() {
         guard let s = UIPasteboard.general.string, !s.isEmpty else { return }
+        speech.stop()
         bridge.resetTyping()
         Task { if await bridge.input(Keys.pasteSequence(s)) == false { bridge.note = "Not connected. Nothing was pasted." } }
     }
@@ -86,6 +92,9 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
     @Published var keyboardShown = false
     weak var webView: WKWebView?
     weak var proxy: ProxyTextView?
+
+    /// Runs before the keyboard sends anything, so another input source (speech) can yield first.
+    var manualInput: (() -> Void)?
 
     /// Anything that moves the terminal's cursor on its own makes the typed buffer stale; typing then starts afresh.
     func resetTyping() { proxy?.resetBaseline() }

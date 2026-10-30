@@ -11,7 +11,7 @@ struct TypingProxy: UIViewRepresentable {
     func makeUIView(context: Context) -> ProxyTextView {
         let v = ProxyTextView()
         v.delegate = context.coordinator
-        v.send = { [weak bridge] bytes in Task { await bridge?.input(bytes) } }
+        v.send = { [weak bridge] bytes in bridge?.manualInput?(); Task { await bridge?.input(bytes) } }
         v.autocorrectionType = .no
         v.autocapitalizationType = .none
         v.spellCheckingType = .no

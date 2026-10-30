@@ -6,37 +6,55 @@ import Speech
 /// partial transcript goes to the terminal as the difference from what was already sent, the same
 /// way the typing proxy handles the keyboard's own dictation. One tap starts, one tap stops; Apple
 /// ends a request after about a minute, and the button goes quiet when that happens.
+///
+/// Every start bumps a generation; a stop bumps it again. Results, errors and a pending permission
+/// request all carry the generation they belong to, so nothing from an earlier recording can type
+/// or stop a later one.
 @MainActor
 final class SpeechTyper: ObservableObject {
     @Published private(set) var listening = false
     @Published private(set) var transcript = ""
     @Published var problem: String?
 
+    /// Called when listening ends for any reason; the owner resets the keyboard's baseline since the cursor moved.
+    var onStopped: (() -> Void)?
+
     private let engine = AVAudioEngine()
-    private var recognizer: SFSpeechRecognizer?
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
+    private var generation = 0
+    private var starting = false
     private var sent = ""
     private var unit: DeleteUnit = .scalar
     private var send: ((String) -> Void)?
 
-    static var isSupported: Bool { SFSpeechRecognizer(locale: Locale.current) != nil || SFSpeechRecognizer() != nil }
+    var isActive: Bool { listening || starting }
 
     func toggle(unit: DeleteUnit, send: @escaping (String) -> Void) {
-        if listening { stop() } else { start(unit: unit, send: send) }
+        if isActive { stop() } else { start(unit: unit, send: send) }
     }
 
     private func start(unit: DeleteUnit, send: @escaping (String) -> Void) {
         problem = nil
         self.unit = unit
         self.send = send
+        starting = true
+        generation += 1
+        let gen = generation
         Task {
-            guard await Self.authorized() else {
+            let ok = await Self.authorized()
+            guard gen == generation, starting else { return }
+            guard ok else {
+                starting = false
                 problem = "Allow the microphone and speech recognition for Session Deck in iOS Settings."
                 return
             }
-            do { try begin() }
-            catch { problem = "Could not start listening: \(error.localizedDescription)" }
+            do { try begin(gen) }
+            catch {
+                teardown()
+                starting = false
+                problem = "Could not start listening: \(error.localizedDescription)"
+            }
         }
     }
 
@@ -50,18 +68,16 @@ final class SpeechTyper: ObservableObject {
         }
     }
 
-    private func begin() throws {
+    private func begin(_ gen: Int) throws {
         guard let recognizer = SFSpeechRecognizer(locale: Locale.current) ?? SFSpeechRecognizer(), recognizer.isAvailable else {
             throw NSError(domain: "SpeechTyper", code: 1, userInfo: [NSLocalizedDescriptionKey: "speech recognition is not available right now"])
         }
-        self.recognizer = recognizer
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.record, mode: .measurement, options: .duckOthers)
         try session.setActive(true, options: .notifyOthersOnDeactivation)
 
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
-        if recognizer.supportsOnDeviceRecognition { request.requiresOnDeviceRecognition = false }
         self.request = request
 
         let input = engine.inputNode
@@ -73,15 +89,16 @@ final class SpeechTyper: ObservableObject {
 
         sent = ""
         transcript = ""
+        starting = false
         listening = true
         task = recognizer.recognitionTask(with: request) { [weak self] result, error in
             Task { @MainActor [weak self] in
-                guard let self else { return }
+                guard let self, gen == self.generation, self.listening else { return }
                 if let result {
                     self.apply(result.bestTranscription.formattedString)
                     if result.isFinal { self.stop() }
                 }
-                if let error, self.listening {
+                if let error {
                     // A normal end of listening also arrives here; only an unexpected one is worth a word.
                     let code = (error as NSError).code
                     if code != 216 && code != 301 && code != 1110 { self.problem = "Listening stopped: \(error.localizedDescription)" }
@@ -100,15 +117,23 @@ final class SpeechTyper: ObservableObject {
         if !bytes.isEmpty { send?(bytes) }
     }
 
+    /// Stop whatever state the recording is in: a pending permission request, a running one, or a half-started one.
     func stop() {
-        guard listening || task != nil else { return }
+        let wasActive = isActive
+        generation += 1
+        starting = false
         listening = false
-        task?.finish()
+        teardown()
+        if wasActive { onStopped?() }
+    }
+
+    private func teardown() {
+        task?.cancel()
         task = nil
         request?.endAudio()
         request = nil
-        if engine.isRunning { engine.stop() }
         engine.inputNode.removeTap(onBus: 0)
+        if engine.isRunning { engine.stop() }
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 }
