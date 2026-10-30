@@ -74,7 +74,8 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
 
     /// The newest output is what matters: the web view scrolls to its bottom edge.
     func scrollToBottom() {
-        guard let scroll = webView?.scrollView else { return }
+        guard let webView, case let scroll = webView.scrollView else { return }
+        webView.evaluateJavaScript("window.sdScrollToBottom()")
         let y = max(0, scroll.contentSize.height - scroll.bounds.height + scroll.adjustedContentInset.bottom)
         scroll.setContentOffset(CGPoint(x: scroll.contentOffset.x, y: y), animated: false)
     }

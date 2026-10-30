@@ -38,7 +38,12 @@
   // the page attaches as a passive viewer and the host answers them, so a replayed snapshot or a
   // second phone never produces a reply.
   let replaying = false;
-  term.onData(d => { if (!replaying) send({ type: 'input', data: d }); });
+  // A report xterm generates in answer to a query (cursor position, attributes, mode, colours,
+  // DCS/OSC answers) never comes from a finger: anything shaped like one is dropped so the host's
+  // own answer stays the only one. Keys a hardware keyboard sends (arrows, Esc) do not match.
+  const REPLY = /^(\[[?>]?[0-9;]*[Rcn]|\[[?>]?[0-9;]*\$y|\]|P)/;
+  const isReply = d => REPLY.test(d);
+  term.onData(d => { if (!replaying && !isReply(d)) send({ type: 'input', data: d }); });
   term.onBinary(d => { if (!replaying) send({ type: 'input', data: d }); });
   const swallow = () => true;
   term.parser.registerCsiHandler({ final: 'n' }, swallow);
