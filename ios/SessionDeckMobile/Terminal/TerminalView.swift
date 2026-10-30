@@ -131,16 +131,28 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
         }
     }
 
-    func keyboardCameUp() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.scrollToBottom("keyboard up") }
+    func keyboardCameUp() { land("keyboard up") }
+
+    private var landUntil = Date.distantPast
+    private var lastLandedY: CGFloat?
+    private var readerAtBottom = true
+    private var offsetObservation: NSKeyValueObservation?
+
+    /// A session opening or the keyboard rising lands the page at the newest output, and for the next
+    /// moments the zoom restores that follow land there too. After that the reader owns the position.
+    func land(_ reason: String) {
+        landUntil = Date().addingTimeInterval(3.0)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.scrollToBottom(reason) }
     }
 
     /// The newest output is what matters: xterm's viewport goes to its end and the page scrolls so the
     /// last row with text on it sits at the bottom of the screen, not xterm's blank spare rows.
-    func scrollToBottom(_ reason: String = "unspecified") {
+    /// With `resetViewport` false the scrollback stays where the reader put it and only the page moves.
+    func scrollToBottom(_ reason: String = "unspecified", resetViewport: Bool = true) {
         guard let webView else { return }
         LaunchOptions.log("scroll to bottom (\(reason))")
-        webView.evaluateJavaScript("window.sdScrollToBottom(); window.sdTextBottom()") { [weak self] result, _ in
+        let js = resetViewport ? "window.sdScrollToBottom(); window.sdTextBottom()" : "window.sdTextBottom()"
+        webView.evaluateJavaScript(js) { [weak self] result, _ in
             guard let self, let webView = self.webView else { return }
             let scroll = webView.scrollView
             let visible = scroll.bounds.height - scroll.adjustedContentInset.bottom
@@ -149,7 +161,27 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
             if let bottomCss = result as? Double {
                 y = min(maxY, max(0, CGFloat(bottomCss) * scroll.zoomScale - visible + 8))
             }
+            self.lastLandedY = y
+            self.readerAtBottom = true
             scroll.setContentOffset(CGPoint(x: scroll.contentOffset.x, y: y), animated: false)
+        }
+    }
+
+    /// Where the reader is, sampled only while the zoom is the stable one: a restore in progress or
+    /// WebKit's refit moves the offset on its own, and that is not the reader scrolling.
+    private func noteOffset(_ scroll: UIScrollView) {
+        let saved = zooms.zoom(for: sessionId) ?? Double(scroll.zoomScale)
+        guard abs(Double(scroll.zoomScale) - saved) < 0.01, !userIsZooming else { return }
+        let visible = scroll.bounds.height - scroll.adjustedContentInset.bottom
+        let maxY = max(0, scroll.contentSize.height - visible)
+        readerAtBottom = ScrollFollow.atBottom(offsetY: Double(scroll.contentOffset.y), maxY: Double(maxY), lastLandedY: lastLandedY.map(Double.init))
+    }
+
+    private func afterZoomRestore(_ reason: String) {
+        switch ScrollFollow.decide(landing: Date() < landUntil, readerAtBottom: readerAtBottom) {
+        case .land: scrollToBottom(reason + ", landing")
+        case .follow: scrollToBottom(reason + ", reader was at the bottom", resetViewport: false)
+        case .keep: LaunchOptions.log("\(reason): the reader scrolled up, keeping their place")
         }
     }
     var sessionId = ""
@@ -169,6 +201,9 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
         recognizer.delegate = self
         webView.scrollView.addGestureRecognizer(recognizer)
         pinch = recognizer
+        offsetObservation = webView.scrollView.observe(\.contentOffset, options: [.new]) { [weak self] scrollView, _ in
+            self?.noteOffset(scrollView)
+        }
         zoomObservation = webView.scrollView.observe(\.zoomScale, options: [.new]) { [weak self] scrollView, _ in
             guard let self else { return }
             let scale = Double(scrollView.zoomScale)
@@ -180,7 +215,7 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
                     // WebKit refitting after the page's viewport settled or the view changed size: put the user's zoom back.
                     LaunchOptions.log(String(format: "zoom refit %.3f -> restoring %.3f", scale, saved))
                     self.setZoom(saved, on: scrollView)
-                    self.scrollToBottom("refit undone")
+                    self.afterZoomRestore("refit undone")
                 } else {
                     LaunchOptions.log(String(format: "zoom changed to %.3f outside a restore window (saved %.3f)", scale, saved))
                 }
@@ -218,18 +253,18 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
     }
 
     /// After the page laid out at a (new) size, bring back the zoom this session had, and keep
-    /// bringing it back for a couple of seconds while WebKit settles its own fit.
+    /// bringing it back for a couple of seconds while WebKit settles its own fit. A pass that finds
+    /// the zoom already right leaves the page alone: the reader may have scrolled up to read.
     private func applySavedZoom() {
         restoreUntil = Date().addingTimeInterval(2.5)
         for delay in [0.3, 1.0, 2.0] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 guard let self, let scroll = self.webView?.scrollView, !self.userIsZooming else { return }
                 guard let saved = self.zooms.zoom(for: self.sessionId) else { LaunchOptions.log("zoom none saved"); return }
-                if abs(Double(scroll.zoomScale) - saved) > 0.01 {
-                    LaunchOptions.log(String(format: "zoom restore %.3f (was %.3f)", saved, Double(scroll.zoomScale)))
-                    self.setZoom(saved, on: scroll)
-                }
-                self.scrollToBottom("zoom restore pass")
+                guard abs(Double(scroll.zoomScale) - saved) > 0.01 else { return }
+                LaunchOptions.log(String(format: "zoom restore %.3f (was %.3f)", saved, Double(scroll.zoomScale)))
+                self.setZoom(saved, on: scroll)
+                self.afterZoomRestore("zoom restored")
             }
         }
     }
@@ -299,7 +334,7 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
         case "selection": hasSelection = body["has"] as? Bool ?? false
         case "selecting": selecting = body["on"] as? Bool ?? false
         case "size": applySavedZoom()
-        case "replayed": DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.scrollToBottom("replay finished") }
+        case "replayed": land("replay finished")
         case "tap": if !selecting { toggleKeyboard() }
         case "open": if let s = body["uri"] as? String, let url = URL(string: s), ["http", "https"].contains(url.scheme ?? "") { UIApplication.shared.open(url) }
         case "connected": note = nil; connected = true; LaunchOptions.log("terminal connected")
