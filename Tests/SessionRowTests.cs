@@ -40,6 +40,15 @@ public class SessionRowTests
     }
 
     [Fact]
+    public void A_host_from_before_the_current_protocol_is_behind_until_it_exits()
+    {
+        var info = new SessionInfo { SessionId = "s1", Kind = "interactive" };
+        Assert.True(new SessionRow(new SessionDeck.Host.HostRecord { Id = "h", SessionId = "s1", Protocol = 3 }, info).HostBehind);
+        Assert.False(new SessionRow(new SessionDeck.Host.HostRecord { Id = "h", SessionId = "s1", Protocol = SessionDeck.Host.HostRecord.CurrentProtocol }, info).HostBehind);
+        Assert.False(new SessionRow(new SessionDeck.Host.HostRecord { Id = "h", SessionId = "s1", Protocol = 3, ExitCode = 0, ExitedAt = DateTime.UtcNow }, info).HostBehind);
+    }
+
+    [Fact]
     public void An_unrecognised_model_id_is_shown_as_is_rather_than_blanked()
         => Assert.Equal("some-new-model", WithModel("some-new-model").ModelChip);
 

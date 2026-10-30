@@ -76,8 +76,11 @@ internal sealed class HostRecord
     public bool Pending { get; set; }
 
     /// <summary>How this host derives status. 2: idle notifications no longer mean waiting; turns can end
-    /// scheduled. 3: a background shell command no longer counts as scheduling a wake-up.</summary>
+    /// scheduled. 3: a background shell command no longer counts as scheduling a wake-up. 4: the pty size
+    /// travels with the attach stream, which a phone needs.</summary>
     public int Protocol { get; set; }
+
+    public const int CurrentProtocol = 4;
 
     [JsonIgnore] public bool HasExited => ExitCode.HasValue;
 
@@ -201,7 +204,7 @@ internal static class HostProgram
             HostStartTicks = self.StartTime.ToUniversalTime().Ticks,
             HostBin = Path.GetDirectoryName(Environment.ProcessPath ?? "") ?? "",
             Profile = spec.Profile,
-            Protocol = 4,
+            Protocol = HostRecord.CurrentProtocol,
             ChildPid = _pty.Pid,
             Port = port,
             Token = token,

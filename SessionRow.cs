@@ -376,6 +376,7 @@ internal sealed class SessionRow : INotifyPropertyChanged
                 $"{ProviderName} · PID {_s.Pid} · {ShortId} · v{_s.Version}",
             });
             if (UpdatePending) lines.Add($"Update installed: v{InstalledVersions.For(_s.Provider)} · restarts when idle, or right-click to restart now");
+            if (HostBehind) lines.Add("Deck updated: this pane cannot open on the phone until it restarts · restarts when idle, or right-click to restart now");
             if (OnOtherDesktop) lines.Add($"On {DesktopLabel}");
             if (_s.SubagentsActive > 0) lines.Add($"Subagents: {_s.SubagentsActive} working / {_s.SubagentsTotal} this session");
             if (_s.ApiError && _s.ErrorText.Length > 0) lines.Add(_s.ErrorText);
@@ -430,6 +431,9 @@ internal sealed class SessionRow : INotifyPropertyChanged
 
     /// <summary>The CLI on disk is newer than the one this session is running; a restart picks it up.</summary>
     public bool UpdatePending => !Host.HasExited && InstalledVersions.IsBehind(_s.Provider, _s.Version);
+
+    /// <summary>The host runs from a copy older than this deck and lacks something the deck now relies on (the phone cannot open it); a restart moves the session onto the current host.</summary>
+    public bool HostBehind => !Host.HasExited && Host.Protocol < SessionDeck.Host.HostRecord.CurrentProtocol;
 
     /// <summary>Restart means end the child and start the same session again; both CLIs need the id for that.</summary>
     public bool CanRestart => LiveSessionId.Length > 0;

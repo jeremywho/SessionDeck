@@ -1573,8 +1573,8 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         if (!_app.Settings.AutoRestartOnUpdate || !_autoRestart.IsCompleted) return;
         foreach (var row in Rows.ToList())
         {
-            if (!row.UpdatePending || !row.CanRestart || _restarting.Contains(row.Host.Id)) continue;
-            string target = InstalledVersions.For(row.Provider);
+            if (!(row.UpdatePending || row.HostBehind) || !row.CanRestart || _restarting.Contains(row.Host.Id)) continue;
+            string target = row.UpdatePending ? InstalledVersions.For(row.Provider) : $"host-protocol-{SessionDeck.Host.HostRecord.CurrentProtocol}";
             if (_autoRestarted.Done(row.LiveSessionId, target)) continue;
             // Only a session whose live conversation is provably resumable is touched on its own;
             // anything else waits for a restart you ask for.
@@ -1586,7 +1586,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             if (DateTime.Now - row.LastChanged < IdleBeforeRestart) continue;
             var tab = Deck.FindByHost(row.Host.Id);
             if (tab != null && tab == Deck.Active && IsActive) continue;
-            PerformanceLog.Write($"auto-restart host={row.Host.Id} provider={row.Provider} from=v{row.Version} to=v{target}");
+            PerformanceLog.Write($"auto-restart host={row.Host.Id} provider={row.Provider} from=v{row.Version} to={target} hostProtocol={row.Host.Protocol}");
             _autoRestarted.Record(row.LiveSessionId, target);
             _autoRestart = RestartSession(row);
             return;
