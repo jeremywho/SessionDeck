@@ -57,4 +57,23 @@ public class GatewayProcessTests : IDisposable
         File.WriteAllText(path, "{\"Pid\":5,\"StartTicks\":1,\"Port\":7420,\"Exe\":\"x\",\"AdminToken\":\"a\"}");
         Assert.Equal(5, GatewayProcess.ReadRecord(path)!.Pid);
     }
+
+    [Fact]
+    public void Relay_is_not_started_without_a_key()
+    {
+        var noKey = new Settings();
+        noKey.Gateway.Relay.Enabled = true;
+        noKey.Gateway.Relay.Key = "  ";
+        Assert.Null(GatewayProcess.StartRelay(noKey, 7420, _dir));
+
+        var off = new Settings();
+        off.Gateway.Relay.Enabled = false;
+        off.Gateway.Relay.Key = "ab";
+        Assert.Null(GatewayProcess.StartRelay(off, 7420, _dir));
+
+        var on = new Settings();
+        on.Gateway.Relay.Enabled = true;
+        on.Gateway.Relay.Key = "ab";
+        Assert.NotNull(GatewayProcess.StartRelay(on, 7420, _dir));
+    }
 }

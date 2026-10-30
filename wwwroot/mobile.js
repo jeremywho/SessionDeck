@@ -74,7 +74,8 @@
   function connect() {
     if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
     if (ended || !SD.hostId || ws) return;
-    const sock = new WebSocket(`ws://${location.host}/sessions/${encodeURIComponent(SD.hostId)}/attach?token=${encodeURIComponent(SD.token)}&after=${seq}`);
+    const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
+    const sock = new WebSocket(`${scheme}://${location.host}/sessions/${encodeURIComponent(SD.hostId)}/attach?token=${encodeURIComponent(SD.token)}&after=${seq}`);
     sock.binaryType = 'arraybuffer';
     ws = sock;
     let expectSnapshot = false, snapStart = 0, openedAt = 0;

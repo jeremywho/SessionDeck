@@ -183,12 +183,31 @@ internal static class GatewayProcess
 
         using var cts = new CancellationTokenSource();
         var running = loop.RunAsync(cts.Token);
+        var relay = StartRelay(settings, server.Port, Settings.DataDir);
+        var relayRunning = relay?.RunAsync(cts.Token);
         quit.Task.GetAwaiter().GetResult();
         Log("quit requested");
         cts.Cancel();
         try { running.Wait(TimeSpan.FromSeconds(5)); } catch { }
+        try { relayRunning?.Wait(TimeSpan.FromSeconds(5)); } catch { }
+        relay?.DisposeAsync().AsTask().GetAwaiter().GetResult();
         server.DisposeAsync().AsTask().GetAwaiter().GetResult();
         try { if (ReadRecord()?.Pid == self.Id) File.Delete(RecordPath); } catch { }
+        try { if (relay != null) File.Delete(RelayTunnel.StatusPath(Settings.DataDir)); } catch { }
         return 0;
+    }
+
+    /// <summary>The tunnel to the VPS, when the settings turn it on and hold a key; its status lands in <c>relay.json</c> and in the log when it changes.</summary>
+    internal static RelayTunnel? StartRelay(Settings settings, int gatewayPort, string dataDir)
+    {
+        var relay = settings.Gateway.Relay;
+        if (!relay.Enabled || relay.Key.Trim().Length == 0) { Log("relay off"); return null; }
+        string last = "";
+        return new RelayTunnel(relay, gatewayPort, dataDir, RelayTunnel.StartSsh, RelayTunnel.HttpProbe(relay.PublicUrl, relay.Key), status =>
+        {
+            RelayTunnel.WriteStatus(dataDir, status);
+            string line = status.Reason == null ? status.State : $"{status.State}: {status.Reason}";
+            if (line != last) { last = line; Log($"relay {line}"); }
+        });
     }
 }
