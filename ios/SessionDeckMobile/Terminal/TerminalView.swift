@@ -122,6 +122,7 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
         keyboardShown = false
         LaunchOptions.log("keyboard field ended editing (wanted \(wantKeyboard))")
         guard wantKeyboard, Date().timeIntervalSince(raisedAt) < 1.0 else { return }
+        raisedAt = .distantPast
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
             guard let self, self.wantKeyboard, self.proxy?.isFirstResponder == false else { return }
             LaunchOptions.log("keyboard re-raised after a focus steal")

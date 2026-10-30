@@ -58,6 +58,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.jeremywho.sessiondeck.uitests
         TEST_TARGET_NAME: SessionDeckMobile
+        GENERATE_INFOPLIST_FILE: YES
 schemes:
   SessionDeckMobile:
     build:
