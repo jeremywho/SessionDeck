@@ -129,6 +129,28 @@
           </ItemsControl.ItemTemplate>
         </ItemsControl>
 
+        <Grid Margin="0,14,0,0">
+          <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+          <StackPanel Grid.Column="0">
+            <TextBlock Text="Remote" Foreground="{DynamicResource FgBrush}"/>
+            <TextBlock Text="Reach the deck from anywhere through your own server. The gateway dials out; nothing listens on this network." FontSize="11.5" Foreground="{DynamicResource Fg3Brush}" TextWrapping="Wrap"/>
+          </StackPanel>
+          <ui:ToggleSwitch x:Name="RelayToggle" Grid.Column="1" VerticalAlignment="Center"/>
+        </Grid>
+        <Grid Margin="0,8,0,0">
+          <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+          <TextBlock Grid.Column="0" Text="URL" VerticalAlignment="Center" Margin="0,0,10,0" Foreground="{DynamicResource FgBrush}"/>
+          <ui:TextBox x:Name="RelayUrlBox" Grid.Column="1" PlaceholderText="https://sessiondeck.example"/>
+        </Grid>
+        <Grid Margin="0,8,0,0">
+          <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+          <TextBlock Grid.Column="0" Text="Key" VerticalAlignment="Center" Margin="0,0,10,0" Foreground="{DynamicResource FgBrush}"/>
+          <ui:PasswordBox x:Name="RelayKeyBox" Grid.Column="1" PlaceholderText="generate one, then put the same key in the phone build"/>
+          <ui:Button x:Name="RelayGenerateButton" Grid.Column="2" Content="Generate" Appearance="Secondary" Margin="8,0,0,0" Click="RelayGenerate_Click"/>
+          <ui:Button x:Name="RelayCopyButton" Grid.Column="3" Content="Copy" Appearance="Secondary" Margin="8,0,0,0" Click="RelayCopy_Click"/>
+        </Grid>
+        <TextBlock x:Name="RelayStatus" FontSize="11.5" Margin="0,6,0,0" Foreground="{DynamicResource Fg3Brush}" TextWrapping="Wrap"/>
+
         <TextBlock Text="Claude flags" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource FgBrush}" Margin="0,20,0,0"/>
         <TextBlock Text="Appended to every new or resumed Claude session (space-separated)." FontSize="11.5"
                    Foreground="{DynamicResource Fg3Brush}" Margin="0,2,0,6"/>

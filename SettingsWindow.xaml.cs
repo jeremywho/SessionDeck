@@ -33,6 +33,14 @@ internal partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
 
         GatewayToggle.IsChecked = _app.Settings.Gateway.Enabled;
         GatewayPortBox.Value = _app.Settings.Gateway.Port;
+        RelayToggle.IsChecked = _app.Settings.Gateway.Relay.Enabled;
+        RelayUrlBox.Text = _app.Settings.Gateway.Relay.PublicUrl;
+        RelayKeyBox.Password = _app.Settings.Gateway.Relay.Key;
+        ShowRelayStatus();
+        _relayTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+        _relayTimer.Tick += (_, _) => ShowRelayStatus();
+        _relayTimer.Start();
+        Closed += (_, _) => _relayTimer.Stop();
         _ = RefreshDevicesAsync();
 
         // Assembly version == the release tag (release.yml stamps -p:Version); dev builds show the csproj default.
@@ -66,14 +74,48 @@ internal partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
 
         bool gatewayWas = _app.Settings.Gateway.Enabled;
         int portWas = _app.Settings.Gateway.Port;
+        var relay = _app.Settings.Gateway.Relay;
+        var relayWas = (relay.Enabled, relay.PublicUrl, relay.Key);
         _app.Settings.Gateway.Enabled = GatewayToggle.IsChecked == true;
         _app.Settings.Gateway.Port = GatewayPortBox.Value is double gp && gp >= 1024 && gp <= 65535 ? (int)gp : 7420;
+        relay.Enabled = RelayToggle.IsChecked == true;
+        relay.PublicUrl = string.IsNullOrWhiteSpace(RelayUrlBox.Text) ? new RelaySettings().PublicUrl : RelayUrlBox.Text.Trim().TrimEnd('/');
+        relay.Key = RelayKeyBox.Password?.Trim() ?? "";
         _app.Settings.Save();
-        if (_app.Settings.Gateway.Enabled != gatewayWas || _app.Settings.Gateway.Port != portWas) _app.ApplyGatewaySettings();
+        bool relayChanged = relayWas != (relay.Enabled, relay.PublicUrl, relay.Key);
+        if (_app.Settings.Gateway.Enabled != gatewayWas || _app.Settings.Gateway.Port != portWas || relayChanged) _app.ApplyGatewaySettings();
         Close();
     }
 
     void Cancel_Click(object sender, RoutedEventArgs e) => Close();
+
+    System.Windows.Threading.DispatcherTimer? _relayTimer;
+
+    /// <summary>What the gateway last wrote about the tunnel; read from relay.json every couple of seconds while the window is open.</summary>
+    void ShowRelayStatus()
+    {
+        if (!_app.Settings.Gateway.Relay.Enabled) { RelayStatus.Text = "Off."; return; }
+        var status = RelayTunnel.ReadStatus(Settings.DataDir);
+        RelayStatus.Text = status switch
+        {
+            null => "No status yet. Save to start the gateway with these settings.",
+            { State: "connected", ConnectedSinceUtc: { } since } => $"Connected since {since.ToLocalTime():t}.",
+            { State: "connected" } => "Connected.",
+            { State: "connecting" } => "Connecting…",
+            { Reason: { } reason } => $"Down: {reason}",
+            _ => $"Down.",
+        };
+    }
+
+    void RelayGenerate_Click(object sender, RoutedEventArgs e) =>
+        RelayKeyBox.Password = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
+
+    void RelayCopy_Click(object sender, RoutedEventArgs e)
+    {
+        string key = RelayKeyBox.Password ?? "";
+        if (key.Length == 0) return;
+        try { Clipboard.SetText(key); } catch { }
+    }
 
     sealed record DeviceLine(string Id, string Name, string Seen);
 
