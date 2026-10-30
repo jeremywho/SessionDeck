@@ -18,6 +18,7 @@ enum LaunchOptions {
     }
 
     static var open: String? { value("--open") }
+    static var zoom: Double? { value("--zoom").flatMap(Double.init) }
 
     /// Every `--send` in order; `\e`, `\t`, `\r`, `\x03` and friends spell the bytes a key bar would send.
     static var sends: [String] {

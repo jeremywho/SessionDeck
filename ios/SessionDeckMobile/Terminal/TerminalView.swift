@@ -28,6 +28,10 @@ struct TerminalScreen: View {
         .onAppear { gateway.markViewed(entry.sessionId); bridge.sessionId = entry.sessionId.isEmpty ? entry.hostId : entry.sessionId }
         .onDisappear { gateway.markViewed(entry.sessionId) }
         .onChange(of: bridge.connected) { _, connected in
+            if connected, let z = LaunchOptions.zoom, !autoZoomed {
+                autoZoomed = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { bridge.testPinch(to: z) }
+            }
             guard connected, !autoSent, !LaunchOptions.sends.isEmpty else { return }
             autoSent = true
             Task {
@@ -41,6 +45,7 @@ struct TerminalScreen: View {
     }
 
     @State private var autoSent = false
+    @State private var autoZoomed = false
 
     /// One line is typed; a draft with newlines goes as a terminal paste so the CLI takes it whole.
     private func send() {
@@ -68,7 +73,9 @@ struct TerminalScreen: View {
 
 /// Native side of the page bridge: calls into the page, receives its messages.
 @MainActor
-final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler {
+final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, UIGestureRecognizerDelegate {
+    nonisolated func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
+
     @Published var note: String?
     @Published var selecting = false
     @Published var hasSelection = false
@@ -77,27 +84,79 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler {
     var sessionId = ""
     private let zooms = ZoomStore()
     private var zoomObservation: NSKeyValueObservation?
+    private var pinch: UIPinchGestureRecognizer?
+    private var pinchEndedAt = Date.distantPast
+    private var restoreUntil = Date.distantPast
 
     /// Remember how far this session is zoomed, and bring it back to that zoom when it opens.
+    /// A pinch of the user's is told apart from WebKit's own refits by a recognizer of our own on
+    /// the web view (WebKit does not report its scroll view as zooming while it applies a pinch).
     func watchZoom(of webView: WKWebView) {
-        // Only a pinch counts as the user's zoom: WebKit refits the scale itself after a viewport
-        // change (the desktop resizing the pane), and the restore below sets it programmatically.
+        let recognizer = UIPinchGestureRecognizer(target: self, action: #selector(pinched(_:)))
+        recognizer.cancelsTouchesInView = false
+        recognizer.delegate = self
+        webView.scrollView.addGestureRecognizer(recognizer)
+        pinch = recognizer
         zoomObservation = webView.scrollView.observe(\.zoomScale, options: [.new]) { [weak self] scrollView, _ in
-            guard let self, scrollView.isZooming else { return }
-            self.zooms.set(Double(scrollView.zoomScale), for: self.sessionId)
+            guard let self else { return }
+            let scale = Double(scrollView.zoomScale)
+            if self.userIsZooming {
+                self.zooms.set(scale, for: self.sessionId)
+                LaunchOptions.log(String(format: "zoom saved %.3f (pinch)", scale))
+            } else if Date() < self.restoreUntil, let saved = self.zooms.zoom(for: self.sessionId), abs(saved - scale) > 0.01 {
+                // WebKit refitting after the page's viewport settled: put the user's zoom back.
+                LaunchOptions.log(String(format: "zoom refit %.3f -> restoring %.3f", scale, saved))
+                self.setZoom(saved, on: scrollView)
+            }
         }
     }
 
-    /// After the page laid out at a (new) size, bring back the zoom this session had.
-    private func applySavedZoom() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
-            guard let self, let webView = self.webView, !webView.scrollView.isZooming else { return }
-            if let saved = self.zooms.zoom(for: self.sessionId) {
-                let scroll = webView.scrollView
-                let clamped = min(max(CGFloat(saved), scroll.minimumZoomScale), scroll.maximumZoomScale)
-                scroll.setZoomScale(clamped, animated: false)
+    private var userIsZooming: Bool {
+        if let pinch, pinch.state == .began || pinch.state == .changed { return true }
+        return Date().timeIntervalSince(pinchEndedAt) < 1.0
+    }
+
+    @objc private func pinched(_ g: UIPinchGestureRecognizer) {
+        if g.state == .ended || g.state == .cancelled {
+            pinchEndedAt = Date()
+            restoreUntil = .distantPast
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                guard let self, let scroll = self.webView?.scrollView else { return }
+                self.zooms.set(Double(scroll.zoomScale), for: self.sessionId)
+                LaunchOptions.log(String(format: "zoom saved %.3f (pinch ended)", Double(scroll.zoomScale)))
             }
         }
+    }
+
+    private func setZoom(_ zoom: Double, on scroll: UIScrollView) {
+        let clamped = min(max(CGFloat(zoom), scroll.minimumZoomScale), scroll.maximumZoomScale)
+        scroll.setZoomScale(clamped, animated: false)
+    }
+
+    /// After the page laid out at a (new) size, bring back the zoom this session had, and keep
+    /// bringing it back for a couple of seconds while WebKit settles its own fit.
+    private func applySavedZoom() {
+        restoreUntil = Date().addingTimeInterval(2.5)
+        for delay in [0.3, 1.0, 2.0] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self, let scroll = self.webView?.scrollView, !self.userIsZooming else { return }
+                guard let saved = self.zooms.zoom(for: self.sessionId) else { LaunchOptions.log("zoom none saved"); return }
+                if abs(Double(scroll.zoomScale) - saved) > 0.01 {
+                    LaunchOptions.log(String(format: "zoom restore %.3f (was %.3f)", saved, Double(scroll.zoomScale)))
+                    self.setZoom(saved, on: scroll)
+                }
+            }
+        }
+    }
+
+    /// Debug driving: pretend the user pinched to `zoom`, so persistence can be proven from the command line.
+    func testPinch(to zoom: Double) {
+        guard let scroll = webView?.scrollView else { return }
+        pinchEndedAt = Date()
+        restoreUntil = .distantPast
+        setZoom(zoom, on: scroll)
+        zooms.set(Double(scroll.zoomScale), for: sessionId)
+        LaunchOptions.log(String(format: "zoom saved %.3f (test pinch; asked %.3f, range %.3f-%.3f)", Double(scroll.zoomScale), zoom, Double(scroll.minimumZoomScale), Double(scroll.maximumZoomScale)))
     }
 
     /// Sends to the page; false when the page had no open socket and dropped it.
