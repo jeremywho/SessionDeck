@@ -77,25 +77,26 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler {
     var sessionId = ""
     private let zooms = ZoomStore()
     private var zoomObservation: NSKeyValueObservation?
-    private var zoomReady = false
 
     /// Remember how far this session is zoomed, and bring it back to that zoom when it opens.
     func watchZoom(of webView: WKWebView) {
+        // Only a pinch counts as the user's zoom: WebKit refits the scale itself after a viewport
+        // change (the desktop resizing the pane), and the restore below sets it programmatically.
         zoomObservation = webView.scrollView.observe(\.zoomScale, options: [.new]) { [weak self] scrollView, _ in
-            guard let self, self.zoomReady else { return }
+            guard let self, scrollView.isZooming else { return }
             self.zooms.set(Double(scrollView.zoomScale), for: self.sessionId)
         }
     }
 
+    /// After the page laid out at a (new) size, bring back the zoom this session had.
     private func applySavedZoom() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
-            guard let self, let webView = self.webView else { return }
+            guard let self, let webView = self.webView, !webView.scrollView.isZooming else { return }
             if let saved = self.zooms.zoom(for: self.sessionId) {
                 let scroll = webView.scrollView
                 let clamped = min(max(CGFloat(saved), scroll.minimumZoomScale), scroll.maximumZoomScale)
                 scroll.setZoomScale(clamped, animated: false)
             }
-            self.zoomReady = true
         }
     }
 
@@ -134,7 +135,7 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler {
             hasSelection = false
         case "selection": hasSelection = body["has"] as? Bool ?? false
         case "selecting": selecting = body["on"] as? Bool ?? false
-        case "size": if !zoomReady { applySavedZoom() }
+        case "size": applySavedZoom()
         case "connected": note = nil; connected = true; LaunchOptions.log("terminal connected")
         case "disconnected": note = "Reconnecting…"; connected = false
         case "revoked": note = "This phone was revoked from the deck."
