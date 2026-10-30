@@ -76,6 +76,7 @@ public class AttachRelayTests
 
         string target = await host.Target.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.StartsWith("/attach?token=FAKETOKEN&after=4096", target);
+        Assert.Contains("&passive=1", target);
 
         var first = await Receive(phone);
         Assert.Equal(WebSocketMessageType.Text, first.Type);

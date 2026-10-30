@@ -104,7 +104,12 @@ internal static class HostProgram
     sealed class Client
     {
         public readonly Channel<(bool Text, byte[] Data)> Out = Channel.CreateUnbounded<(bool, byte[])>(new UnboundedChannelOptions { SingleReader = true });
+        /// <summary>A viewer that answers none of the program's terminal queries (a phone through the gateway); the host answers for it.</summary>
+        public bool Passive;
     }
+
+    /// <summary>The host answers cursor-position queries itself unless a viewer that can answer them is attached: exactly one responder, never two.</summary>
+    internal static bool HostAnswersQueries(IEnumerable<bool> viewersPassive) => viewersPassive.All(p => p);
 
     static readonly List<Client> Clients = new();
     static readonly object ClientsLock = new();
@@ -305,9 +310,9 @@ internal static class HostProgram
             Interlocked.Exchange(ref _lastOutputTicks, DateTime.UtcNow.Ticks);
             _ring.Append(chunk);
             ScanTitle(chunk);
-            bool anyViewer;
-            lock (ClientsLock) anyViewer = Clients.Count > 0;
-            if (!anyViewer && chunk.IndexOf(DsrQuery) >= 0)
+            bool hostAnswers;
+            lock (ClientsLock) hostAnswers = HostAnswersQueries(Clients.Select(c => c.Passive));
+            if (hostAnswers && chunk.IndexOf(DsrQuery) >= 0)
             {
                 try { _pty.Input.Write(DsrReply); _pty.Input.Flush(); } catch { }
             }
@@ -408,7 +413,7 @@ internal static class HostProgram
         await Gateway.MiniHttp.WriteAscii(stream, $"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n\r\n");
 
         using var ws = WebSocket.CreateFromStream(stream, new WebSocketCreationOptions { IsServer = true, KeepAliveInterval = TimeSpan.FromSeconds(30) });
-        var client = new Client();
+        var client = new Client { Passive = query.TryGetValue("passive", out var passive) && passive == "1" };
 
         (long start, byte[] data) = _ring.Since(after);
         long end = start + data.Length;

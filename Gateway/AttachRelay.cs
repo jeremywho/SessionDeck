@@ -12,8 +12,9 @@ namespace SessionDeck.Gateway;
 /// </summary>
 internal static class AttachRelay
 {
+    /// <summary>Phones attach as passive viewers: the page answers no terminal queries, so the host keeps answering them.</summary>
     public static Uri HostUri(HostRecord host, long after) =>
-        new($"ws://127.0.0.1:{host.Port}/attach?token={Uri.EscapeDataString(host.Token)}&after={Math.Max(0, after)}");
+        new($"ws://127.0.0.1:{host.Port}/attach?token={Uri.EscapeDataString(host.Token)}&after={Math.Max(0, after)}&passive=1");
 
     public static async Task RunAsync(WebSocket phone, HostRecord host, long after, CancellationToken ct)
     {

@@ -80,6 +80,16 @@ public class HostRecordWriteTests : IDisposable
     }
 
     [Fact]
+    public void The_host_answers_terminal_queries_unless_a_viewer_that_can_is_attached()
+    {
+        Assert.True(HostProgram.HostAnswersQueries(Array.Empty<bool>()));
+        Assert.True(HostProgram.HostAnswersQueries(new[] { true }));
+        Assert.True(HostProgram.HostAnswersQueries(new[] { true, true }));
+        Assert.False(HostProgram.HostAnswersQueries(new[] { false }));
+        Assert.False(HostProgram.HostAnswersQueries(new[] { true, false }));
+    }
+
+    [Fact]
     public void A_snapshot_carries_the_pty_size_and_a_resize_announces_the_new_one()
     {
         using var snap = System.Text.Json.JsonDocument.Parse(HostProgram.SnapshotJson(10, 20, "t", 132, 40));
