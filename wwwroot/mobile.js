@@ -26,7 +26,7 @@
     cursorStyle: 'bar',
     cursorInactiveStyle: 'none',
     allowProposedApi: true,
-    disableStdin: false,
+    disableStdin: true,
     cols: 120,
     rows: 30,
   });
@@ -168,9 +168,34 @@
     return text;
   };
   window.sdScrollToBottom = () => term.scrollToBottom();
-  window.sdFocus = on => { if (on) term.focus(); else term.blur(); };
-  term.textarea.addEventListener('focus', () => post({ type: 'keyboard', on: true }));
-  term.textarea.addEventListener('blur', () => post({ type: 'keyboard', on: false }));
+  // The phone keyboard belongs to the native app, which sends only what changed; xterm's own
+  // textarea never raises it. A tap on the terminal asks the app for the keyboard.
+  term.textarea.setAttribute('inputmode', 'none');
+  term.textarea.setAttribute('readonly', 'readonly');
+  let tapStart = null;
+  el.addEventListener('touchstart', ev => { if (!selecting && ev.touches.length === 1) tapStart = { x: ev.touches[0].clientX, y: ev.touches[0].clientY, t: Date.now() }; }, { passive: true });
+  el.addEventListener('touchend', ev => {
+    if (!tapStart || selecting) { tapStart = null; return; }
+    const t = ev.changedTouches[0];
+    const moved = Math.hypot(t.clientX - tapStart.x, t.clientY - tapStart.y);
+    if (moved < 12 && Date.now() - tapStart.t < 400) post({ type: 'tap' });
+    tapStart = null;
+  });
+
+  // Where the text ends: the bottom edge (CSS px, page coordinates) of the last row with anything on
+  // it, so the app can scroll to the end of the output rather than to xterm's blank spare rows.
+  window.sdTextBottom = () => {
+    const buf = term.buffer.active;
+    let last = -1;
+    for (let r = term.rows - 1; r >= 0; r--) {
+      const line = buf.getLine(buf.viewportY + r);
+      if (line && line.translateToString(true).trim().length > 0) { last = r; break; }
+    }
+    if (last < 0) last = buf.cursorY;
+    const cell = term._core._renderService.dimensions.css.cell;
+    const rect = term.element.getBoundingClientRect();
+    return rect.top + window.scrollY + (last + 1) * cell.height;
+  };
   window.sdReconnect = () => { if (!ended) { retries = 0; connect(); } };
 
   term.onSelectionChange(() => { if (selecting) post({ type: 'selection', has: term.hasSelection() }); });

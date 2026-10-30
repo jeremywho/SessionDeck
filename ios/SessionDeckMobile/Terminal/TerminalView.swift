@@ -17,6 +17,7 @@ struct TerminalScreen: View {
             if let note = bridge.note {
                 Text(note).font(.caption).foregroundStyle(.orange).frame(maxWidth: .infinity).padding(4).background(Color(white: 0.12))
             }
+            TypingProxy(bridge: bridge).frame(height: 1)
             InputBar(selecting: bridge.selecting, hasSelection: bridge.hasSelection, keyboardShown: bridge.keyboardShown,
                      onKey: { key in Task { await bridge.input(key.bytes) } },
                      onNewline: { Task { await bridge.input("\\\r") } },
@@ -69,15 +70,31 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
     @Published var connected = false
     @Published var keyboardShown = false
     weak var webView: WKWebView?
+    weak var proxy: UITextView?
 
-    func focus(_ on: Bool) { webView?.evaluateJavaScript("window.sdFocus(\(on ? "true" : "false"))") }
+    func focus(_ on: Bool) {
+        if on { proxy?.becomeFirstResponder() } else { proxy?.resignFirstResponder() }
+    }
 
-    /// The newest output is what matters: the web view scrolls to its bottom edge.
+    func keyboardCameUp() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.scrollToBottom() }
+    }
+
+    /// The newest output is what matters: xterm's viewport goes to its end and the page scrolls so the
+    /// last row with text on it sits at the bottom of the screen, not xterm's blank spare rows.
     func scrollToBottom() {
-        guard let webView, case let scroll = webView.scrollView else { return }
-        webView.evaluateJavaScript("window.sdScrollToBottom()")
-        let y = max(0, scroll.contentSize.height - scroll.bounds.height + scroll.adjustedContentInset.bottom)
-        scroll.setContentOffset(CGPoint(x: scroll.contentOffset.x, y: y), animated: false)
+        guard let webView else { return }
+        webView.evaluateJavaScript("window.sdScrollToBottom(); window.sdTextBottom()") { [weak self] result, _ in
+            guard let self, let webView = self.webView else { return }
+            let scroll = webView.scrollView
+            let visible = scroll.bounds.height - scroll.adjustedContentInset.bottom
+            let maxY = max(0, scroll.contentSize.height - visible)
+            var y = maxY
+            if let bottomCss = result as? Double {
+                y = min(maxY, max(0, CGFloat(bottomCss) * scroll.zoomScale - visible + 8))
+            }
+            scroll.setContentOffset(CGPoint(x: scroll.contentOffset.x, y: y), animated: false)
+        }
     }
     var sessionId = ""
     private let zooms = ZoomStore()
@@ -196,7 +213,7 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
         case "selecting": selecting = body["on"] as? Bool ?? false
         case "size": applySavedZoom()
         case "replayed": DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.scrollToBottom() }
-        case "keyboard": keyboardShown = body["on"] as? Bool ?? false; if keyboardShown { DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.scrollToBottom() } }
+        case "tap": if !selecting { focus(true) }
         case "connected": note = nil; connected = true; LaunchOptions.log("terminal connected")
         case "disconnected": note = "Reconnecting…"; connected = false
         case "revoked": note = "This phone was revoked from the deck."
