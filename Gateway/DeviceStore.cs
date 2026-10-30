@@ -8,9 +8,10 @@ namespace SessionDeck.Gateway;
 internal sealed record PairedDevice(string Id, string Name, string TokenHash, DateTime PairedAtUtc, DateTime LastSeenUtc);
 
 /// <summary>
-/// The phones allowed to talk to the gateway. A device is let in once with a short code shown on the
-/// desktop and from then on by a token only it holds; the file keeps the token's hash, so reading the
-/// file does not give the token away.
+/// The phones allowed to talk to the gateway. A device is let in with a short code shown on the
+/// desktop, good for five minutes and for as many devices as are paired in that time (an iPad and a
+/// phone from one code), and from then on by a token only it holds; the file keeps the token's hash,
+/// so reading the file does not give the token away.
 /// </summary>
 internal sealed class DeviceStore
 {
@@ -33,7 +34,7 @@ internal sealed class DeviceStore
 
     public IReadOnlyList<PairedDevice> Devices { get { lock (_gate) return _devices.ToList(); } }
 
-    /// <summary>A fresh code, replacing any outstanding one; good for five minutes and one device.</summary>
+    /// <summary>A fresh code, replacing any outstanding one; good for five minutes, for every device paired in that time.</summary>
     public string IssuePairingCode(DateTime nowUtc)
     {
         var chars = new char[8];
@@ -54,7 +55,6 @@ internal sealed class DeviceStore
         lock (_gate)
         {
             if (_code == null || nowUtc - _codeIssuedUtc > CodeLifetime || !string.Equals(code.Trim(), _code, StringComparison.OrdinalIgnoreCase)) return null;
-            _code = null;
             string token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
             var device = new PairedDevice(Guid.NewGuid().ToString("N")[..12], string.IsNullOrWhiteSpace(deviceName) ? "Phone" : deviceName.Trim(), Hash(token), nowUtc, nowUtc);
             _devices.Add(device);

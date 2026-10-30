@@ -34,6 +34,19 @@
   term.unicode.activeVersion = '11';
   term.open(el);
 
+  // With stdin disabled xterm answers none of the program's queries, and a shell or CLI that asks
+  // where the cursor is waits for the reply; the host answers only while no viewer is attached.
+  // These are the replies xterm itself would send.
+  const reply = text => send({ type: 'input', data: text });
+  term.parser.registerCsiHandler({ final: 'n' }, params => {
+    if (params[0] === 6) { reply(`\x1b[${term.buffer.active.cursorY + 1};${term.buffer.active.cursorX + 1}R`); return true; }
+    if (params[0] === 5) { reply('\x1b[0n'); return true; }
+    return false;
+  });
+  term.parser.registerCsiHandler({ final: 'c' }, () => { reply('\x1b[?1;2c'); return true; });
+  term.parser.registerCsiHandler({ prefix: '>', final: 'c' }, () => { reply('\x1b[>0;276;0c'); return true; });
+  term.parser.registerCsiHandler({ prefix: '?', final: 'u' }, () => { reply('\x1b[?0u'); return true; });
+
   let ws = null, seq = SD.after || 0, retries = 0, retryTimer = null, ended = false, selecting = false;
 
   function send(obj) {

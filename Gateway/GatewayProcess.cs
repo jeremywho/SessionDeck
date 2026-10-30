@@ -148,7 +148,13 @@ internal static class GatewayProcess
         // Listen only once there is a list to serve: a phone that connects during the Codex warm-up
         // would otherwise be shown an empty deck for ten seconds.
         SessionPipeline.WarmUp();
-        try { loop.Tick(); } catch (Exception ex) { App.LogError(ex); }
+        bool built = false;
+        for (int attempt = 0; attempt < 3 && !built; attempt++)
+        {
+            try { loop.Tick(); built = true; }
+            catch (Exception ex) { App.LogError(ex); Log($"first catalog build failed: {ex.Message}"); Thread.Sleep(2000); }
+        }
+        if (!built) { Log("no catalog could be built; not listening"); return 1; }
         try
         {
             server.StartAsync().GetAwaiter().GetResult();

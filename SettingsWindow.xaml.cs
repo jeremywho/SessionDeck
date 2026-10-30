@@ -113,7 +113,7 @@ internal partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         QrImage.Source = image;
         QrImage.Visibility = Visibility.Visible;
         PairText.Text = $"{host}:{client.Port}   code {issued.Value.Code}";
-        PairNote.Text = "Scan with the phone app, or type the address and code. Good for five minutes, one phone.";
+        PairNote.Text = "Scan with each device's Session Deck app, or type the address and code. Good for five minutes.";
     }
 
     async void Revoke_Click(object sender, RoutedEventArgs e)

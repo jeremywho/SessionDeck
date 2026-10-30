@@ -14,7 +14,7 @@ public class DeviceStoreTests : IDisposable
     public void Dispose() => Directory.Delete(_dir, true);
 
     [Fact]
-    public void A_code_pairs_once_within_five_minutes_and_the_token_authenticates_until_revoked()
+    public void A_code_pairs_every_device_within_five_minutes_and_each_token_authenticates_until_revoked()
     {
         var store = new DeviceStore(_path);
         string code = store.IssuePairingCode(T0);
@@ -26,8 +26,12 @@ public class DeviceStoreTests : IDisposable
         Assert.NotNull(paired);
         Assert.Equal(64, paired!.Value.Token.Length);
         Assert.Equal("Jeremy's iPhone", paired.Value.Device.Name);
-        Assert.Null(store.Redeem(code, "again", T0.AddMinutes(2)));
-        Assert.Null(store.CodeExpiresUtc);
+        var second = store.Redeem(code, "Jeremy's iPad", T0.AddMinutes(2));
+        Assert.NotNull(second);
+        Assert.NotEqual(paired.Value.Token, second!.Value.Token);
+        Assert.Equal(2, store.Devices.Count);
+        Assert.Null(store.Redeem(code, "late", T0.AddMinutes(6)));
+        Assert.Equal(T0.AddMinutes(5), store.CodeExpiresUtc);
 
         Assert.Equal(paired.Value.Device.Id, store.Authenticate(paired.Value.Token, T0.AddMinutes(3))!.Id);
         Assert.Null(store.Authenticate("nope", T0));
@@ -37,7 +41,8 @@ public class DeviceStoreTests : IDisposable
         Assert.True(store.Revoke(paired.Value.Device.Id));
         Assert.False(store.Revoke(paired.Value.Device.Id));
         Assert.Null(store.Authenticate(paired.Value.Token, T0.AddMinutes(4)));
-        Assert.Empty(store.Devices);
+        Assert.Equal(second.Value.Device.Id, store.Authenticate(second.Value.Token, T0.AddMinutes(4))!.Id);
+        Assert.Single(store.Devices);
     }
 
     [Fact]
