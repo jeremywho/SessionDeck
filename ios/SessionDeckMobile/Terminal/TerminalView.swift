@@ -171,9 +171,10 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
 
     /// Where the reader is, sampled only while the zoom is the stable one: a restore in progress or
     /// WebKit's refit moves the offset on its own, and that is not the reader scrolling.
-    private func noteOffset(_ scroll: UIScrollView) {
+    private func noteOffset(_ scroll: UIScrollView, force: Bool = false) {
         let saved = zooms.zoom(for: sessionId) ?? Double(scroll.zoomScale)
-        guard abs(Double(scroll.zoomScale) - saved) < 0.01, !userIsZooming, Date() >= keepingUntil else { return }
+        guard abs(Double(scroll.zoomScale) - saved) < 0.01 else { return }
+        guard force || (!userIsZooming && Date() >= keepingUntil) else { return }
         let visible = scroll.bounds.height - scroll.adjustedContentInset.bottom
         let maxY = max(0, scroll.contentSize.height - visible)
         readerOffsetY = scroll.contentOffset.y
@@ -204,6 +205,8 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
         for delay in [0.0, 0.15, 0.3] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 guard let self, let scroll = self.webView?.scrollView, !self.userIsZooming else { return }
+                // A finger on the page wins: the reader is choosing a new place, not WebKit.
+                if scroll.isTracking || scroll.isDragging || scroll.isDecelerating { self.keepingUntil = .distantPast; return }
                 let visible = scroll.bounds.height - scroll.adjustedContentInset.bottom
                 let target = min(y, max(0, scroll.contentSize.height - visible))
                 if abs(scroll.contentOffset.y - target) > 0.5 {
@@ -211,6 +214,11 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
                     scroll.setContentOffset(CGPoint(x: scroll.contentOffset.x, y: target), animated: false)
                 }
             }
+        }
+        // Whatever the page shows once the pause is over is the reader's place, even if nothing moved since.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in
+            guard let self, let scroll = self.webView?.scrollView else { return }
+            self.noteOffset(scroll, force: true)
         }
     }
     var sessionId = ""
@@ -271,6 +279,11 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
                 guard let self, let scroll = self.webView?.scrollView else { return }
                 self.zooms.set(Double(scroll.zoomScale), for: self.sessionId)
                 LaunchOptions.log(String(format: "zoom saved %.3f (pinch ended)", Double(scroll.zoomScale)))
+            }
+            // The place sampled before the pinch belongs to the old scale; take it again once the pinch has settled.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.05) { [weak self] in
+                guard let self, let scroll = self.webView?.scrollView else { return }
+                self.noteOffset(scroll, force: true)
             }
         }
     }
