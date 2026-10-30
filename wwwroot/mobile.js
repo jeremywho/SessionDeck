@@ -185,13 +185,23 @@
     if (row < 0 || row >= term.rows) return null;
     const line = term.buffer.active.getLine(term.buffer.active.viewportY + row);
     if (!line) return null;
-    const text = line.translateToString(false);
-    let m;
-    while ((m = URL_RE.exec(text)) !== null) {
-      const end = m.index + m[0].length;
-      if (col >= m.index && col < end) { URL_RE.lastIndex = 0; return m[0].replace(/[.,;:!?]+$/, ''); }
+    // Columns are not string offsets: a wide character takes two cells and one or more code units.
+    // The line is rebuilt cell by cell so the tapped column maps to the offset it really has.
+    let text = '', offset = -1;
+    for (let c = 0; c < line.length; c++) {
+      const cell = line.getCell(c);
+      if (!cell) break;
+      if (c === col) offset = text.length;
+      text += cell.getWidth() === 0 ? '' : (cell.getChars() || ' ');
     }
-    return null;
+    if (offset < 0) return null;
+    URL_RE.lastIndex = 0;
+    let m, found = null;
+    while ((m = URL_RE.exec(text)) !== null) {
+      if (offset >= m.index && offset < m.index + m[0].length) { found = m[0].replace(/[.,;:!?]+$/, ''); break; }
+    }
+    URL_RE.lastIndex = 0;
+    return found;
   }
   let tapStart = null;
   el.addEventListener('touchstart', ev => { tapStart = (!selecting && ev.touches.length === 1) ? { x: ev.touches[0].clientX, y: ev.touches[0].clientY, t: Date.now() } : null; }, { passive: true });

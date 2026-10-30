@@ -34,7 +34,7 @@ struct TerminalScreen: View {
                      onKey: { key in speech.stop(); bridge.resetTyping(); Task { await bridge.input(key.bytes) } },
                      onNewline: { speech.stop(); bridge.resetTyping(); Task { await bridge.input("\\\r") } },
                      onPaste: paste, onCopy: copy, onSelect: { bridge.select(!bridge.selecting) },
-                     onKeyboard: { bridge.focus(!bridge.keyboardShown) },
+                     onKeyboard: { bridge.toggleKeyboard() },
                      onMic: {
                          // Speech appends at the cursor; whatever the keyboard had typed is left as it is.
                          bridge.resetTyping()
@@ -96,7 +96,12 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
     @Published var connected = false
     @Published var keyboardShown = false
     @Published var linkToOpen: URL?
+    /// What the user asked for last, apart from what the editing callbacks report: WebKit can take first
+    /// responder on the same tap, which would read as "hidden" and make a hide-tap reopen the keyboard.
+    private var wantKeyboard = false
     weak var webView: WKWebView?
+
+    func toggleKeyboard() { focus(!wantKeyboard) }
     weak var proxy: ProxyTextView?
 
     /// Runs before the keyboard sends anything, so another input source (speech) can yield first.
@@ -106,6 +111,7 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
     func resetTyping() { proxy?.resetBaseline() }
 
     func focus(_ on: Bool) {
+        wantKeyboard = on
         if on { proxy?.becomeFirstResponder() } else { proxy?.resignFirstResponder() }
     }
 
@@ -258,7 +264,7 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
         case "selecting": selecting = body["on"] as? Bool ?? false
         case "size": applySavedZoom()
         case "replayed": DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.scrollToBottom() }
-        case "tap": if !selecting { focus(!keyboardShown) }
+        case "tap": if !selecting { toggleKeyboard() }
         case "open": if let s = body["uri"] as? String, let url = URL(string: s), ["http", "https"].contains(url.scheme ?? "") { linkToOpen = url }
         case "connected": note = nil; connected = true; LaunchOptions.log("terminal connected")
         case "disconnected": note = "Reconnecting…"; connected = false
