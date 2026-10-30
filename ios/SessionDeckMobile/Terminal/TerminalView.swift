@@ -14,17 +14,20 @@ struct TerminalScreen: View {
             if let pairing = gateway.pairing {
                 TerminalWebView(bridge: bridge, pairing: pairing, hostId: entry.hostId)
                     .ignoresSafeArea(.container, edges: .bottom)
+                    .overlay(alignment: .bottom) {
+                        // Laid over the terminal, not stacked under it: a strip that changed the web view's height would refit its zoom.
+                        if speech.listening {
+                            HStack(spacing: 6) {
+                                Image(systemName: "waveform").foregroundStyle(.red)
+                                Text(speech.transcript.isEmpty ? "Listening…" : speech.transcript).lineLimit(2).font(.callout)
+                                Spacer()
+                            }
+                            .padding(.horizontal, 10).padding(.vertical, 6).frame(maxWidth: .infinity).background(Color(white: 0.12).opacity(0.92))
+                        }
+                    }
             }
             if let note = bridge.note ?? speech.problem {
                 Text(note).font(.caption).foregroundStyle(.orange).frame(maxWidth: .infinity).padding(4).background(Color(white: 0.12))
-            }
-            if speech.listening {
-                HStack(spacing: 6) {
-                    Image(systemName: "waveform").foregroundStyle(.red)
-                    Text(speech.transcript.isEmpty ? "Listening…" : speech.transcript).lineLimit(2).font(.callout)
-                    Spacer()
-                }
-                .padding(.horizontal, 10).padding(.vertical, 6).frame(maxWidth: .infinity).background(Color(white: 0.12))
             }
             TypingProxy(bridge: bridge).frame(height: 1)
             InputBar(selecting: bridge.selecting, hasSelection: bridge.hasSelection, keyboardShown: bridge.keyboardShown, listening: speech.listening,
@@ -52,6 +55,7 @@ struct TerminalScreen: View {
             if connected, let z = LaunchOptions.zoom, !autoZoomed {
                 autoZoomed = true
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { bridge.testPinch(to: z) }
+                if LaunchOptions.focus { DispatchQueue.main.asyncAfter(deadline: .now() + 6.0) { LaunchOptions.log("raising keyboard"); bridge.focus(true) } }
             }
             guard connected, !autoSent, !LaunchOptions.sends.isEmpty else { return }
             autoSent = true
@@ -146,13 +150,24 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
             if self.userIsZooming {
                 self.zooms.set(scale, for: self.sessionId)
                 LaunchOptions.log(String(format: "zoom saved %.3f (pinch)", scale))
-            } else if Date() < self.restoreUntil, let saved = self.zooms.zoom(for: self.sessionId), abs(saved - scale) > 0.01 {
-                // WebKit refitting after the page's viewport settled: put the user's zoom back.
-                LaunchOptions.log(String(format: "zoom refit %.3f -> restoring %.3f", scale, saved))
-                self.setZoom(saved, on: scrollView)
-                self.scrollToBottom()
+            } else if let saved = self.zooms.zoom(for: self.sessionId), abs(saved - scale) > 0.01 {
+                if Date() < self.restoreUntil {
+                    // WebKit refitting after the page's viewport settled or the view changed size: put the user's zoom back.
+                    LaunchOptions.log(String(format: "zoom refit %.3f -> restoring %.3f", scale, saved))
+                    self.setZoom(saved, on: scrollView)
+                    self.scrollToBottom()
+                } else {
+                    LaunchOptions.log(String(format: "zoom changed to %.3f outside a restore window (saved %.3f)", scale, saved))
+                }
             }
         }
+    }
+
+    /// The web view changed size (the keyboard rose, a strip appeared): WebKit refits its scale to the
+    /// new box, which is not what the user asked for, so the saved zoom is put back.
+    func viewResized() {
+        LaunchOptions.log("web view resized")
+        applySavedZoom()
     }
 
     private var userIsZooming: Bool {
@@ -251,6 +266,21 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
     }
 }
 
+/// A web view that reports when its size changes, so the saved zoom can be restored after WebKit refits.
+final class ResizeAwareWebView: WKWebView {
+    var onResize: (() -> Void)?
+    private var lastSize = CGSize.zero
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        if bounds.size != lastSize {
+            let first = lastSize == .zero
+            lastSize = bounds.size
+            if !first { onResize?() }
+        }
+    }
+}
+
 struct TerminalWebView: UIViewRepresentable {
     @ObservedObject var bridge: TerminalBridge
     let pairing: Pairing
@@ -262,7 +292,8 @@ struct TerminalWebView: UIViewRepresentable {
         config.userContentController.addUserScript(WKUserScript(source: boot, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         config.userContentController.add(bridge, name: "sd")
         config.allowsInlineMediaPlayback = true
-        let view = WKWebView(frame: .zero, configuration: config)
+        let view = ResizeAwareWebView(frame: .zero, configuration: config)
+        view.onResize = { [weak bridge] in bridge?.viewResized() }
         view.isOpaque = false
         view.backgroundColor = UIColor(red: 0.047, green: 0.047, blue: 0.047, alpha: 1)
         view.scrollView.backgroundColor = view.backgroundColor
