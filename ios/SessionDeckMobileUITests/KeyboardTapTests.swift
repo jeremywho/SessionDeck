@@ -2,11 +2,11 @@ import XCTest
 
 /// Drives a real finger-style tap on the terminal of an already paired device: the keyboard must
 /// come up and stay up without a single dip, and the next tap must put it away. The session to open
-/// comes from the test bundle's SDTestHost key (xcodebuild INFOPLIST_KEY_SDTestHost=<hostId>).
+/// comes from TestConfig.host, written on the build machine before the run.
 final class KeyboardTapTests: XCTestCase {
     func testATapRaisesTheKeyboardCleanlyAndANextTapLowersIt() throws {
-        let host = Bundle(for: Self.self).infoDictionary?["SDTestHost"] as? String ?? ""
-        try XCTSkipIf(host.isEmpty, "SDTestHost not set")
+        let host = TestConfig.host
+        try XCTSkipIf(host.isEmpty, "TestConfig.host not set")
         let app = XCUIApplication()
         app.launchArguments = ["--open", host]
         app.launch()
