@@ -19,8 +19,8 @@ struct TerminalScreen: View {
             }
             TypingProxy(bridge: bridge).frame(height: 1)
             InputBar(selecting: bridge.selecting, hasSelection: bridge.hasSelection, keyboardShown: bridge.keyboardShown,
-                     onKey: { key in Task { await bridge.input(key.bytes) } },
-                     onNewline: { Task { await bridge.input("\\\r") } },
+                     onKey: { key in bridge.resetTyping(); Task { await bridge.input(key.bytes) } },
+                     onNewline: { bridge.resetTyping(); Task { await bridge.input("\\\r") } },
                      onPaste: paste, onCopy: copy, onSelect: { bridge.select(!bridge.selecting) },
                      onKeyboard: { bridge.focus(!bridge.keyboardShown) })
         }
@@ -51,6 +51,7 @@ struct TerminalScreen: View {
 
     private func paste() {
         guard let s = UIPasteboard.general.string, !s.isEmpty else { return }
+        bridge.resetTyping()
         Task { if await bridge.input(Keys.pasteSequence(s)) == false { bridge.note = "Not connected. Nothing was pasted." } }
     }
 
@@ -70,7 +71,10 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
     @Published var connected = false
     @Published var keyboardShown = false
     weak var webView: WKWebView?
-    weak var proxy: UITextView?
+    weak var proxy: ProxyTextView?
+
+    /// Anything that moves the terminal's cursor on its own makes the typed buffer stale; typing then starts afresh.
+    func resetTyping() { proxy?.resetBaseline() }
 
     func focus(_ on: Bool) {
         if on { proxy?.becomeFirstResponder() } else { proxy?.resignFirstResponder() }

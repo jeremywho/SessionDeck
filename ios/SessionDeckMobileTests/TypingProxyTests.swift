@@ -2,34 +2,41 @@ import XCTest
 @testable import SessionDeckMobile
 
 final class TypingProxyTests: XCTestCase {
-    typealias D = TypingProxy.Coordinator
+    typealias P = ProxyTextView
+    let del = "\u{7f}"
 
     func testTypingSendsOnlyTheNewTail() {
-        XCTAssertEqual(D.delta(from: "", to: "h"), "h")
-        XCTAssertEqual(D.delta(from: "h", to: "he"), "e")
-        XCTAssertEqual(D.delta(from: "hello", to: "hello world"), " world")
+        XCTAssertEqual(P.delta(from: "", to: "h"), "h")
+        XCTAssertEqual(P.delta(from: "h", to: "he"), "e")
+        XCTAssertEqual(P.delta(from: "hello", to: "hello world"), " world")
+        XCTAssertEqual(P.delta(from: "same", to: "same"), "")
     }
 
     func testADictationRewriteBecomesBackspacesAndTheCorrectedTail() {
-        // iOS replaces "I wanted to" with "I want to": back over "ed to" (five), then " to".
-        XCTAssertEqual(D.delta(from: "I wanted to", to: "I want to"), String(repeating: "\u{7f}", count: 5) + " to")
-        XCTAssertEqual(D.delta(from: "The problem", to: "The problem is"), " is")
-        XCTAssertEqual(D.delta(from: "abc", to: "ab"), "\u{7f}")
-        XCTAssertEqual(D.delta(from: "abc", to: ""), "\u{7f}\u{7f}\u{7f}")
-        XCTAssertEqual(D.delta(from: "same", to: "same"), "")
+        XCTAssertEqual(P.delta(from: "I wanted to", to: "I want to"), String(repeating: del, count: 5) + " to")
+        XCTAssertEqual(P.delta(from: "The problem", to: "The problem is"), " is")
+        XCTAssertEqual(P.delta(from: "abc", to: "ab"), del)
+        XCTAssertEqual(P.delta(from: "abc", to: ""), String(repeating: del, count: 3))
+    }
+
+    func testErasuresAreCountedInUtf16UnitsAsTheTerminalDeletesThem() {
+        XCTAssertEqual(P.delta(from: "a\u{0301}", to: "b"), del + del + "b")
+        XCTAssertEqual(P.delta(from: "x😀", to: "x"), del + del)
+        XCTAssertEqual(P.delta(from: "é", to: "e"), del + "e")
     }
 
     func testTheGrowingInterimResultsFromTheBugReportCollapseToOnePhrase() {
         let interims = ["Th", "The", "The problem", "The problem is with", "The problem is with the", "The problem is with the scroll", "The problem is with the scrolling"]
-        var terminal = ""
+        var terminal: [Unicode.UTF16.CodeUnit] = []
         var sent = ""
         for now in interims {
-            let bytes = D.delta(from: sent, to: now)
+            let bytes = P.delta(from: sent, to: now)
             sent = now
-            for ch in bytes {
-                if ch == "\u{7f}" { if !terminal.isEmpty { terminal.removeLast() } } else { terminal.append(ch) }
+            var i = bytes.utf16.makeIterator()
+            while let u = i.next() {
+                if u == 0x7f { if !terminal.isEmpty { terminal.removeLast() } } else { terminal.append(u) }
             }
         }
-        XCTAssertEqual(terminal, "The problem is with the scrolling")
+        XCTAssertEqual(String(decoding: terminal, as: UTF16.self), "The problem is with the scrolling")
     }
 }
