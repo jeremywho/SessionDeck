@@ -14,6 +14,14 @@ final class KeysTests: XCTestCase {
         XCTAssertEqual(Keys.bytes(for: .enter), "\r")
     }
 
+    func testLaunchArgumentEscapesSpellKeyBytes() {
+        XCTAssertEqual(LaunchOptions.unescape("abc\\e"), "abc\u{1b}")
+        XCTAssertEqual(LaunchOptions.unescape("\\x03"), "\u{03}")
+        XCTAssertEqual(LaunchOptions.unescape("a\\tb\\r"), "a\tb\r")
+        XCTAssertEqual(LaunchOptions.unescape("C:\\\\x"), "C:\\x")
+        XCTAssertEqual(LaunchOptions.unescape("plain"), "plain")
+    }
+
     func testJsLiteralEscapesWhatWouldBreakAScript() {
         XCTAssertEqual(Keys.jsLiteral("ls"), "\"ls\"")
         XCTAssertEqual(Keys.jsLiteral("a\"b"), "\"a\\\"b\"")

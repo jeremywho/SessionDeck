@@ -28,11 +28,14 @@ struct TerminalScreen: View {
         .onAppear { gateway.markViewed(entry.sessionId) }
         .onDisappear { gateway.markViewed(entry.sessionId) }
         .onChange(of: bridge.connected) { _, connected in
-            guard connected, !autoSent, let line = LaunchOptions.send else { return }
+            guard connected, !autoSent, !LaunchOptions.sends.isEmpty else { return }
             autoSent = true
             Task {
-                let ok = await bridge.input(line + "\r")
-                LaunchOptions.log("sent \(ok ? "ok" : "failed"): \(line)")
+                for line in LaunchOptions.sends {
+                    let ok = await bridge.input(line)
+                    LaunchOptions.log("sent \(ok ? "ok" : "failed"): \(line.debugDescription)")
+                    try? await Task.sleep(nanoseconds: 700_000_000)
+                }
             }
         }
     }
