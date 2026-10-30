@@ -203,11 +203,21 @@ internal static class GatewayProcess
         var relay = settings.Gateway.Relay;
         if (!relay.Enabled || relay.Key.Trim().Length == 0) { Log("relay off"); return null; }
         string last = "";
-        return new RelayTunnel(relay, gatewayPort, dataDir, RelayTunnel.StartSsh, RelayTunnel.HttpProbe(relay.PublicUrl, relay.Key), status =>
+        try
         {
-            RelayTunnel.WriteStatus(dataDir, status);
-            string line = status.Reason == null ? status.State : $"{status.State}: {status.Reason}";
-            if (line != last) { last = line; Log($"relay {line}"); }
-        });
+            return new RelayTunnel(relay, gatewayPort, dataDir, RelayTunnel.StartSsh, RelayTunnel.HttpProbe(relay.PublicUrl, relay.Key), status =>
+            {
+                try { RelayTunnel.WriteStatus(dataDir, status); } catch (Exception ex) { App.LogError(ex); }
+                string line = status.Reason == null ? status.State : $"{status.State}: {status.Reason}";
+                if (line != last) { last = line; Log($"relay {line}"); }
+            });
+        }
+        catch (Exception ex)
+        {
+            // The relay must never take the LAN gateway down with it.
+            Log($"relay not started: {ex.Message}");
+            App.LogError(ex);
+            return null;
+        }
     }
 }

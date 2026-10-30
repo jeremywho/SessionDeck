@@ -79,7 +79,9 @@ internal partial class SettingsWindow : Wpf.Ui.Controls.FluentWindow
         _app.Settings.Gateway.Enabled = GatewayToggle.IsChecked == true;
         _app.Settings.Gateway.Port = GatewayPortBox.Value is double gp && gp >= 1024 && gp <= 65535 ? (int)gp : 7420;
         relay.Enabled = RelayToggle.IsChecked == true;
-        relay.PublicUrl = string.IsNullOrWhiteSpace(RelayUrlBox.Text) ? new RelaySettings().PublicUrl : RelayUrlBox.Text.Trim().TrimEnd('/');
+        string url = RelayUrlBox.Text?.Trim().TrimEnd('/') ?? "";
+        if (url.Length > 0 && !url.Contains("://")) url = "https://" + url;
+        relay.PublicUrl = url.Length == 0 ? new RelaySettings().PublicUrl : url;
         relay.Key = RelayKeyBox.Password?.Trim() ?? "";
         _app.Settings.Save();
         bool relayChanged = relayWas != (relay.Enabled, relay.PublicUrl, relay.Key);

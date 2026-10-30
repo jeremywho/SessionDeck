@@ -187,7 +187,8 @@ internal sealed class RelayTunnel : IAsyncDisposable
     /// <summary>GET <c>&lt;publicUrl&gt;/health</c> with the relay key: null when it answered 204, otherwise what went wrong.</summary>
     public static Func<CancellationToken, Task<string?>> HttpProbe(string publicUrl, string key)
     {
-        var uri = new Uri(publicUrl.TrimEnd('/') + "/health");
+        if (!Uri.TryCreate(publicUrl.Trim().TrimEnd('/') + "/health", UriKind.Absolute, out var uri) || (uri.Scheme != "https" && uri.Scheme != "http"))
+            return _ => Task.FromResult<string?>($"relay URL is not an http(s) address: {publicUrl}");
         return async ct =>
         {
             try
@@ -239,9 +240,7 @@ internal sealed class RelayTunnel : IAsyncDisposable
         {
             await _process.WaitForExitAsync();
             _process.WaitForExit();
-            var job = _job;
-            _job = IntPtr.Zero;
-            if (job != IntPtr.Zero) ChildJob.Close(job);
+            ReleaseJob();
             return _process.ExitCode;
         }
 
@@ -252,8 +251,13 @@ internal sealed class RelayTunnel : IAsyncDisposable
         public void Kill()
         {
             try { if (!_process.HasExited) _process.Kill(entireProcessTree: true); } catch { }
-            var job = _job;
-            _job = IntPtr.Zero;
+            ReleaseJob();
+        }
+
+        /// <summary>Exactly one of the exit path and Kill closes the job handle.</summary>
+        void ReleaseJob()
+        {
+            var job = Interlocked.Exchange(ref _job, IntPtr.Zero);
             if (job != IntPtr.Zero) ChildJob.Close(job);
         }
     }

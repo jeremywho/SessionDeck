@@ -158,6 +158,14 @@ public class RelayTunnelTests : IDisposable
     }
 
     [Fact]
+    public async Task A_bad_public_url_is_a_probe_failure_not_an_exception()
+    {
+        var probe = RelayTunnel.HttpProbe("sessiondeck.0a.gg", "k");
+        Assert.Contains("sessiondeck.0a.gg", await probe(CancellationToken.None));
+        Assert.Contains("not an http(s) address", await RelayTunnel.HttpProbe("ftp://x", "k")(CancellationToken.None));
+    }
+
+    [Fact]
     public void Status_round_trips_through_relay_json()
     {
         var status = new RelayStatus("connected", null, new DateTime(2026, 10, 30, 21, 0, 0, DateTimeKind.Utc), new DateTime(2026, 10, 30, 21, 5, 0, DateTimeKind.Utc));
