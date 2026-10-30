@@ -32,7 +32,12 @@ internal sealed class GatewayServer : IAsyncDisposable
     readonly Func<string, HostRecord?> _hostById;
     readonly Func<string, Stream?> _embedded;
     readonly string _adminToken;
+    readonly string _relayKey;
     readonly ConcurrentDictionary<Connection, byte> _connections = new();
+
+    /// <summary>The one device that is a key in the settings rather than a row in devices.json: the phone build that comes in through the relay.</summary>
+    internal const string RelayDeviceId = "relay";
+    static readonly PairedDevice RelayDevice = new(RelayDeviceId, "Relay", "", DateTime.UnixEpoch, DateTime.UnixEpoch);
 
     /// <summary>Starts a session for a phone and returns its host id; null when the request cannot be honoured. Set by the process.</summary>
     public Func<StartRequest, string?>? StartSession;
@@ -53,7 +58,7 @@ internal sealed class GatewayServer : IAsyncDisposable
     }
 
     public GatewayServer(IPAddress bind, int port, DeviceStore devices, Func<IReadOnlyList<CatalogEntry>> catalog,
-                         Func<string, HostRecord?> hostById, Func<string, Stream?> embedded, string adminToken)
+                         Func<string, HostRecord?> hostById, Func<string, Stream?> embedded, string adminToken, string relayKey = "")
     {
         _bind = bind;
         _requestedPort = port;
@@ -62,6 +67,7 @@ internal sealed class GatewayServer : IAsyncDisposable
         _hostById = hostById;
         _embedded = embedded;
         _adminToken = adminToken;
+        _relayKey = relayKey.Trim();
     }
 
     public int Port { get; private set; }
@@ -88,6 +94,7 @@ internal sealed class GatewayServer : IAsyncDisposable
     /// <summary>Forget a device and cut every socket it holds, so a revoked phone cannot keep typing.</summary>
     public bool Revoke(string deviceId)
     {
+        if (deviceId == RelayDeviceId) return false;
         bool removed = _devices.Revoke(deviceId);
         foreach (var c in _connections.Keys.Where(c => c.DeviceId == deviceId))
         {
@@ -128,6 +135,9 @@ internal sealed class GatewayServer : IAsyncDisposable
     async Task Route(NetworkStream s, MiniHttp.Request r)
     {
         var now = DateTime.UtcNow;
+        if (r.Method == "GET" && r.Path == "/health") { await MiniHttp.WriteStatus(s, 204, "No Content"); return; }
+        // Through the proxy there is no pairing code to guess and no admin: those belong to the LAN.
+        if (Forwarded(r) && (r.Path == "/pair" || r.Path.StartsWith("/admin/"))) { await MiniHttp.WriteStatus(s, 404, "Not Found"); return; }
         switch (r.Method, r.Path)
         {
             case ("POST", "/pair"): await Pair(s, r, now); return;
@@ -145,7 +155,8 @@ internal sealed class GatewayServer : IAsyncDisposable
 
         if (r.Method == "GET" && r.Path.StartsWith("/mobile/")) { await Static(s, r.Path["/mobile/".Length..]); return; }
 
-        var device = _devices.Authenticate(BearerToken(r), now);
+        string? presented = BearerToken(r);
+        var device = KeyMatches(presented ?? "", _relayKey) ? RelayDevice : _devices.Authenticate(presented, now);
         bool admin = IsAdmin(r);
         if (r.IsWebSocketUpgrade)
         {
@@ -296,7 +307,8 @@ internal sealed class GatewayServer : IAsyncDisposable
     /// <summary>A revoke between authentication and registration would miss this socket; checked again once it is registered.</summary>
     async Task<bool> StillPaired(Connection conn)
     {
-        if (_devices.Devices.Any(d => d.Id == conn.DeviceId) && !conn.Cancel.IsCancellationRequested) return true;
+        bool paired = conn.DeviceId == RelayDeviceId || _devices.Devices.Any(d => d.Id == conn.DeviceId);
+        if (paired && !conn.Cancel.IsCancellationRequested) return true;
         await CloseAsync(conn.Socket, (WebSocketCloseStatus)RevokedClose, "revoked");
         return false;
     }
@@ -310,11 +322,25 @@ internal sealed class GatewayServer : IAsyncDisposable
 
     bool IsAdmin(MiniHttp.Request r) => _adminToken.Length > 0 && r.Header("X-Admin-Token") == _adminToken;
 
-    static bool OriginAllowed(MiniHttp.Request r)
+    /// <summary>Caddy on the relay adds this; nothing on the LAN does.</summary>
+    internal static bool Forwarded(MiniHttp.Request r) => r.Header("X-Forwarded-For").Length > 0;
+
+    /// <summary>The relay key compared in constant time; an empty key on either side never matches.</summary>
+    internal static bool KeyMatches(string presented, string key)
+    {
+        string p = presented.Trim(), k = key.Trim();
+        if (p.Length == 0 || k.Length == 0) return false;
+        return System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(p), Encoding.UTF8.GetBytes(k));
+    }
+
+    /// <summary>A page may only open sockets to the host it was served from; behind the relay that host speaks https, which the proxy says so in X-Forwarded-Proto.</summary>
+    internal static bool OriginAllowed(MiniHttp.Request r)
     {
         string origin = r.Header("Origin");
         if (origin.Length == 0) return true;
-        return string.Equals(origin, "http://" + r.Header("Host"), StringComparison.OrdinalIgnoreCase);
+        string proto = r.Header("X-Forwarded-Proto");
+        string scheme = proto.Length > 0 ? proto : "http";
+        return string.Equals(origin, scheme + "://" + r.Header("Host"), StringComparison.OrdinalIgnoreCase);
     }
 
     static async Task CloseAsync(WebSocket ws, WebSocketCloseStatus status, string reason)

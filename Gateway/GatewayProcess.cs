@@ -143,7 +143,7 @@ internal static class GatewayProcess
             () => { lock (gate) return current; },
             id => { lock (gate) return hosts.GetValueOrDefault(id); },
             name => typeof(GatewayServer).Assembly.GetManifestResourceStream("www/" + name),
-            adminToken);
+            adminToken, settings.Gateway.Relay.Key);
         server.QuitRequested += () => quit.TrySetResult();
         server.Folders = () => SessionStarter.Folders(Settings.Peek());
         server.Machine = () => machine.Latest;
