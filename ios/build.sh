@@ -19,7 +19,15 @@ unlock_keychain() {
   fi
 }
 
-generate() { xcodegen generate --quiet; }
+# The build carries its commit: CFBundleVersion is the commit count, SDCommit the short hash.
+generate() {
+  xcodegen generate --quiet
+  local sha count
+  sha="$(git rev-parse --short HEAD)"; count="$(git rev-list --count HEAD)"
+  /usr/libexec/PlistBuddy -c "Delete :SDCommit" SessionDeckMobile/Info.plist >/dev/null 2>&1 || true
+  /usr/libexec/PlistBuddy -c "Add :SDCommit string $sha" SessionDeckMobile/Info.plist
+  /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $count" SessionDeckMobile/Info.plist
+}
 
 simulator_udid() {
   xcrun simctl list devices available -j | python3 -c '

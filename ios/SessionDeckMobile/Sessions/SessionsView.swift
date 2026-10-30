@@ -8,6 +8,15 @@ struct SessionsView: View {
     @State private var awaitingHost: String?
     @State private var startError: String?
 
+    /// "0.1.0 (57) 905e217": marketing version, commit count, commit, as build.sh stamps them.
+    static var buildLabel: String {
+        let info = Bundle.main.infoDictionary ?? [:]
+        let version = info["CFBundleShortVersionString"] as? String ?? "?"
+        let build = info["CFBundleVersion"] as? String ?? "?"
+        let commit = info["SDCommit"] as? String ?? "dev"
+        return "Build \(version) (\(build)) \(commit)"
+    }
+
     private func start(_ provider: String) {
         Task {
             do { awaitingHost = try await gateway.startSession(provider: provider, cwd: "", name: "", prompt: "") }
@@ -78,6 +87,7 @@ struct SessionsView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
+                        Text(Self.buildLabel)
                         Button(role: .destructive) { showForget = true } label: { Label("Forget this deck", systemImage: "xmark.circle") }
                     } label: { Image(systemName: "ellipsis.circle") }
                 }
