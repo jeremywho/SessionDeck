@@ -35,19 +35,19 @@ struct TerminalScreen: View {
                      onMic: {
                          // Speech appends at the cursor; whatever the keyboard had typed is left as it is.
                          bridge.resetTyping()
-                         speech.toggle(unit: DeleteUnit.forProvider(entry.provider)) { bytes in Task { await bridge.input(bytes) } }
+                         speech.toggle(unit: DeleteUnit.forProvider(entry.provider)) { [weak bridge] bytes in Task { await bridge?.input(bytes) } }
                      })
             .onAppear {
                 // Keyboard typing, a paste or a key while speech runs would corrupt its baseline: speech yields first.
-                bridge.manualInput = { speech.stop() }
-                speech.onStopped = { bridge.resetTyping() }
+                bridge.manualInput = { [weak speech] in speech?.stop() }
+                speech.onStopped = { [weak bridge] in bridge?.resetTyping() }
             }
         }
         .background(Color(red: 0.047, green: 0.047, blue: 0.047))
         .navigationTitle(entry.name.isEmpty ? entry.provider : entry.name)
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { gateway.markViewed(entry.sessionId); bridge.sessionId = entry.sessionId.isEmpty ? entry.hostId : entry.sessionId; bridge.provider = entry.provider; bridge.proxy?.unit = DeleteUnit.forProvider(entry.provider) }
-        .onDisappear { gateway.markViewed(entry.sessionId); speech.stop() }
+        .onDisappear { gateway.markViewed(entry.sessionId); speech.stop(); bridge.manualInput = nil; speech.onStopped = nil }
         .onChange(of: bridge.connected) { _, connected in
             if connected, let z = LaunchOptions.zoom, !autoZoomed {
                 autoZoomed = true
