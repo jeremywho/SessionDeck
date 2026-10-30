@@ -108,8 +108,9 @@ Everything the gateway serves today is served unchanged through the tunnel: `/se
   The child is placed in a job object that kills it when the gateway dies (same mechanism
   `Host/ConPty.cs` uses for ptys), so a replaced gateway never leaves an orphan holding 8103.
 - Reachability is measured end to end, not inferred from the child being alive: every 30 s the
-  gateway `GET`s `<PublicUrl>/health` with the relay key and records `Relay.State`
-  (`connected` / `connecting` / `down: <reason>`) plus the last success time in `gateway.json`.
+  gateway `GET`s `<PublicUrl>/health` with the relay key and records the state
+  (`connected` / `connecting` / `down: <reason>`) plus the last success time in `relay.json` next to
+  `gateway.json` (its own file, so the `GatewayRecord` the deck reads stays as it is).
   `GET /health` is a new unauthenticated route returning 204 (it exposes nothing).
 - Auth: a bearer token equal to `Relay.Key` (constant-time compare) authenticates as a synthetic
   device `{Id: "relay", Name: "Relay"}` that is not stored in `devices.json` and cannot be revoked
@@ -126,7 +127,7 @@ Everything the gateway serves today is served unchanged through the tunnel: `/se
   `X-Forwarded-Proto` when present, else `http`.
 - Settings window, Phone section: a "Remote" group with the public URL, a password box for the relay
   key with "Generate" (32 random bytes, hex) and "Copy" buttons, an on/off toggle, and a status line fed from
-  `gateway.json` (`connected since …` / `down: reason`). Saving applies like other gateway changes
+  `relay.json` (`connected since …` / `down: reason`). Saving applies like other gateway changes
   (the gateway restarts).
 
 ### Page (`wwwroot/mobile.js`, decided)
