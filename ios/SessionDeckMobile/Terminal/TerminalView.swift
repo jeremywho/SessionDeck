@@ -25,7 +25,7 @@ struct TerminalScreen: View {
         .background(Color(red: 0.047, green: 0.047, blue: 0.047))
         .navigationTitle(entry.name.isEmpty ? entry.provider : entry.name)
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { gateway.markViewed(entry.sessionId) }
+        .onAppear { gateway.markViewed(entry.sessionId); bridge.sessionId = entry.sessionId.isEmpty ? entry.hostId : entry.sessionId }
         .onDisappear { gateway.markViewed(entry.sessionId) }
         .onChange(of: bridge.connected) { _, connected in
             guard connected, !autoSent, !LaunchOptions.sends.isEmpty else { return }
@@ -74,6 +74,30 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler {
     @Published var hasSelection = false
     @Published var connected = false
     weak var webView: WKWebView?
+    var sessionId = ""
+    private let zooms = ZoomStore()
+    private var zoomObservation: NSKeyValueObservation?
+    private var zoomReady = false
+
+    /// Remember how far this session is zoomed, and bring it back to that zoom when it opens.
+    func watchZoom(of webView: WKWebView) {
+        zoomObservation = webView.scrollView.observe(\.zoomScale, options: [.new]) { [weak self] scrollView, _ in
+            guard let self, self.zoomReady else { return }
+            self.zooms.set(Double(scrollView.zoomScale), for: self.sessionId)
+        }
+    }
+
+    private func applySavedZoom() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            guard let self, let webView = self.webView else { return }
+            if let saved = self.zooms.zoom(for: self.sessionId) {
+                let scroll = webView.scrollView
+                let clamped = min(max(CGFloat(saved), scroll.minimumZoomScale), scroll.maximumZoomScale)
+                scroll.setZoomScale(clamped, animated: false)
+            }
+            self.zoomReady = true
+        }
+    }
 
     /// Sends to the page; false when the page had no open socket and dropped it.
     @discardableResult
@@ -110,6 +134,7 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler {
             hasSelection = false
         case "selection": hasSelection = body["has"] as? Bool ?? false
         case "selecting": selecting = body["on"] as? Bool ?? false
+        case "size": if !zoomReady { applySavedZoom() }
         case "connected": note = nil; connected = true; LaunchOptions.log("terminal connected")
         case "disconnected": note = "Reconnecting…"; connected = false
         case "revoked": note = "This phone was revoked from the deck."
@@ -137,6 +162,7 @@ struct TerminalWebView: UIViewRepresentable {
         view.scrollView.bounces = false
         view.scrollView.contentInsetAdjustmentBehavior = .never
         bridge.webView = view
+        bridge.watchZoom(of: view)
         view.load(URLRequest(url: pairing.baseURL.appendingPathComponent("mobile/mobile.html")))
         return view
     }

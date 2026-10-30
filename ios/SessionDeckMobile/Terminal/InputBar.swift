@@ -1,8 +1,9 @@
 import SwiftUI
 import UIKit
 
-/// What a prompt needs from a phone: a draft of one or more lines with Send, and the keys the
-/// keyboard lacks. Return sends; the newline key (or Shift+Return on a hardware keyboard) adds a line.
+/// What a prompt needs from a phone: a draft of one or more lines with one Send button, and the keys
+/// the keyboard lacks. Return adds a line, as in any message box; Send (or Shift+Return on a hardware
+/// keyboard) submits; the key bar's enter key presses Enter in the terminal without a draft.
 struct InputBar: View {
     @Binding var text: String
     var focused: FocusState<Bool>.Binding
@@ -13,7 +14,8 @@ struct InputBar: View {
     let onPaste: () -> Void
     let onCopy: () -> Void
     let onSelect: () -> Void
-    @StateObject private var draft = DraftHandle()
+
+    private var canSend: Bool { !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     var body: some View {
         VStack(spacing: 6) {
@@ -23,8 +25,8 @@ struct InputBar: View {
                         Button(key.label) { onKey(key) }
                             .buttonStyle(.bordered)
                             .font(.system(size: 13, weight: .medium, design: .monospaced))
+                            .accessibilityLabel(key.spoken)
                     }
-                    Button("newline") { draft.insertNewline() }.buttonStyle(.bordered).font(.system(size: 13, design: .monospaced))
                     Divider().frame(height: 20)
                     Button("paste") { onPaste() }.buttonStyle(.bordered).font(.system(size: 13, design: .monospaced))
                     Button(selecting ? (hasSelection ? "copy" : "cancel") : "select") { selecting && hasSelection ? onCopy() : onSelect() }
@@ -34,14 +36,19 @@ struct InputBar: View {
                 .padding(.horizontal, 8)
             }
             HStack(alignment: .bottom, spacing: 8) {
-                DraftField(text: $text, handle: draft, placeholder: "Type to the session, return sends", onSubmit: onSend)
+                DraftField(text: $text, placeholder: "Type to the session", onSubmit: onSend)
                     .frame(minHeight: 36, maxHeight: 132)
                     .padding(.horizontal, 6)
                     .background(Color(white: 0.14), in: RoundedRectangle(cornerRadius: 10))
                     .focused(focused)
-                Button(action: onSend) { Image(systemName: "arrow.up.circle.fill").font(.system(size: 30)) }
-                    .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    .padding(.bottom, 3)
+                Button(action: onSend) {
+                    Label("Send", systemImage: "paperplane.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .padding(.horizontal, 12)
+                        .frame(height: 36)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!canSend)
             }
             .padding(.horizontal, 8)
         }
@@ -50,25 +57,18 @@ struct InputBar: View {
     }
 }
 
-/// The SwiftUI side's handle on the text view, so the newline key inserts where the cursor is.
-@MainActor
-final class DraftHandle: ObservableObject {
-    weak var textView: DraftTextView?
-    func insertNewline() { textView?.insertNewlineAtCursor() }
-}
-
 /// A growing text view that sends exactly what was typed: no autocorrect, smart quotes or dashes,
-/// no capitalisation. Return sends, Shift+Return (hardware keyboard) or the newline key adds a line,
-/// and the keyboard's dictation key works as it does anywhere else.
+/// no capitalisation. Return adds a line; Shift+Return on a hardware keyboard submits; the
+/// keyboard's dictation key works as it does anywhere else.
 struct DraftField: UIViewRepresentable {
     @Binding var text: String
-    let handle: DraftHandle
     let placeholder: String
     let onSubmit: () -> Void
 
     func makeUIView(context: Context) -> DraftTextView {
         let v = DraftTextView()
         v.delegate = context.coordinator
+        v.onSubmit = onSubmit
         v.placeholderLabel.text = placeholder
         v.autocorrectionType = .no
         v.autocapitalizationType = .none
@@ -76,15 +76,13 @@ struct DraftField: UIViewRepresentable {
         v.smartQuotesType = .no
         v.smartDashesType = .no
         v.smartInsertDeleteType = .no
-        v.returnKeyType = .send
-        v.enablesReturnKeyAutomatically = true
+        v.returnKeyType = .default
         v.font = UIFont.monospacedSystemFont(ofSize: 15, weight: .regular)
         v.textColor = .white
         v.backgroundColor = .clear
         v.isScrollEnabled = true
         v.textContainerInset = UIEdgeInsets(top: 8, left: 2, bottom: 8, right: 2)
         v.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        handle.textView = v
         return v
     }
 
@@ -105,20 +103,11 @@ struct DraftField: UIViewRepresentable {
             (textView as? DraftTextView)?.placeholderLabel.isHidden = !textView.text.isEmpty
             textView.invalidateIntrinsicContentSize()
         }
-
-        func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
-            // The on-screen return key: send. Newlines come only through insertNewlineAtCursor.
-            if text == "\n", let draft = textView as? DraftTextView, !draft.insertingNewline {
-                parent.onSubmit()
-                return false
-            }
-            return true
-        }
     }
 }
 
 final class DraftTextView: UITextView {
-    private(set) var insertingNewline = false
+    var onSubmit: (() -> Void)?
     let placeholderLabel = UILabel()
 
     override init(frame: CGRect, textContainer: NSTextContainer?) {
@@ -141,17 +130,12 @@ final class DraftTextView: UITextView {
     }
 
     override var keyCommands: [UIKeyCommand]? {
-        let shiftReturn = UIKeyCommand(input: "\r", modifierFlags: .shift, action: #selector(insertNewlineAtCursor))
-        // Ahead of the system handler, or UIKit delivers a plain newline first and the draft is sent instead.
-        shiftReturn.wantsPriorityOverSystemBehavior = true
-        return [shiftReturn]
+        let send = UIKeyCommand(input: "\r", modifierFlags: .shift, action: #selector(submit))
+        send.wantsPriorityOverSystemBehavior = true
+        let sendCmd = UIKeyCommand(input: "\r", modifierFlags: .command, action: #selector(submit))
+        sendCmd.wantsPriorityOverSystemBehavior = true
+        return [send, sendCmd]
     }
 
-    /// A newline where the cursor is (replacing any selection), bypassing the return-sends rule.
-    @objc func insertNewlineAtCursor() {
-        insertingNewline = true
-        insertText("\n")
-        insertingNewline = false
-        delegate?.textViewDidChange?(self)
-    }
+    @objc private func submit() { onSubmit?() }
 }

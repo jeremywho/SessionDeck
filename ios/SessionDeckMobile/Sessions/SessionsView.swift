@@ -5,8 +5,15 @@ struct SessionsView: View {
     @State private var showForget = false
     @State private var path: [CatalogEntry] = []
     @State private var autoOpened = false
-    @State private var showNew = false
     @State private var awaitingHost: String?
+    @State private var startError: String?
+
+    private func start(_ provider: String) {
+        Task {
+            do { awaitingHost = try await gateway.startSession(provider: provider, cwd: "", name: "", prompt: "") }
+            catch { startError = error.localizedDescription }
+        }
+    }
 
     private var grouped: [(name: String, order: Int, entries: [CatalogEntry])] {
         var byGroup: [String: (order: Int, entries: [CatalogEntry])] = [:]
@@ -59,7 +66,13 @@ struct SessionsView: View {
             .refreshable { await gateway.refresh() }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { showNew = true } label: { Image(systemName: "plus") }
+                    // The deck's own "+" right-click: a new session in the home folder with the deck's flags.
+                    Menu {
+                        Button { start("Claude") } label: { Label("New Claude session", systemImage: "sparkle") }
+                        Button { start("Codex") } label: { Label("New Codex session", systemImage: "diamond") }
+                        Button { start("Agy") } label: { Label("New AGY session", systemImage: "diamond.inset.filled") }
+                        Button { start("Shell") } label: { Label("New terminal", systemImage: "terminal") }
+                    } label: { Image(systemName: "plus") }
                         .disabled(!gateway.connected)
                         .accessibilityLabel("New session")
                 }
@@ -76,10 +89,9 @@ struct SessionsView: View {
             .confirmationDialog("Forget this deck?", isPresented: $showForget, titleVisibility: .visible) {
                 Button("Forget", role: .destructive) { gateway.forgetPairing() }
             }
-            .sheet(isPresented: $showNew) {
-                NewSessionSheet { hostId in awaitingHost = hostId }
-                    .environmentObject(gateway)
-            }
+            .alert("Could not start the session", isPresented: Binding(get: { startError != nil }, set: { if !$0 { startError = nil } })) {
+                Button("OK") { startError = nil }
+            } message: { Text(startError ?? "") }
             .task { await gateway.refresh() }
             .onChange(of: gateway.sessions) { _, sessions in
                 if let hostId = awaitingHost, let entry = sessions.first(where: { $0.hostId == hostId }) {

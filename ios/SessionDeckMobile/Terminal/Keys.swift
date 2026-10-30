@@ -30,7 +30,21 @@ enum Key: CaseIterable, Identifiable {
         case .left: return "←"
         case .right: return "→"
         case .ctrlC: return "^C"
-        case .enter: return "↵"
+        case .enter: return "enter"
+        }
+    }
+
+    var spoken: String {
+        switch self {
+        case .esc: return "Escape"
+        case .tab: return "Tab"
+        case .shiftTab: return "Shift Tab"
+        case .up: return "Arrow up"
+        case .down: return "Arrow down"
+        case .left: return "Arrow left"
+        case .right: return "Arrow right"
+        case .ctrlC: return "Control C"
+        case .enter: return "Enter in the terminal"
         }
     }
 }
