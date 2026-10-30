@@ -1573,9 +1573,12 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         if (!_app.Settings.AutoRestartOnUpdate || !_autoRestart.IsCompleted) return;
         foreach (var row in Rows.ToList())
         {
-            if (!(row.UpdatePending || row.HostBehind) || !row.CanRestart || _restarting.Contains(row.Host.Id)) continue;
-            string target = row.UpdatePending ? InstalledVersions.For(row.Provider) : $"host-protocol-{SessionDeck.Host.HostRecord.CurrentProtocol}";
-            if (_autoRestarted.Done(row.LiveSessionId, target)) continue;
+            if (!row.CanRestart || _restarting.Contains(row.Host.Id)) continue;
+            string cliTarget = InstalledVersions.For(row.Provider);
+            string hostTarget = $"host-protocol-{SessionDeck.Host.HostRecord.CurrentProtocol}";
+            bool forCli = row.UpdatePending && !_autoRestarted.Done(row.LiveSessionId, cliTarget, AutoRestartLedger.Cli);
+            bool forHost = row.HostBehind && !_autoRestarted.Done(row.LiveSessionId, hostTarget, AutoRestartLedger.HostProtocol);
+            if (!forCli && !forHost) continue;
             // Only a session whose live conversation is provably resumable is touched on its own;
             // anything else waits for a restart you ask for.
             if (!SessionScanner.HasConversation(row.TranscriptPath)) continue;
@@ -1586,8 +1589,9 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             if (DateTime.Now - row.LastChanged < IdleBeforeRestart) continue;
             var tab = Deck.FindByHost(row.Host.Id);
             if (tab != null && tab == Deck.Active && IsActive) continue;
-            PerformanceLog.Write($"auto-restart host={row.Host.Id} provider={row.Provider} from=v{row.Version} to={target} hostProtocol={row.Host.Protocol}");
-            _autoRestarted.Record(row.LiveSessionId, target);
+            PerformanceLog.Write($"auto-restart host={row.Host.Id} provider={row.Provider} from=v{row.Version} cli={(forCli ? cliTarget : "-")} host={(forHost ? hostTarget : "-")} hostProtocol={row.Host.Protocol}");
+            if (forCli) _autoRestarted.Record(row.LiveSessionId, cliTarget, AutoRestartLedger.Cli);
+            if (forHost) _autoRestarted.Record(row.LiveSessionId, hostTarget, AutoRestartLedger.HostProtocol);
             _autoRestart = RestartSession(row);
             return;
         }

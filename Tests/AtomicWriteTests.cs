@@ -116,6 +116,15 @@ public class AtomicWriteTests
     {
         string path = Path.Combine(NewDir(), "auto-restarts.json");
         new AutoRestartLedger(path).Record("s1", "2.1.283");
+        var kinds = new AutoRestartLedger(path);
+        kinds.Record("s2", "host-protocol-4", AutoRestartLedger.HostProtocol);
+        Assert.True(kinds.Done("s1", "2.1.283"));
+        Assert.True(kinds.Done("s2", "host-protocol-4", AutoRestartLedger.HostProtocol));
+        Assert.False(kinds.Done("s2", "host-protocol-4"));
+        kinds.Record("s3", "2.1.284");
+        Assert.False(kinds.Done("s1", "2.1.283"));
+        Assert.True(kinds.Done("s2", "host-protocol-4", AutoRestartLedger.HostProtocol));
+        new AutoRestartLedger(path).Record("s1", "2.1.283");
 
         var relaunched = new AutoRestartLedger(path);
         Assert.True(relaunched.Done("s1", "2.1.283"));
