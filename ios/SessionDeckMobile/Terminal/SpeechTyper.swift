@@ -19,7 +19,11 @@ final class SpeechTyper: ObservableObject {
     /// Called when listening ends for any reason; the owner resets the keyboard's baseline since the cursor moved.
     var onStopped: (() -> Void)?
 
-    private let engine = AVAudioEngine()
+    /// Created on first use: merely touching an AVAudioEngine's input node switches the app's audio
+    /// session to a recording category, which interrupts whatever another app is playing.
+    private lazy var engine = AVAudioEngine()
+    /// True from the moment the audio session is ours (begin activated it) until teardown gives it back.
+    private var holdingAudio = false
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
     private var generation = 0
@@ -81,6 +85,7 @@ final class SpeechTyper: ObservableObject {
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.record, mode: .measurement, options: .duckOthers)
         try session.setActive(true, options: .notifyOthersOnDeactivation)
+        holdingAudio = true
 
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
@@ -133,16 +138,20 @@ final class SpeechTyper: ObservableObject {
         if wasActive { onStopped?() }
     }
 
+    /// Only a recording that really started touches the engine and the audio session on the way out;
+    /// a stop with nothing running (leaving the screen, a key press) must not so much as look at them,
+    /// or another app's playback pauses for the moment the session changes hands.
     private func teardown() {
-        AudioSessionLog.note("teardown begins")
         task?.cancel()
         task = nil
         request?.endAudio()
         request = nil
+        guard holdingAudio else { return }
+        holdingAudio = false
+        AudioSessionLog.note("teardown after a recording")
         engine.inputNode.removeTap(onBus: 0)
-        AudioSessionLog.note("teardown after inputNode access")
         if engine.isRunning { engine.stop() }
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-        AudioSessionLog.note("teardown after setActive(false)")
+        AudioSessionLog.note("teardown gave the audio session back")
     }
 }
