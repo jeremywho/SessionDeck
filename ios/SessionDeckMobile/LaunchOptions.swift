@@ -18,6 +18,7 @@ enum LaunchOptions {
     }
 
     static var open: String? { value("--open") }
+    static var closeAfter: Double? { value("--close-after").flatMap(Double.init) }
     static var zoom: Double? { value("--zoom").flatMap(Double.init) }
     static var scrollTest: Bool {
         #if DEBUG

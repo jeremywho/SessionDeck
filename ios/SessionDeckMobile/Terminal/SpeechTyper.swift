@@ -30,6 +30,12 @@ final class SpeechTyper: ObservableObject {
 
     var isActive: Bool { listening || starting }
 
+    init() {
+        AudioSessionLog.note("SpeechTyper created")
+    }
+
+    deinit { AudioSessionLog.note("SpeechTyper gone") }
+
     func toggle(unit: DeleteUnit, send: @escaping (String) -> Void) {
         if isActive { stop() } else { start(unit: unit, send: send) }
     }
@@ -128,12 +134,15 @@ final class SpeechTyper: ObservableObject {
     }
 
     private func teardown() {
+        AudioSessionLog.note("teardown begins")
         task?.cancel()
         task = nil
         request?.endAudio()
         request = nil
         engine.inputNode.removeTap(onBus: 0)
+        AudioSessionLog.note("teardown after inputNode access")
         if engine.isRunning { engine.stop() }
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        AudioSessionLog.note("teardown after setActive(false)")
     }
 }

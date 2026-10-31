@@ -116,6 +116,9 @@ struct SessionsView: View {
                 autoOpened = true
                 LaunchOptions.log("listed \(sessions.count) sessions, opening \(hostId)")
                 path = [entry]
+                if let after = LaunchOptions.closeAfter {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + after) { LaunchOptions.log("closing the session screen"); path = [] }
+                }
             }
         }
     }

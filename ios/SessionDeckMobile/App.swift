@@ -26,6 +26,7 @@ struct RootView: View {
             }
         }
         .task {
+            AudioSessionLog.watch()
             guard !autoPaired, gateway.pairing == nil, let p = LaunchOptions.pair else { return }
             autoPaired = true
             do {
