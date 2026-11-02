@@ -49,6 +49,8 @@ struct Meta: Codable {
     let folders: [String]
     let providers: [String]
     let machine: MachineLoad?
+    /// Where the gateway can be reached on its own network, e.g. `http://192.168.1.5:7420`; absent on older gateways.
+    let lan: String?
 }
 
 struct StartResponse: Codable {

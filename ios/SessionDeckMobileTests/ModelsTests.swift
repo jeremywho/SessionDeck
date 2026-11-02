@@ -19,6 +19,26 @@ final class ModelsTests: XCTestCase {
         XCTAssertTrue(p.isRelay)
     }
 
+    @MainActor func testLanPairingComesFromTheGatewaysMeta() {
+        let p = GatewayStore.lan(base: "http://192.168.1.5:7420", key: "k")
+        XCTAssertEqual(p?.host, "192.168.1.5")
+        XCTAssertEqual(p?.port, 7420)
+        XCTAssertEqual(p?.scheme, "http")
+        XCTAssertEqual(p?.token, "k")
+        XCTAssertEqual(p?.deviceId, "relay")
+        XCTAssertNil(GatewayStore.lan(base: nil, key: "k"))
+        XCTAssertNil(GatewayStore.lan(base: "https://evil.example:443", key: "k"))
+        XCTAssertNil(GatewayStore.lan(base: "http://192.168.1.5", key: "k"))
+        XCTAssertNil(GatewayStore.lan(base: "http://192.168.1.5:7420", key: ""))
+    }
+
+    func testMetaDecodesWithAndWithoutTheLanAddress() throws {
+        let with = try JSONDecoder().decode(Meta.self, from: Data(#"{"folders":[],"providers":[],"machine":null,"lan":"http://10.0.0.2:7420"}"#.utf8))
+        XCTAssertEqual(with.lan, "http://10.0.0.2:7420")
+        let without = try JSONDecoder().decode(Meta.self, from: Data(#"{"folders":[],"providers":[],"machine":null}"#.utf8))
+        XCTAssertNil(without.lan)
+    }
+
     @MainActor func testRelayPairingComesFromTheSecrets() {
         let p = GatewayStore.relay(url: "https://sessiondeck.0a.gg", key: "k")
         XCTAssertEqual(p?.host, "sessiondeck.0a.gg")

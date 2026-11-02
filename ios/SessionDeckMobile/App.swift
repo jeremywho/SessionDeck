@@ -15,6 +15,7 @@ struct SessionDeckMobileApp: App {
 
 struct RootView: View {
     @EnvironmentObject var gateway: GatewayStore
+    @Environment(\.scenePhase) private var scenePhase
     @State private var autoPaired = false
 
     var body: some View {
@@ -24,6 +25,9 @@ struct RootView: View {
             } else {
                 SessionsView()
             }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await gateway.choosePath() } }
         }
         .task {
             AudioSessionLog.watch()

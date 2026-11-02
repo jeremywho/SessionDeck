@@ -89,7 +89,7 @@ struct SessionsView: View {
                     Menu {
                         Text(Self.buildLabel)
                         if gateway.usesRelay {
-                            Text("via \(gateway.pairing?.host ?? "")")
+                            Text(gateway.pathLabel ?? "")
                         } else {
                             Button(role: .destructive) { showForget = true } label: { Label("Forget this deck", systemImage: "xmark.circle") }
                         }

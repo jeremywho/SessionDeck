@@ -14,10 +14,19 @@ final class GatewayStore: ObservableObject {
     private var eventsTask: Task<Void, Never>?
     private let ledger = ViewedLedger()
 
+    /// The relay pairing the build carries, and the gateway's own network address once learned from it.
+    /// At home the LAN path wins (shorter, and it works with the server down); the relay is the fallback.
+    private let relayPairing: Pairing?
+    private var lanPairing: Pairing?
+    private static let lanBaseKey = "lanBase"
+
     init() {
-        pairing = Self.relay() ?? Keychain.loadPairing()
+        relayPairing = Self.relay()
+        lanPairing = Self.lan(base: UserDefaults.standard.string(forKey: Self.lanBaseKey), key: RelaySecrets.key)
+        pairing = lanPairing ?? relayPairing ?? Keychain.loadPairing()
         viewed = ledger.all()
         if pairing != nil { startEvents() }
+        if relayPairing != nil { Task { await choosePath(); await learnLan() } }
     }
 
     /// The build's own way in: when `RelaySecrets` carry a URL and key, the deck is reached through the
@@ -29,7 +38,51 @@ final class GatewayStore: ObservableObject {
         return Pairing(host: host, port: parsed.port ?? (scheme == "https" ? 443 : 80), token: key, deviceId: "relay", scheme: scheme)
     }
 
-    var usesRelay: Bool { pairing?.isRelay == true }
+    /// The gateway's LAN address as `/meta` reports it, with the same key; nil unless it is a plain http address.
+    static func lan(base: String?, key: String?) -> Pairing? {
+        guard let base, let key, !key.isEmpty, let parsed = URL(string: base), parsed.scheme == "http", let host = parsed.host, let port = parsed.port else { return nil }
+        return Pairing(host: host, port: port, token: key, deviceId: "relay", scheme: "http")
+    }
+
+    /// The build carries the relay key, so there is no pairing screen and no forgetting; 401 means the key, not the phone.
+    var usesRelay: Bool { relayPairing != nil }
+
+    /// Which way the deck is being reached right now, for the menu.
+    var pathLabel: String? {
+        guard let pairing, relayPairing != nil else { return nil }
+        return pairing == lanPairing ? "via \(pairing.host) (home network)" : "via \(pairing.host) (relay)"
+    }
+
+    /// Take the short way when it answers, the relay otherwise. Run at launch and whenever the app comes back to the front.
+    func choosePath() async {
+        guard let relayPairing else { return }
+        var want = relayPairing
+        if let lanPairing, await answers(lanPairing) { want = lanPairing }
+        LaunchOptions.log("path: \(want == lanPairing ? "lan" : "relay") \(want.host)")
+        guard want != pairing else { return }
+        pairing = want
+        startEvents()
+    }
+
+    /// Ask the gateway where it lives on its own network, and remember it for the next launch.
+    func learnLan() async {
+        guard relayPairing != nil, let meta = await meta() else { return }
+        let learned = Self.lan(base: meta.lan, key: RelaySecrets.key)
+        guard learned != lanPairing else { return }
+        lanPairing = learned
+        UserDefaults.standard.set(meta.lan, forKey: Self.lanBaseKey)
+        LaunchOptions.log("lan learned: \(meta.lan ?? "none")")
+        if learned != nil, pairing != learned { await choosePath() }
+    }
+
+    /// A second and a half for the gateway to answer the session list with our key on this path.
+    private func answers(_ candidate: Pairing) async -> Bool {
+        var request = URLRequest(url: candidate.baseURL.appendingPathComponent("sessions"))
+        request.setValue("Bearer \(candidate.token)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 1.5
+        guard let (_, response) = try? await URLSession.shared.data(for: request) else { return false }
+        return (response as? HTTPURLResponse)?.statusCode == 200
+    }
 
     /// The deck said 401. A LAN pairing is gone for good; the relay key is a build-time fact, so the
     /// app says so and keeps trying rather than dropping to a pairing screen that cannot help.
@@ -150,6 +203,13 @@ final class GatewayStore: ObservableObject {
                 let started = Date()
                 await self.runEvents(pairing)
                 if Task.isCancelled { return }
+                // The home network went away (the phone left the house): go round by the relay without waiting out the backoff.
+                if let relay = self.relayPairing, pairing != relay, pairing == self.lanPairing {
+                    LaunchOptions.log("path: lan feed failed, falling back to the relay")
+                    self.pairing = relay
+                    attempt = 0
+                    continue
+                }
                 if Date().timeIntervalSince(started) > 15 { attempt = 0 }
                 let delay = min(30.0, 0.5 * pow(2.0, Double(min(attempt, 6))))
                 attempt += 1
