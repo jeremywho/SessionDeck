@@ -164,4 +164,26 @@ public class GatewayRelayTests : IAsyncDisposable
         Assert.Contains("sessions", await NextText(ws));
         await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", CancellationToken.None);
     }
+
+    [Fact]
+    public async Task Identity_proves_the_key_without_being_shown_it()
+    {
+        using var c = Client(_server);
+        const string nonce = "00112233445566778899aabbccddeeff";
+        var res = await c.GetAsync($"/identity?nonce={nonce}");
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+        string proof = JsonDocument.Parse(await res.Content.ReadAsStringAsync()).RootElement.GetProperty("proof").GetString()!;
+        Assert.Equal(GatewayServer.Proof(nonce, RelayKey), proof);
+        Assert.Equal("030ffc11ec49be148af4e692ad06ac01633f5fcae141bab99873e78ab06db975", proof);
+        Assert.Equal(Convert.ToHexString(System.Security.Cryptography.HMACSHA256.HashData(Encoding.UTF8.GetBytes(RelayKey), Encoding.UTF8.GetBytes(nonce))).ToLowerInvariant(), proof);
+        Assert.NotEqual(GatewayServer.Proof(nonce, "other"), proof);
+
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.GetAsync("/identity")).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.GetAsync("/identity?nonce=short")).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.GetAsync("/identity?nonce=zz112233445566778899aabbccddeeff")).StatusCode);
+
+        await using var noKey = Server(new DeviceStore(Path.Combine(_dir, "devices3.json")), "");
+        using var anon = Client(noKey);
+        Assert.Equal(HttpStatusCode.NotFound, (await anon.GetAsync($"/identity?nonce={nonce}")).StatusCode);
+    }
 }

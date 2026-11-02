@@ -136,6 +136,7 @@ internal sealed class GatewayServer : IAsyncDisposable
     {
         var now = DateTime.UtcNow;
         if (r.Method == "GET" && r.Path == "/health") { await MiniHttp.WriteStatus(s, 204, "No Content"); return; }
+        if (r.Method == "GET" && r.Path == "/identity") { await Identity(s, r); return; }
         // Through the proxy there is no pairing code to guess and no admin: those belong to the LAN.
         if (Forwarded(r) && (r.Path == "/pair" || r.Path.StartsWith("/admin/"))) { await MiniHttp.WriteStatus(s, 404, "Not Found"); return; }
         switch (r.Method, r.Path)
@@ -324,6 +325,24 @@ internal sealed class GatewayServer : IAsyncDisposable
 
     /// <summary>Caddy on the relay adds this; nothing on the LAN does.</summary>
     internal static bool Forwarded(MiniHttp.Request r) => r.Header("X-Forwarded-For").Length > 0;
+
+    static readonly Regex Nonce = new(@"^[0-9a-fA-F]{16,64}$", RegexOptions.Compiled);
+
+    /// <summary>
+    /// Proves this gateway holds the relay key without being shown it: the phone sends a fresh nonce
+    /// and checks the HMAC itself, so on a strange network it never hands the key to whoever answers
+    /// at the address it remembers. 404 when no relay key is configured.
+    /// </summary>
+    async Task Identity(NetworkStream s, MiniHttp.Request r)
+    {
+        if (_relayKey.Length == 0) { await MiniHttp.WriteStatus(s, 404, "Not Found"); return; }
+        if (!r.Query.TryGetValue("nonce", out var nonce) || !Nonce.IsMatch(nonce)) { await MiniHttp.WriteStatus(s, 400, "Bad Request"); return; }
+        await MiniHttp.WriteJson(s, 200, "OK", JsonSerializer.Serialize(new { proof = Proof(nonce, _relayKey) }, Json));
+    }
+
+    /// <summary>Lower-case hex HMAC-SHA256 of the nonce under the key; the phone computes the same.</summary>
+    internal static string Proof(string nonce, string key) =>
+        Convert.ToHexString(System.Security.Cryptography.HMACSHA256.HashData(Encoding.UTF8.GetBytes(key.Trim()), Encoding.UTF8.GetBytes(nonce))).ToLowerInvariant();
 
     /// <summary>Where this gateway can be reached on the local network, so a phone that came in through the relay can take the short way next time; null when no LAN address is known.</summary>
     string? LanBase()
