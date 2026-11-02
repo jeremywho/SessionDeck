@@ -182,6 +182,12 @@ public class GatewayRelayTests : IAsyncDisposable
         Assert.Equal(HttpStatusCode.BadRequest, (await c.GetAsync("/identity?nonce=short")).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await c.GetAsync("/identity?nonce=zz112233445566778899aabbccddeeff")).StatusCode);
 
+        using (var viaRelay = Client(_server))
+        {
+            viaRelay.DefaultRequestHeaders.Add("X-Forwarded-For", "203.0.113.9");
+            Assert.Equal(HttpStatusCode.NotFound, (await viaRelay.GetAsync($"/identity?nonce={nonce}")).StatusCode);
+        }
+
         await using var noKey = Server(new DeviceStore(Path.Combine(_dir, "devices3.json")), "");
         using var anon = Client(noKey);
         Assert.Equal(HttpStatusCode.NotFound, (await anon.GetAsync($"/identity?nonce={nonce}")).StatusCode);

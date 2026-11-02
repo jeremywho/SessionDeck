@@ -335,7 +335,8 @@ internal sealed class GatewayServer : IAsyncDisposable
     /// </summary>
     async Task Identity(NetworkStream s, MiniHttp.Request r)
     {
-        if (_relayKey.Length == 0) { await MiniHttp.WriteStatus(s, 404, "Not Found"); return; }
+        // Only the LAN side answers: through the relay this would be an oracle a hostile LAN peer could forward the phone's nonce to.
+        if (_relayKey.Length == 0 || Forwarded(r)) { await MiniHttp.WriteStatus(s, 404, "Not Found"); return; }
         if (!r.Query.TryGetValue("nonce", out var nonce) || !Nonce.IsMatch(nonce)) { await MiniHttp.WriteStatus(s, 400, "Bad Request"); return; }
         await MiniHttp.WriteJson(s, 200, "OK", JsonSerializer.Serialize(new { proof = Proof(nonce, _relayKey) }, Json));
     }
