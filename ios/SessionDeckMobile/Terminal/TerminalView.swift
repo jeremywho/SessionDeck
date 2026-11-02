@@ -99,6 +99,8 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
     /// responder on the same tap, which would read as "hidden" and make a hide-tap reopen the keyboard.
     private var wantKeyboard = false
     weak var webView: WKWebView?
+    /// The base URL the page was last loaded from, so a path switch is told apart from WebKit's URL normalisation.
+    var pageBase: URL?
 
     func toggleKeyboard() { focus(!wantKeyboard) }
     weak var proxy: ProxyTextView?
@@ -430,17 +432,19 @@ struct TerminalWebView: UIViewRepresentable {
         view.scrollView.contentInsetAdjustmentBehavior = .never
         bridge.webView = view
         bridge.watchZoom(of: view)
+        bridge.pageBase = pairing.baseURL
         view.load(URLRequest(url: pairing.baseURL.appendingPathComponent("mobile/mobile.html")))
         return view
     }
 
     /// The path changed under an open terminal (the phone left or reached home): the page is reloaded
-    /// from the new base, since its sockets only ever go back to the origin it was served from.
+    /// from the new base, since its sockets only ever go back to the origin it was served from. The
+    /// base the page was asked for is what is compared; WebKit's own URL drops default ports.
     func updateUIView(_ uiView: WKWebView, context: Context) {
-        let wanted = pairing.baseURL.appendingPathComponent("mobile/mobile.html")
-        guard let current = uiView.url, current.host != wanted.host || current.port != wanted.port || current.scheme != wanted.scheme else { return }
-        LaunchOptions.log("terminal page reloaded via \(wanted.host ?? "")")
-        uiView.load(URLRequest(url: wanted))
+        guard bridge.pageBase != pairing.baseURL else { return }
+        bridge.pageBase = pairing.baseURL
+        LaunchOptions.log("terminal page reloaded via \(pairing.host)")
+        uiView.load(URLRequest(url: pairing.baseURL.appendingPathComponent("mobile/mobile.html")))
     }
 
     static func dismantleUIView(_ uiView: WKWebView, coordinator: ()) {

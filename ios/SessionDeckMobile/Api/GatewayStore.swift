@@ -27,7 +27,8 @@ final class GatewayStore: ObservableObject {
         let relay = Self.relay()
         relayPairing = relay
         lanPairing = Self.lan(base: UserDefaults.standard.string(forKey: Self.lanBaseKey(for: relay)), key: RelaySecrets.key)
-        pairing = lanPairing ?? relayPairing ?? Keychain.loadPairing()
+        // The remembered LAN address is only a candidate until it proves itself: the key never goes there first.
+        pairing = relayPairing ?? Keychain.loadPairing()
         viewed = ledger.all()
         if pairing != nil { startEvents() }
         if relayPairing != nil { Task { await choosePath(); await learnLan() } }
@@ -95,16 +96,31 @@ final class GatewayStore: ObservableObject {
         await choosePath()
     }
 
-    /// A second and a half for whatever answers at the LAN address to prove it holds our key, by HMAC
-    /// over a fresh nonce; the key itself is not sent until it has.
+    /// A short, bounded session for talking to something that has not proved itself yet: two seconds
+    /// in total, whatever it streams.
+    private static let probeSession: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 1.5
+        config.timeoutIntervalForResource = 2.0
+        return URLSession(configuration: config)
+    }()
+
+    /// Whatever answers at the LAN address must prove it holds our key, by HMAC over a fresh nonce,
+    /// before the key is sent there. The answer is read a byte at a time and cut off at a kilobyte.
     private func answers(_ candidate: Pairing) async -> Bool {
         let nonce = (0..<16).map { _ in String(format: "%02x", UInt8.random(in: 0...255)) }.joined()
         var parts = URLComponents(url: candidate.baseURL.appendingPathComponent("identity"), resolvingAgainstBaseURL: false)!
         parts.queryItems = [URLQueryItem(name: "nonce", value: nonce)]
-        var request = URLRequest(url: parts.url!)
-        request.timeoutInterval = 1.5
-        guard let (data, response) = try? await URLSession.shared.data(for: request), (response as? HTTPURLResponse)?.statusCode == 200,
-              let answer = try? JSONDecoder().decode([String: String].self, from: data), let proof = answer["proof"] else { return false }
+        guard let url = parts.url, let (bytes, response) = try? await Self.probeSession.bytes(from: url),
+              (response as? HTTPURLResponse)?.statusCode == 200 else { return false }
+        var data = Data()
+        do {
+            for try await byte in bytes {
+                data.append(byte)
+                if data.count > 1024 { return false }
+            }
+        } catch { return false }
+        guard let answer = try? JSONDecoder().decode([String: String].self, from: data), let proof = answer["proof"] else { return false }
         return proof == Self.proof(nonce: nonce, key: candidate.token)
     }
 
