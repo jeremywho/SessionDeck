@@ -20,11 +20,13 @@ final class GatewayStore: ObservableObject {
     private let relayPairing: Pairing?
     private var lanPairing: Pairing?
     /// The remembered LAN address belongs to one relay: a build pointed at another deck starts afresh.
-    private var lanBaseKey: String { "lanBase:\(relayPairing?.host ?? "")" }
+    private var lanBaseKey: String { Self.lanBaseKey(for: relayPairing) }
+    private static func lanBaseKey(for relay: Pairing?) -> String { "lanBase:\(relay?.host ?? "")" }
 
     init() {
-        relayPairing = Self.relay()
-        lanPairing = Self.lan(base: UserDefaults.standard.string(forKey: lanBaseKey), key: RelaySecrets.key)
+        let relay = Self.relay()
+        relayPairing = relay
+        lanPairing = Self.lan(base: UserDefaults.standard.string(forKey: Self.lanBaseKey(for: relay)), key: RelaySecrets.key)
         pairing = lanPairing ?? relayPairing ?? Keychain.loadPairing()
         viewed = ledger.all()
         if pairing != nil { startEvents() }
