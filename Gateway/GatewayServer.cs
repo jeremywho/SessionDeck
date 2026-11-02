@@ -176,7 +176,7 @@ internal sealed class GatewayServer : IAsyncDisposable
                 await MiniHttp.WriteJson(s, 200, "OK", SessionCatalog.ToJson(_catalog()));
                 return;
             case ("GET", "/meta"):
-                await MiniHttp.WriteJson(s, 200, "OK", JsonSerializer.Serialize(new { folders = Folders(), providers = SessionStarter.Providers, machine = Machine() }, Json));
+                await MiniHttp.WriteJson(s, 200, "OK", JsonSerializer.Serialize(new { folders = Folders(), providers = SessionStarter.Providers, machine = Machine(), lan = LanBase() }, Json));
                 return;
             case ("POST", "/sessions"):
                 await Start(s, r);
@@ -324,6 +324,14 @@ internal sealed class GatewayServer : IAsyncDisposable
 
     /// <summary>Caddy on the relay adds this; nothing on the LAN does.</summary>
     internal static bool Forwarded(MiniHttp.Request r) => r.Header("X-Forwarded-For").Length > 0;
+
+    /// <summary>Where this gateway can be reached on the local network, so a phone that came in through the relay can take the short way next time; null when no LAN address is known.</summary>
+    string? LanBase()
+    {
+        string address = QrPayload.LanAddress();
+        if (string.IsNullOrWhiteSpace(address) || address.StartsWith("127.", StringComparison.Ordinal)) return null;
+        return $"http://{address}:{Port}";
+    }
 
     /// <summary>The relay key compared in constant time; an empty key on either side never matches.</summary>
     internal static bool KeyMatches(string presented, string key)

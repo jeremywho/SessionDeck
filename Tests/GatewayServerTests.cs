@@ -247,6 +247,9 @@ public class GatewayServerTests : IAsyncDisposable
         Assert.Equal("C:/home", meta.GetProperty("folders")[0].GetString());
         Assert.Contains("Agy", meta.GetProperty("providers").EnumerateArray().Select(p => p.GetString()));
         Assert.Equal(12, meta.GetProperty("machine").GetProperty("cpuPercent").GetInt32());
+        var lan = meta.GetProperty("lan");
+        if (lan.ValueKind != JsonValueKind.Null)
+            Assert.Matches($@"^http://\d+\.\d+\.\d+\.\d+:{_server.Port}$", lan.GetString());
 
         using var ws = new ClientWebSocket();
         await ws.ConnectAsync(Ws($"/events?token={token}"), CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
