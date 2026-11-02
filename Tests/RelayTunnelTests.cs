@@ -158,6 +158,28 @@ public class RelayTunnelTests : IDisposable
     }
 
     [Fact]
+    public async Task The_path_is_asked_again_soon_until_it_answers_once_then_at_the_slow_cadence()
+    {
+        int probes = 0;
+        string? trouble = "503 from caddy";
+        var child = new FakeChild();
+        using var cts = new CancellationTokenSource();
+        var tunnel = new RelayTunnel(new RelaySettings(), 7420, _dir, _ => child,
+            _ => { Interlocked.Increment(ref probes); return Task.FromResult<string?>(Volatile.Read(ref trouble)); },
+            s => { lock (_statuses) _statuses.Add(s); },
+            probeEvery: TimeSpan.FromSeconds(10), retryEvery: TimeSpan.FromMilliseconds(20));
+        var run = tunnel.RunAsync(cts.Token);
+        await Until(() => Volatile.Read(ref probes) >= 4);
+        Volatile.Write(ref trouble, null);
+        await Until(() => Last.State == "connected");
+        int atConnect = Volatile.Read(ref probes);
+        await Task.Delay(300);
+        Assert.Equal(atConnect, Volatile.Read(ref probes));
+        cts.Cancel();
+        await run.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
     public async Task A_bad_public_url_is_a_probe_failure_not_an_exception()
     {
         var probe = RelayTunnel.HttpProbe("sessiondeck.0a.gg", "k");

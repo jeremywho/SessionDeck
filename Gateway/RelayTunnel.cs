@@ -41,13 +41,14 @@ internal sealed class RelayTunnel : IAsyncDisposable
     readonly Action<RelayStatus> _publish;
     readonly Func<int, TimeSpan> _backoff;
     readonly TimeSpan _probeEvery;
+    readonly TimeSpan _retryEvery;
     IRelayChild? _child;
 
     public RelayTunnel(RelaySettings settings, int gatewayPort, string dataDir,
                        Func<IReadOnlyList<string>, IRelayChild> start,
                        Func<CancellationToken, Task<string?>> probe,
                        Action<RelayStatus> publish,
-                       Func<int, TimeSpan>? backoff = null, TimeSpan? probeEvery = null)
+                       Func<int, TimeSpan>? backoff = null, TimeSpan? probeEvery = null, TimeSpan? retryEvery = null)
     {
         _settings = settings;
         _gatewayPort = gatewayPort;
@@ -57,6 +58,7 @@ internal sealed class RelayTunnel : IAsyncDisposable
         _publish = publish;
         _backoff = backoff ?? Backoff;
         _probeEvery = probeEvery ?? TimeSpan.FromSeconds(30);
+        _retryEvery = retryEvery ?? TimeSpan.FromSeconds(5);
     }
 
     public async Task RunAsync(CancellationToken ct)
@@ -107,7 +109,6 @@ internal sealed class RelayTunnel : IAsyncDisposable
             var done = await Task.WhenAny(child.Exited, Task.Delay(wait, ct));
             ct.ThrowIfCancellationRequested();
             if (done == child.Exited) return;
-            wait = _probeEvery;
             string? trouble;
             try { trouble = await _probe(ct); }
             catch (OperationCanceledException) { throw; }
@@ -123,8 +124,12 @@ internal sealed class RelayTunnel : IAsyncDisposable
                 since = null;
                 Publish("down", trouble, null, DateTime.UtcNow);
             }
+            // Until the path has answered once, ask again soon: the first probe can beat the forward by milliseconds.
+            wait = since == null ? Min(_retryEvery, _probeEvery) : _probeEvery;
         }
     }
+
+    static TimeSpan Min(TimeSpan a, TimeSpan b) => a < b ? a : b;
 
     void Publish(string state, string? reason, DateTime? since = null, DateTime? probed = null) =>
         _publish(new RelayStatus(state, reason, since, probed));
