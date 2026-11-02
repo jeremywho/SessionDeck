@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import CryptoKit
 
 /// The phone's view of the gateway: the pairing, the live session list, and whether the feed is up.
 @MainActor
@@ -18,11 +19,12 @@ final class GatewayStore: ObservableObject {
     /// At home the LAN path wins (shorter, and it works with the server down); the relay is the fallback.
     private let relayPairing: Pairing?
     private var lanPairing: Pairing?
-    private static let lanBaseKey = "lanBase"
+    /// The remembered LAN address belongs to one relay: a build pointed at another deck starts afresh.
+    private var lanBaseKey: String { "lanBase:\(relayPairing?.host ?? "")" }
 
     init() {
         relayPairing = Self.relay()
-        lanPairing = Self.lan(base: UserDefaults.standard.string(forKey: Self.lanBaseKey), key: RelaySecrets.key)
+        lanPairing = Self.lan(base: UserDefaults.standard.string(forKey: lanBaseKey), key: RelaySecrets.key)
         pairing = lanPairing ?? relayPairing ?? Keychain.loadPairing()
         viewed = ledger.all()
         if pairing != nil { startEvents() }
@@ -38,10 +40,26 @@ final class GatewayStore: ObservableObject {
         return Pairing(host: host, port: parsed.port ?? (scheme == "https" ? 443 : 80), token: key, deviceId: "relay", scheme: scheme)
     }
 
-    /// The gateway's LAN address as `/meta` reports it, with the same key; nil unless it is a plain http address.
+    /// The gateway's LAN address as `/meta` reports it, with the same key; nil unless it is a plain http
+    /// address on a private network, which is the only kind of place a home gateway lives.
     static func lan(base: String?, key: String?) -> Pairing? {
-        guard let base, let key, !key.isEmpty, let parsed = URL(string: base), parsed.scheme == "http", let host = parsed.host, let port = parsed.port else { return nil }
+        guard let base, let key, !key.isEmpty, let parsed = URL(string: base), parsed.scheme == "http", let host = parsed.host, let port = parsed.port, isPrivateIPv4(host) else { return nil }
         return Pairing(host: host, port: port, token: key, deviceId: "relay", scheme: "http")
+    }
+
+    /// 10/8, 172.16/12, 192.168/16.
+    static func isPrivateIPv4(_ host: String) -> Bool {
+        let parts = host.split(separator: ".").compactMap { UInt8($0) }
+        guard parts.count == 4 else { return false }
+        if parts[0] == 10 { return true }
+        if parts[0] == 172, (16...31).contains(parts[1]) { return true }
+        return parts[0] == 192 && parts[1] == 168
+    }
+
+    /// What the gateway must answer to `/identity?nonce=`: HMAC-SHA256 of the nonce under the key, lower-case hex.
+    static func proof(nonce: String, key: String) -> String {
+        let mac = HMAC<SHA256>.authenticationCode(for: Data(nonce.utf8), using: SymmetricKey(data: Data(key.trimmingCharacters(in: .whitespaces).utf8)))
+        return mac.map { String(format: "%02x", $0) }.joined()
     }
 
     /// The build carries the relay key, so there is no pairing screen and no forgetting; 401 means the key, not the phone.
@@ -64,24 +82,28 @@ final class GatewayStore: ObservableObject {
         startEvents()
     }
 
-    /// Ask the gateway where it lives on its own network, and remember it for the next launch.
+    /// Ask the gateway, over the relay's TLS and nowhere else, where it lives on its own network, and remember it.
     func learnLan() async {
-        guard relayPairing != nil, let meta = await meta() else { return }
+        guard let relayPairing, let meta = await meta(via: relayPairing) else { return }
         let learned = Self.lan(base: meta.lan, key: RelaySecrets.key)
         guard learned != lanPairing else { return }
         lanPairing = learned
-        UserDefaults.standard.set(meta.lan, forKey: Self.lanBaseKey)
-        LaunchOptions.log("lan learned: \(meta.lan ?? "none")")
-        if learned != nil, pairing != learned { await choosePath() }
+        UserDefaults.standard.set(learned == nil ? nil : meta.lan, forKey: lanBaseKey)
+        LaunchOptions.log("lan learned: \(learned?.host ?? "none")")
+        await choosePath()
     }
 
-    /// A second and a half for the gateway to answer the session list with our key on this path.
+    /// A second and a half for whatever answers at the LAN address to prove it holds our key, by HMAC
+    /// over a fresh nonce; the key itself is not sent until it has.
     private func answers(_ candidate: Pairing) async -> Bool {
-        var request = URLRequest(url: candidate.baseURL.appendingPathComponent("sessions"))
-        request.setValue("Bearer \(candidate.token)", forHTTPHeaderField: "Authorization")
+        let nonce = (0..<16).map { _ in String(format: "%02x", UInt8.random(in: 0...255)) }.joined()
+        var parts = URLComponents(url: candidate.baseURL.appendingPathComponent("identity"), resolvingAgainstBaseURL: false)!
+        parts.queryItems = [URLQueryItem(name: "nonce", value: nonce)]
+        var request = URLRequest(url: parts.url!)
         request.timeoutInterval = 1.5
-        guard let (_, response) = try? await URLSession.shared.data(for: request) else { return false }
-        return (response as? HTTPURLResponse)?.statusCode == 200
+        guard let (data, response) = try? await URLSession.shared.data(for: request), (response as? HTTPURLResponse)?.statusCode == 200,
+              let answer = try? JSONDecoder().decode([String: String].self, from: data), let proof = answer["proof"] else { return false }
+        return proof == Self.proof(nonce: nonce, key: candidate.token)
     }
 
     /// The deck said 401. A LAN pairing is gone for good; the relay key is a build-time fact, so the
@@ -154,7 +176,14 @@ final class GatewayStore: ObservableObject {
     }
 
     func meta() async -> Meta? {
-        guard let request = authorized("meta") else { return nil }
+        guard let pairing else { return nil }
+        return await meta(via: pairing)
+    }
+
+    private func meta(via pairing: Pairing) async -> Meta? {
+        var request = URLRequest(url: pairing.baseURL.appendingPathComponent("meta"))
+        request.setValue("Bearer \(pairing.token)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 8
         guard let (data, _) = try? await URLSession.shared.data(for: request) else { return nil }
         return try? JSONDecoder().decode(Meta.self, from: data)
     }
@@ -204,7 +233,7 @@ final class GatewayStore: ObservableObject {
                 await self.runEvents(pairing)
                 if Task.isCancelled { return }
                 // The home network went away (the phone left the house): go round by the relay without waiting out the backoff.
-                if let relay = self.relayPairing, pairing != relay, pairing == self.lanPairing {
+                if let relay = self.relayPairing, pairing != relay {
                     LaunchOptions.log("path: lan feed failed, falling back to the relay")
                     self.pairing = relay
                     attempt = 0

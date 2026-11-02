@@ -30,6 +30,19 @@ final class ModelsTests: XCTestCase {
         XCTAssertNil(GatewayStore.lan(base: "https://evil.example:443", key: "k"))
         XCTAssertNil(GatewayStore.lan(base: "http://192.168.1.5", key: "k"))
         XCTAssertNil(GatewayStore.lan(base: "http://192.168.1.5:7420", key: ""))
+        XCTAssertNil(GatewayStore.lan(base: "http://8.8.8.8:7420", key: "k"), "a public address is never a home gateway")
+        XCTAssertNotNil(GatewayStore.lan(base: "http://10.1.2.3:7420", key: "k"))
+        XCTAssertNotNil(GatewayStore.lan(base: "http://172.31.0.9:7420", key: "k"))
+        XCTAssertNil(GatewayStore.lan(base: "http://172.32.0.9:7420", key: "k"))
+    }
+
+    @MainActor func testTheIdentityProofMatchesTheGateways() {
+        // HMAC-SHA256("00112233445566778899aabbccddeeff") under "0123…cdef" (64 hex chars), as the C# test computes it.
+        let key = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        let proof = GatewayStore.proof(nonce: "00112233445566778899aabbccddeeff", key: key)
+        XCTAssertEqual(proof, "030ffc11ec49be148af4e692ad06ac01633f5fcae141bab99873e78ab06db975")
+        XCTAssertNotEqual(proof, GatewayStore.proof(nonce: "00112233445566778899aabbccddeeff", key: "other"))
+        XCTAssertEqual(proof, GatewayStore.proof(nonce: "00112233445566778899aabbccddeeff", key: " \(key) "), "the key is trimmed like the gateway trims it")
     }
 
     func testMetaDecodesWithAndWithoutTheLanAddress() throws {

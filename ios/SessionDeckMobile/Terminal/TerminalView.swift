@@ -434,7 +434,14 @@ struct TerminalWebView: UIViewRepresentable {
         return view
     }
 
-    func updateUIView(_ uiView: WKWebView, context: Context) {}
+    /// The path changed under an open terminal (the phone left or reached home): the page is reloaded
+    /// from the new base, since its sockets only ever go back to the origin it was served from.
+    func updateUIView(_ uiView: WKWebView, context: Context) {
+        let wanted = pairing.baseURL.appendingPathComponent("mobile/mobile.html")
+        guard let current = uiView.url, current.host != wanted.host || current.port != wanted.port || current.scheme != wanted.scheme else { return }
+        LaunchOptions.log("terminal page reloaded via \(wanted.host ?? "")")
+        uiView.load(URLRequest(url: wanted))
+    }
 
     static func dismantleUIView(_ uiView: WKWebView, coordinator: ()) {
         uiView.configuration.userContentController.removeScriptMessageHandler(forName: "sd")
