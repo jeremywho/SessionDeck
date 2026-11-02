@@ -21,7 +21,7 @@
     fontFamily: '"Cascadia Code", "Cascadia Mono", Menlo, monospace',
     fontSize: 14,
     lineHeight: 1.0,
-    scrollback: 5000,
+    scrollback: 20000,
     cursorBlink: false,
     cursorStyle: 'bar',
     cursorInactiveStyle: 'none',
