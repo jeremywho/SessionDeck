@@ -569,6 +569,13 @@ internal static class HostProgram
             int childPid;
             lock (_record) childPid = _record.ChildPid;
             int hops = Hooks.AgyHops(_processTable, sender, childPid);
+            if (hops < 0 && DateTime.UtcNow - _processTableAt > TimeSpan.FromMilliseconds(50))
+            {
+                // An ancestor the table does not know yet (a shell agy just opened): look once more at the present.
+                _processTable = Native.BuildProcessTable();
+                _processTableAt = DateTime.UtcNow;
+                hops = Hooks.AgyHops(_processTable, sender, childPid);
+            }
             if (_senderLogs < 3 || hops != 1)
             {
                 _senderLogs++;
