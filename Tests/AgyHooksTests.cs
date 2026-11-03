@@ -99,4 +99,36 @@ public class AgyHooksTests
         Assert.Equal(SessionProvider.Claude, SessionRow.ProviderOf("Claude"));
         Assert.Equal(SessionProvider.Claude, SessionRow.ProviderOf("Shell"));
     }
+
+    static JsonElement Payload(string conversationId) =>
+        JsonDocument.Parse($"{{\"conversationId\":\"{conversationId}\",\"modelName\":\"gemini-4-argon-high\"}}").RootElement.Clone();
+
+    [Fact]
+    public void A_fanned_out_agents_events_never_become_the_panes_conversation()
+    {
+        // The pane (whoop) is mid-turn; a review agent it spawned starts and runs with its own conversation id.
+        Assert.True(Hooks.FromOtherConversation(Payload("child-1"), "SessionStart", "whoop-conv", "busy"));
+        Assert.True(Hooks.FromOtherConversation(Payload("child-1"), "PreInvocation", "whoop-conv", "busy"));
+        Assert.True(Hooks.FromOtherConversation(Payload("child-1"), "Stop", "whoop-conv", "busy"));
+        // A child that is still talking after the pane's own turn ended is still a child.
+        Assert.True(Hooks.FromOtherConversation(Payload("child-1"), "PreInvocation", "whoop-conv", "idle"));
+    }
+
+    [Fact]
+    public void A_resume_or_clear_typed_while_idle_switches_the_panes_conversation()
+    {
+        Assert.False(Hooks.FromOtherConversation(Payload("resumed"), "SessionStart", "whoop-conv", "idle"));
+        Assert.False(Hooks.FromOtherConversation(Payload("resumed"), "SessionStart", "whoop-conv", ""));
+        Assert.False(Hooks.FromOtherConversation(Payload("resumed"), "SessionStart", "whoop-conv", "waiting"));
+    }
+
+    [Fact]
+    public void The_panes_own_conversation_and_a_first_conversation_are_never_foreign()
+    {
+        Assert.False(Hooks.FromOtherConversation(Payload("whoop-conv"), "PreInvocation", "whoop-conv", "busy"));
+        Assert.False(Hooks.FromOtherConversation(Payload("WHOOP-CONV"), "Stop", "whoop-conv", "busy"));
+        Assert.False(Hooks.FromOtherConversation(Payload("first"), "PreInvocation", "", "busy"));
+        var claude = JsonDocument.Parse("{\"session_id\":\"abc\",\"hook_event_name\":\"PreToolUse\"}").RootElement;
+        Assert.False(Hooks.FromOtherConversation(claude, "PreToolUse", "whoop-conv", "busy"));
+    }
 }

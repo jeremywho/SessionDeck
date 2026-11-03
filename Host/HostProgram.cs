@@ -557,6 +557,7 @@ internal static class HostProgram
         lock (_record)
         {
             _record.HookEvents++;
+            if (Hooks.FromOtherConversation(root, ev, _record.SessionId, _record.AgentStatus)) return;
             // PostToolUse follows a PreToolUse that already said busy and names the tool; recording it
             // would rewrite the file on every tool call for nothing the app reads.
             if (ev != "PostToolUse") _record.LastEvent = ev;

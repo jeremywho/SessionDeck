@@ -98,6 +98,22 @@ internal static class Hooks
     public static bool FromSubagent(JsonElement root) =>
         root.TryGetProperty("agent_id", out var a) && a.ValueKind == JsonValueKind.String && (a.GetString() ?? "").Length > 0;
 
+    /// <summary>
+    /// Agy runs the pane's hooks inside the headless agents a conversation fans out to, each stamped
+    /// with its own conversationId and nothing that says "child". Those events say nothing about the
+    /// pane's own conversation, which only changes when a /resume or /clear is typed while it is idle.
+    /// So a SessionStart from another conversation while the pane's own is idle is a switch; any other
+    /// event from another conversation, or a SessionStart mid-turn, is a child's. Seen live: a pane
+    /// named whoop showed "claude" whenever one of its review agents spoke.
+    /// </summary>
+    public static bool FromOtherConversation(JsonElement root, string eventName, string current, string currentStatus)
+    {
+        string id = root.TryGetProperty("conversationId", out var c) && c.ValueKind == JsonValueKind.String ? c.GetString() ?? "" : "";
+        if (id.Length == 0 || current.Length == 0 || string.Equals(id, current, StringComparison.OrdinalIgnoreCase)) return false;
+        bool idle = currentStatus is "" or "idle" or "scheduled" or "waiting" or "ended";
+        return !(eventName == "SessionStart" && idle);
+    }
+
     /// <summary>Why a SessionStart fired: startup, resume, clear, or compact. A compaction happens mid-turn and changes nothing.</summary>
     public static string StartSource(JsonElement root) =>
         root.TryGetProperty("source", out var s) && s.ValueKind == JsonValueKind.String ? s.GetString() ?? "" : "";
