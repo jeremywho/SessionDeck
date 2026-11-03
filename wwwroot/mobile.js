@@ -152,6 +152,33 @@
   el.addEventListener('touchend', onTouchEnd);
   el.addEventListener('touchcancel', onTouchEnd);
 
+  // A long press on a row starts selecting from that row, the way text is selected elsewhere on the
+  // phone; the finger can then drag to take more rows, and the key bar's "copy" finishes it.
+  let pressTimer = null, pressTouch = null;
+  function cancelPress() { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } pressTouch = null; }
+  el.addEventListener('touchstart', ev => {
+    if (selecting || ev.touches.length !== 1) { cancelPress(); return; }
+    const t = ev.touches[0];
+    pressTouch = { x: t.clientX, y: t.clientY };
+    pressTimer = setTimeout(() => {
+      pressTimer = null;
+      if (!pressTouch) return;
+      selecting = true;
+      el.classList.add('selecting');
+      anchorRow = rowAt(pressTouch);
+      term.selectLines(anchorRow, anchorRow);
+      post({ type: 'selecting', on: true, longPress: true });
+      tapStart = null;
+    }, 450);
+  }, { passive: true });
+  el.addEventListener('touchmove', ev => {
+    if (!pressTouch || ev.touches.length !== 1) { cancelPress(); return; }
+    const t = ev.touches[0];
+    if (Math.hypot(t.clientX - pressTouch.x, t.clientY - pressTouch.y) > 10) cancelPress();
+  }, { passive: true });
+  el.addEventListener('touchend', cancelPress);
+  el.addEventListener('touchcancel', cancelPress);
+
   window.sdInput = text => send({ type: 'input', data: text });
   window.sdPaste = text => send({ type: 'input', data: text });
   window.sdSelect = on => {
@@ -236,6 +263,8 @@
     return rect.top + window.scrollY + (last + 1) * cell.height;
   };
   window.sdReconnect = () => { if (!ended) { retries = 0; connect(); } };
+  // Debug: where xterm's viewport sits in its buffer.
+  window.sdViewport = () => { const b = term.buffer.active; return { y: b.viewportY, base: b.baseY, rows: term.rows, lines: b.length }; };
 
   term.onSelectionChange(() => { if (selecting) post({ type: 'selection', has: term.hasSelection() }); });
   connect();

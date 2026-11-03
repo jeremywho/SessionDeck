@@ -57,6 +57,7 @@ struct TerminalScreen: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { bridge.testPinch(to: z) }
                 if LaunchOptions.focus { DispatchQueue.main.asyncAfter(deadline: .now() + 6.0) { LaunchOptions.log("raising keyboard"); bridge.focus(true) } }
                 if LaunchOptions.scrollTest { DispatchQueue.main.asyncAfter(deadline: .now() + 6.0) { bridge.scrollTest() } }
+                if LaunchOptions.watchViewport { bridge.watchViewport() }
             }
             guard connected, !autoSent, !LaunchOptions.sends.isEmpty else { return }
             autoSent = true
@@ -315,6 +316,15 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
         }
     }
 
+    /// Debug: once a second, where xterm's viewport sits and where the page is scrolled to.
+    func watchViewport() {
+        guard let webView else { return }
+        webView.evaluateJavaScript("JSON.stringify(window.sdViewport ? window.sdViewport() : null)") { [weak self] result, _ in
+            LaunchOptions.log("viewport \(result as? String ?? "n/a") page y=\(Int(webView.scrollView.contentOffset.y)) zoom=\(String(format: "%.2f", webView.scrollView.zoomScale))")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { self?.watchViewport() }
+        }
+    }
+
     /// Debug driving: raise the keyboard, scroll the page to its top as a reader would, lower the
     /// keyboard, and report where the page sits for the next few seconds. A reader's place must survive.
     func scrollTest() {
@@ -383,7 +393,9 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
             selecting = false
             hasSelection = false
         case "selection": hasSelection = body["has"] as? Bool ?? false
-        case "selecting": selecting = body["on"] as? Bool ?? false
+        case "selecting":
+            selecting = body["on"] as? Bool ?? false
+            if body["longPress"] as? Bool == true { UIImpactFeedbackGenerator(style: .medium).impactOccurred() }
         case "size": applySavedZoom()
         case "replayed": land("replay finished")
         case "tap": if !selecting { toggleKeyboard() }
