@@ -550,6 +550,7 @@ internal static class HostProgram
 
     static Dictionary<int, (int Parent, string Name)>? _processTable;
     static DateTime _processTableAt;
+    static int _senderLogs;
 
     /// <summary>True when the hook came from an agy fanned out by the pane's agy rather than from the pane's agy itself.</summary>
     static bool FromChildAgy(int peerPort)
@@ -558,15 +559,24 @@ internal static class HostProgram
         try
         {
             int sender = TcpPeer.OwningPid(peerPort);
-            if (sender <= 0) return false;
-            if (_processTable == null || DateTime.UtcNow - _processTableAt > TimeSpan.FromSeconds(2))
+            if (sender <= 0) { if (_senderLogs++ < 3) Log($"hook from port {peerPort}: no owning process found"); return false; }
+            // The sender is a curl that lives for milliseconds: a table that does not know it is stale, however recent.
+            if (_processTable == null || !_processTable.ContainsKey(sender) || DateTime.UtcNow - _processTableAt > TimeSpan.FromSeconds(2))
             {
                 _processTable = Native.BuildProcessTable();
                 _processTableAt = DateTime.UtcNow;
             }
             int childPid;
             lock (_record) childPid = _record.ChildPid;
-            return Hooks.FromChildAgy(Hooks.AgyHops(_processTable, sender, childPid));
+            int hops = Hooks.AgyHops(_processTable, sender, childPid);
+            if (_senderLogs < 3 || hops != 1)
+            {
+                _senderLogs++;
+                var chain = new List<string>();
+                for (int p = sender, i = 0; p > 0 && i < 12 && _processTable.TryGetValue(p, out var e); i++, p = e.Parent) chain.Add($"{e.Name}({p})");
+                Log($"hook from pid {sender}: {hops} agy between it and the pane {childPid}; chain {string.Join(" < ", chain)}");
+            }
+            return Hooks.FromChildAgy(hops);
         }
         catch (Exception ex) { Log($"hook sender: {ex.Message}"); return false; }
     }

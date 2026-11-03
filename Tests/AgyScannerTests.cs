@@ -57,5 +57,7 @@ public class AgyScannerTests : IDisposable
         Assert.Equal(300, AgyScanner.AgyPidUnder(200, table));
         Assert.Equal(0, AgyScanner.AgyPidUnder(400, table));
         Assert.Equal(0, AgyScanner.AgyPidUnder(999, table));
+        // A pane whose command ran without a shell has agy as the pty child itself.
+        Assert.Equal(300, AgyScanner.AgyPidUnder(300, table));
     }
 }

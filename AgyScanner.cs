@@ -111,6 +111,7 @@ internal static class AgyScanner
         foreach (var (pid, (parent, name)) in table)
         {
             if (!string.Equals(name, "agy.exe", StringComparison.OrdinalIgnoreCase)) continue;
+            if (pid == childPid) return pid;
             int p = parent;
             for (int hops = 0; hops < 6 && p > 0; hops++)
             {

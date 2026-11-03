@@ -265,18 +265,23 @@ internal sealed class App : Application
             .ToList();
     }
 
-    /// <summary>The session each running host owns: what it was told, else, for an agy pane, what agy's log says its process opened.</summary>
+    /// <summary>
+    /// The session each running host owns: what it was told, and, for an agy pane, also what agy's own
+    /// log says its process opened. Both, not either: a host from before the fan-out fix may be
+    /// holding a child agent's id at this instant, and restoring the pane's real conversation beside
+    /// the live pane would run two agys on one conversation (seen live at the v0.5.63 update).
+    /// </summary>
     internal static IEnumerable<string> HostedConversations(IEnumerable<Host.HostRecord> running, IReadOnlyDictionary<int, (int Parent, string Name)>? processes = null)
     {
         foreach (var h in running)
         {
-            if (h.SessionId.Length > 0) { yield return h.SessionId; continue; }
+            if (h.SessionId.Length > 0) yield return h.SessionId;
             if (!string.Equals(h.Provider, "Agy", StringComparison.OrdinalIgnoreCase)) continue;
             processes ??= Native.BuildProcessTable();
             int agyPid = AgyScanner.AgyPidUnder(h.ChildPid, processes);
             if (agyPid == 0) continue;
             string id = AgyScanner.ConversationFor(agyPid);
-            if (id.Length > 0) yield return id;
+            if (id.Length > 0 && !string.Equals(id, h.SessionId, StringComparison.OrdinalIgnoreCase)) yield return id;
         }
     }
 

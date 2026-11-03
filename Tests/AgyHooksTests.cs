@@ -130,6 +130,26 @@ public class AgyHooksTests
     }
 
     [Fact]
+    public void A_pane_whose_child_is_agy_itself_counts_the_same_way()
+    {
+        // Seen in an isolated host: `agy -p …` as the pane's command runs agy.exe as the pty child, no shell.
+        var tree = new Dictionary<int, (int Parent, string Name)>
+        {
+            [40] = (1, "agy.exe"),
+            [41] = (40, "cmd.exe"),
+            [42] = (41, "curl.exe"),
+            [43] = (40, "pwsh.exe"),
+            [44] = (43, "agy.exe"),
+            [45] = (44, "cmd.exe"),
+            [46] = (45, "curl.exe"),
+        };
+        Assert.Equal(1, Hooks.AgyHops(tree, 42, 40));
+        Assert.False(Hooks.FromChildAgy(Hooks.AgyHops(tree, 42, 40)));
+        Assert.Equal(2, Hooks.AgyHops(tree, 46, 40));
+        Assert.True(Hooks.FromChildAgy(Hooks.AgyHops(tree, 46, 40)));
+    }
+
+    [Fact]
     public void A_sender_outside_the_pane_or_unknown_is_taken_at_its_word()
     {
         Assert.Equal(-1, Hooks.AgyHops(Tree, 91, 50));

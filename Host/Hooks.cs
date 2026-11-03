@@ -113,9 +113,10 @@ internal static class Hooks
         int p = senderPid;
         for (int hops = 0; hops < 24 && p > 0; hops++)
         {
-            if (p == paneChildPid) return agys;
             if (!table.TryGetValue(p, out var entry)) return -1;
             if (string.Equals(entry.Name, "agy.exe", StringComparison.OrdinalIgnoreCase)) agys++;
+            // The pane's child is agy itself when the command ran without a shell, and it counts too.
+            if (p == paneChildPid) return agys;
             p = entry.Parent;
         }
         return -1;
