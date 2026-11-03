@@ -150,6 +150,19 @@ public class AgyHooksTests
     }
 
     [Fact]
+    public void The_agents_a_pane_fanned_out_to_are_never_sessions_to_restore()
+    {
+        var pane = new HostRecord { Id = "a", SessionId = "whoop-conv", Provider = "Agy", ChildConversations = { "child-1", "child-2" } };
+        var other = new HostRecord { Id = "b", SessionId = "oura-conv", Provider = "Agy", ChildConversations = { "CHILD-2", "child-3" } };
+        var claude = new HostRecord { Id = "c", SessionId = "s", Provider = "Claude" };
+        Assert.Equal(new[] { "child-1", "child-2", "child-3" }, App.ChildConversations(new[] { pane, other, claude }).ToList());
+        var back = System.Text.Json.JsonSerializer.Deserialize<HostRecord>(System.Text.Json.JsonSerializer.Serialize(pane))!;
+        Assert.Equal(new[] { "child-1", "child-2" }, back.ChildConversations);
+        var old = System.Text.Json.JsonSerializer.Deserialize<HostRecord>("{\"Id\":\"old\",\"SessionId\":\"x\"}")!;
+        Assert.Empty(App.ChildConversations(new[] { old }));
+    }
+
+    [Fact]
     public void A_sender_outside_the_pane_or_unknown_is_taken_at_its_word()
     {
         Assert.Equal(-1, Hooks.AgyHops(Tree, 91, 50));

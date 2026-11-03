@@ -62,6 +62,8 @@ internal sealed class HostRecord
     public DateTime? StatusAt { get; set; }
     public string TranscriptPath { get; set; } = "";
     public string Model { get; set; } = "";
+    /// <summary>Conversations of the agents this pane's agy fanned out to, as their hooks named them: not this pane's, never to be restored as sessions of their own.</summary>
+    public List<string> ChildConversations { get; set; } = new();
 
     /// <summary>Hooks seen by this process; kept out of the file so a hook that changes nothing else writes nothing.</summary>
     [JsonIgnore] public int HookEvents { get; set; }
@@ -594,7 +596,18 @@ internal static class HostProgram
         if (ev.Length == 0) return;
         if (Hooks.FromSubagent(root) || childAgy)
         {
-            lock (_record) _record.HookEvents++;
+            bool learned = false;
+            lock (_record)
+            {
+                _record.HookEvents++;
+                string child = childAgy ? Text(root, "conversationId") : "";
+                if (child.Length > 0 && _record.ChildConversations.Count < 64 && !_record.ChildConversations.Contains(child, StringComparer.OrdinalIgnoreCase))
+                {
+                    _record.ChildConversations.Add(child);
+                    learned = true;
+                }
+            }
+            if (learned) WriteRecord();
             return;
         }
         lock (_record)

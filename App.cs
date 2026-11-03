@@ -248,8 +248,10 @@ internal sealed class App : Application
         // Agy has no registry of its own: a conversation is live while a host of this app still runs
         // it, which is the case across every restart of the app itself. A pane from before hooks
         // never told its host the conversation, so it is read from agy's own log instead.
-        foreach (var id in HostedConversations(HostManager.Discover().Where(h => !h.HasExited && HostManager.IsAlive(h))))
-            liveIds.Add(id);
+        var running = HostManager.Discover().Where(h => !h.HasExited && HostManager.IsAlive(h)).ToList();
+        foreach (var id in HostedConversations(running)) liveIds.Add(id);
+        // The agents a pane fanned out to are not sessions of their own: they were never panes and come back by themselves.
+        foreach (var id in ChildConversations(running)) liveIds.Add(id);
         // A week, not a day: a machine can sit wedged/powered-off well past 24h, and the restore
         // offer is an opt-in checklist — a stale entry costs one unticked row.
         long cutoff = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - 7L * 24 * 60 * 60 * 1000;
@@ -271,6 +273,10 @@ internal sealed class App : Application
     /// holding a child agent's id at this instant, and restoring the pane's real conversation beside
     /// the live pane would run two agys on one conversation (seen live at the v0.5.63 update).
     /// </summary>
+    /// <summary>Every conversation some running pane's agy fanned out to, as the hosts recorded them.</summary>
+    internal static IEnumerable<string> ChildConversations(IEnumerable<Host.HostRecord> running) =>
+        running.SelectMany(h => h.ChildConversations ?? new List<string>()).Distinct(StringComparer.OrdinalIgnoreCase);
+
     internal static IEnumerable<string> HostedConversations(IEnumerable<Host.HostRecord> running, IReadOnlyDictionary<int, (int Parent, string Name)>? processes = null)
     {
         foreach (var h in running)
