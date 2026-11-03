@@ -100,35 +100,59 @@ public class AgyHooksTests
         Assert.Equal(SessionProvider.Claude, SessionRow.ProviderOf("Shell"));
     }
 
-    static JsonElement Payload(string conversationId) =>
-        JsonDocument.Parse($"{{\"conversationId\":\"{conversationId}\",\"modelName\":\"gemini-4-argon-high\"}}").RootElement.Clone();
+    /// <summary>The pane's shell is 50; its agy is 51; a hook's curl runs under cmd under the agy that fired it.</summary>
+    static readonly Dictionary<int, (int Parent, string Name)> Tree = new()
+    {
+        [50] = (1, "pwsh.exe"),
+        [51] = (50, "agy.exe"),
+        [52] = (51, "cmd.exe"),
+        [53] = (52, "curl.exe"),
+        [60] = (51, "pwsh.exe"),
+        [61] = (60, "agy.exe"),
+        [62] = (61, "cmd.exe"),
+        [63] = (62, "curl.exe"),
+        [70] = (61, "bash.exe"),
+        [71] = (70, "agy.exe"),
+        [72] = (71, "curl.exe"),
+        [90] = (1, "agy.exe"),
+        [91] = (90, "curl.exe"),
+    };
 
     [Fact]
-    public void A_fanned_out_agents_events_never_become_the_panes_conversation()
+    public void The_panes_own_agy_is_one_hop_and_a_fanned_out_agent_is_two_or_more()
     {
-        // The pane (whoop) is mid-turn; a review agent it spawned starts and runs with its own conversation id.
-        Assert.True(Hooks.FromOtherConversation(Payload("child-1"), "SessionStart", "whoop-conv", "busy"));
-        Assert.True(Hooks.FromOtherConversation(Payload("child-1"), "PreInvocation", "whoop-conv", "busy"));
-        Assert.True(Hooks.FromOtherConversation(Payload("child-1"), "Stop", "whoop-conv", "busy"));
-        // A child that is still talking after the pane's own turn ended is still a child.
-        Assert.True(Hooks.FromOtherConversation(Payload("child-1"), "PreInvocation", "whoop-conv", "idle"));
+        Assert.Equal(1, Hooks.AgyHops(Tree, 53, 50));
+        Assert.False(Hooks.FromChildAgy(Hooks.AgyHops(Tree, 53, 50)));
+        Assert.Equal(2, Hooks.AgyHops(Tree, 63, 50));
+        Assert.True(Hooks.FromChildAgy(Hooks.AgyHops(Tree, 63, 50)));
+        Assert.Equal(3, Hooks.AgyHops(Tree, 72, 50));
+        Assert.True(Hooks.FromChildAgy(Hooks.AgyHops(Tree, 72, 50)));
     }
 
     [Fact]
-    public void A_resume_or_clear_typed_while_idle_switches_the_panes_conversation()
+    public void A_sender_outside_the_pane_or_unknown_is_taken_at_its_word()
     {
-        Assert.False(Hooks.FromOtherConversation(Payload("resumed"), "SessionStart", "whoop-conv", "idle"));
-        Assert.False(Hooks.FromOtherConversation(Payload("resumed"), "SessionStart", "whoop-conv", ""));
-        Assert.False(Hooks.FromOtherConversation(Payload("resumed"), "SessionStart", "whoop-conv", "waiting"));
+        Assert.Equal(-1, Hooks.AgyHops(Tree, 91, 50));
+        Assert.False(Hooks.FromChildAgy(Hooks.AgyHops(Tree, 91, 50)));
+        Assert.Equal(-1, Hooks.AgyHops(Tree, 12345, 50));
+        Assert.False(Hooks.FromChildAgy(-1));
+        Assert.False(Hooks.FromChildAgy(0));
     }
 
     [Fact]
-    public void The_panes_own_conversation_and_a_first_conversation_are_never_foreign()
+    public void The_tcp_table_names_the_process_behind_a_loopback_connection()
     {
-        Assert.False(Hooks.FromOtherConversation(Payload("whoop-conv"), "PreInvocation", "whoop-conv", "busy"));
-        Assert.False(Hooks.FromOtherConversation(Payload("WHOOP-CONV"), "Stop", "whoop-conv", "busy"));
-        Assert.False(Hooks.FromOtherConversation(Payload("first"), "PreInvocation", "", "busy"));
-        var claude = JsonDocument.Parse("{\"session_id\":\"abc\",\"hook_event_name\":\"PreToolUse\"}").RootElement;
-        Assert.False(Hooks.FromOtherConversation(claude, "PreToolUse", "whoop-conv", "busy"));
+        var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        try
+        {
+            using var client = new System.Net.Sockets.TcpClient();
+            client.Connect(System.Net.IPAddress.Loopback, ((System.Net.IPEndPoint)listener.LocalEndpoint).Port);
+            using var accepted = listener.AcceptTcpClient();
+            int clientPort = ((System.Net.IPEndPoint)accepted.Client.RemoteEndPoint!).Port;
+            Assert.Equal(Environment.ProcessId, TcpPeer.OwningPid(clientPort));
+            Assert.Equal(0, TcpPeer.OwningPid(1));
+        }
+        finally { listener.Stop(); }
     }
 }

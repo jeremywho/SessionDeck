@@ -100,19 +100,28 @@ internal static class Hooks
 
     /// <summary>
     /// Agy runs the pane's hooks inside the headless agents a conversation fans out to, each stamped
-    /// with its own conversationId and nothing that says "child". Those events say nothing about the
-    /// pane's own conversation, which only changes when a /resume or /clear is typed while it is idle.
-    /// So a SessionStart from another conversation while the pane's own is idle is a switch; any other
-    /// event from another conversation, or a SessionStart mid-turn, is a child's. Seen live: a pane
-    /// named whoop showed "claude" whenever one of its review agents spoke.
+    /// with its own conversationId and nothing that says "child". The sender tells them apart: the
+    /// pane's own agy is the one agy.exe between the hook's curl and the pane's shell, a fanned-out
+    /// agent has its parent agy above it as well. Returns how many agy.exe lie between the sender and
+    /// <paramref name="paneChildPid"/>, or -1 when the sender is not under the pane at all (then nothing
+    /// can be said, and the event is taken at its word). Seen live: a pane named whoop read "claude"
+    /// whenever one of its review agents spoke.
     /// </summary>
-    public static bool FromOtherConversation(JsonElement root, string eventName, string current, string currentStatus)
+    public static int AgyHops(IReadOnlyDictionary<int, (int Parent, string Name)> table, int senderPid, int paneChildPid)
     {
-        string id = root.TryGetProperty("conversationId", out var c) && c.ValueKind == JsonValueKind.String ? c.GetString() ?? "" : "";
-        if (id.Length == 0 || current.Length == 0 || string.Equals(id, current, StringComparison.OrdinalIgnoreCase)) return false;
-        bool idle = currentStatus is "" or "idle" or "scheduled" or "waiting" or "ended";
-        return !(eventName == "SessionStart" && idle);
+        int agys = 0;
+        int p = senderPid;
+        for (int hops = 0; hops < 24 && p > 0; hops++)
+        {
+            if (p == paneChildPid) return agys;
+            if (!table.TryGetValue(p, out var entry)) return -1;
+            if (string.Equals(entry.Name, "agy.exe", StringComparison.OrdinalIgnoreCase)) agys++;
+            p = entry.Parent;
+        }
+        return -1;
     }
+
+    public static bool FromChildAgy(int agyHops) => agyHops >= 2;
 
     /// <summary>Why a SessionStart fired: startup, resume, clear, or compact. A compaction happens mid-turn and changes nothing.</summary>
     public static string StartSource(JsonElement root) =>

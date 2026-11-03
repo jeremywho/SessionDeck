@@ -392,7 +392,8 @@ internal static class HostProgram
         string path = reqLine[1];
         if (reqLine[0] == "POST")
         {
-            await ServeHook(stream, lines, path, leftover);
+            int peerPort = (tcp.Client.RemoteEndPoint as IPEndPoint)?.Port ?? 0;
+            await ServeHook(stream, lines, path, leftover, peerPort);
             return;
         }
         if (reqLine[0] != "GET") return;
@@ -496,7 +497,7 @@ internal static class HostProgram
 
     /// <summary><c>POST /hook?token=…</c> from <c>SessionDeck.exe --hook</c>: one CLI hook event as
     /// JSON. Updates the record (status, last tool, identity) and tells attached viewers.</summary>
-    static async Task ServeHook(NetworkStream stream, string[] lines, string path, byte[] leftover)
+    static async Task ServeHook(NetworkStream stream, string[] lines, string path, byte[] leftover, int peerPort = 0)
     {
         var query = Gateway.MiniHttp.ParseQuery(path);
         if (!path.StartsWith("/hook") || !query.TryGetValue("token", out var token) || token != _record.Token)
@@ -520,7 +521,9 @@ internal static class HostProgram
         try
         {
             using var doc = JsonDocument.Parse(body.AsMemory(0, have));
-            ApplyHook(doc.RootElement, EventFromPath(path));
+            // Who sent it is decided while curl still holds its socket, before anything else is read.
+            bool childAgy = doc.RootElement.TryGetProperty("conversationId", out _) && FromChildAgy(peerPort);
+            ApplyHook(doc.RootElement, EventFromPath(path), childAgy);
         }
         catch (Exception ex) { Log($"hook: {ex.Message}"); }
         await Gateway.MiniHttp.WriteAscii(stream, "HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n");
@@ -545,11 +548,34 @@ internal static class HostProgram
     internal static string EventName(JsonElement root, string fromQuery) =>
         root.TryGetProperty("hook_event_name", out var e) && e.ValueKind == JsonValueKind.String && (e.GetString() ?? "").Length > 0 ? e.GetString()! : fromQuery;
 
-    static void ApplyHook(JsonElement root, string eventFromQuery = "")
+    static Dictionary<int, (int Parent, string Name)>? _processTable;
+    static DateTime _processTableAt;
+
+    /// <summary>True when the hook came from an agy fanned out by the pane's agy rather than from the pane's agy itself.</summary>
+    static bool FromChildAgy(int peerPort)
+    {
+        if (peerPort <= 0) return false;
+        try
+        {
+            int sender = TcpPeer.OwningPid(peerPort);
+            if (sender <= 0) return false;
+            if (_processTable == null || DateTime.UtcNow - _processTableAt > TimeSpan.FromSeconds(2))
+            {
+                _processTable = Native.BuildProcessTable();
+                _processTableAt = DateTime.UtcNow;
+            }
+            int childPid;
+            lock (_record) childPid = _record.ChildPid;
+            return Hooks.FromChildAgy(Hooks.AgyHops(_processTable, sender, childPid));
+        }
+        catch (Exception ex) { Log($"hook sender: {ex.Message}"); return false; }
+    }
+
+    static void ApplyHook(JsonElement root, string eventFromQuery = "", bool childAgy = false)
     {
         string ev = EventName(root, eventFromQuery);
         if (ev.Length == 0) return;
-        if (Hooks.FromSubagent(root))
+        if (Hooks.FromSubagent(root) || childAgy)
         {
             lock (_record) _record.HookEvents++;
             return;
@@ -557,7 +583,6 @@ internal static class HostProgram
         lock (_record)
         {
             _record.HookEvents++;
-            if (Hooks.FromOtherConversation(root, ev, _record.SessionId, _record.AgentStatus)) return;
             // PostToolUse follows a PreToolUse that already said busy and names the tool; recording it
             // would rewrite the file on every tool call for nothing the app reads.
             if (ev != "PostToolUse") _record.LastEvent = ev;
