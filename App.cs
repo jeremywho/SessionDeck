@@ -59,7 +59,7 @@ internal sealed class App : Application
 
         // Orphaned = saved in the registry but not currently live, i.e. lost to a reboot or a crash.
         // Capture BEFORE the window's scan loop starts overwriting the registry, then bring every one
-        // of them back; the tray's "Restore sessions…" keeps the checklist for picking by hand.
+        // of them back.
         var orphaned = ComputeOrphaned();
 
         _window = new SessionsWindow(this);
@@ -223,22 +223,6 @@ internal sealed class App : Application
         if (_window != null) _window.ShowInTaskbar = Settings.ShowInTaskbar;
     }
 
-    void RestoreFromTray()
-    {
-        var orphaned = ComputeOrphaned();
-        if (orphaned.Count == 0)
-        {
-            _tray.ShowBalloonTip(2500, "Session Deck", "No previous sessions to restore.", ToolTipIcon.Info);
-            return;
-        }
-        ShowRestore(orphaned);
-    }
-
-    void ShowRestore(List<SavedSession> orphaned)
-    {
-        if (orphaned.Count > 0) new RestoreWindow(this, orphaned).Show();
-    }
-
     /// <summary>Sessions saved last run that aren't live now (and seen within the last week).</summary>
     static List<SavedSession> ComputeOrphaned()
     {
@@ -306,21 +290,25 @@ internal sealed class App : Application
         var menu = new WpfContextMenu();
         menu.Items.Add(Item("Open", ShowWindow));
         menu.Items.Add(Item("Settings…", ShowSettings));
-        menu.Items.Add(Item("New session with options…", () => { ShowWindow(); _window?.ShowNewSessionDialog(); }));
-        menu.Items.Add(Item("Adopt a session from another terminal…", () => { ShowWindow(); _window?.ShowAdoptPicker(); }));
-        menu.Items.Add(Item("Restore sessions…", RestoreFromTray));
-        menu.Items.Add(Item("Toggle theme", ToggleTheme));
-        menu.Items.Add(new System.Windows.Controls.Separator());
-        menu.Items.Add(new WpfMenuItem { Header = "Dock to", IsEnabled = false });
-        menu.Items.Add(Item("Left edge", () => _window?.SnapTo("LeftEdge")));
-        menu.Items.Add(Item("Right edge", () => _window?.SnapTo("RightEdge")));
-        menu.Items.Add(Item("Top-left", () => _window?.SnapTo("TopLeft")));
-        menu.Items.Add(Item("Top-right", () => _window?.SnapTo("TopRight")));
-        menu.Items.Add(Item("Bottom-left", () => _window?.SnapTo("BottomLeft")));
-        menu.Items.Add(Item("Bottom-right", () => _window?.SnapTo("BottomRight")));
+        menu.Items.Add(Item("Check for updates…", () => _ = CheckForUpdatesFromTray()));
         menu.Items.Add(new System.Windows.Controls.Separator());
         menu.Items.Add(Item("Exit", ExitApp));
         return menu;
+    }
+
+    /// <summary>A check the person asked for: no debounce, and the answer comes back as a balloon either way.</summary>
+    async Task CheckForUpdatesFromTray()
+    {
+        var outcome = await Updater.CheckAsync(force: true);
+        string text = outcome switch
+        {
+            Updater.CheckOutcome.UpToDate => $"Up to date (v{Updater.Current.ToString(3)}).",
+            Updater.CheckOutcome.Staged => $"{Updater.StagedTag} downloaded. Click Update in the deck to install it.",
+            Updater.CheckOutcome.AlreadyStaged => $"{Updater.StagedTag} is already downloaded. Click Update in the deck to install it.",
+            Updater.CheckOutcome.NotInstalled => "This is a development build; updates apply to the installed app only.",
+            _ => "Could not check for updates. Is gh signed in?",
+        };
+        _tray.ShowBalloonTip(3000, "Session Deck", text, outcome == Updater.CheckOutcome.Failed ? ToolTipIcon.Warning : ToolTipIcon.Info);
     }
 
     static WpfMenuItem Item(string header, Action onClick)

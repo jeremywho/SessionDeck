@@ -43,31 +43,36 @@ internal static class Updater
     public static bool ShouldCheckNow(DateTime lastCheck, DateTime now, TimeSpan gap) =>
         lastCheck == DateTime.MinValue || now - lastCheck >= gap;
 
-    /// <summary>Ask GitHub (via gh) for the latest release; if it's newer, download + stage it. Idempotent.</summary>
-    public static async Task CheckAsync()
+    public enum CheckOutcome { NotInstalled, Skipped, UpToDate, AlreadyStaged, Staged, Failed }
+
+    /// <summary>Ask GitHub (via gh) for the latest release; if it's newer, download + stage it. Idempotent.
+    /// <paramref name="force"/> skips the debounce for a check the person asked for by hand.</summary>
+    public static async Task<CheckOutcome> CheckAsync(bool force = false)
     {
-        if (!Installer.IsInstalledInstance()) return;   // dormant in dev / uninstalled runs
-        if (!ShouldCheckNow(_lastCheck, DateTime.UtcNow, MinCheckGap)) return;
+        if (!Installer.IsInstalledInstance()) return CheckOutcome.NotInstalled;   // dormant in dev / uninstalled runs
+        if (!force && !ShouldCheckNow(_lastCheck, DateTime.UtcNow, MinCheckGap)) return CheckOutcome.Skipped;
         // Stamped before the work, not after: a slow or failing `gh` shouldn't let a second trigger
         // pile another pair of processes on top of the one already running.
         _lastCheck = DateTime.UtcNow;
         try
         {
             string? tag = (await Gh($"api repos/{Repo}/releases/latest --jq .tag_name"))?.Trim();
-            if (string.IsNullOrEmpty(tag) || !TryParseTag(tag, out var v)) return;   // no release / unparsable
-            if (v <= Current || StagedTag == tag) return;                            // up to date / already staged
+            if (string.IsNullOrEmpty(tag) || !TryParseTag(tag, out var v)) return CheckOutcome.Failed;   // no release / unparsable
+            if (v <= Current) return CheckOutcome.UpToDate;
+            if (StagedTag == tag) return CheckOutcome.AlreadyStaged;
 
             string asset = $"SessionDeck-{tag}.exe";
             Directory.CreateDirectory(StagingDir);
             string dest = Path.Combine(StagingDir, asset);
             await Gh($"release download {tag} --repo {Repo} --pattern \"{asset}\" --dir \"{StagingDir}\" --clobber");
-            if (!File.Exists(dest) || new FileInfo(dest).Length < 1_000_000) return;   // sanity: a real exe
+            if (!File.Exists(dest) || new FileInfo(dest).Length < 1_000_000) return CheckOutcome.Failed;   // sanity: a real exe
 
             _stagedExe = dest;
             StagedTag = tag;
             UpdateStaged?.Invoke();
+            return CheckOutcome.Staged;
         }
-        catch (Exception ex) { App.LogError(ex); }
+        catch (Exception ex) { App.LogError(ex); return CheckOutcome.Failed; }
     }
 
     /// <summary>Swap the staged exe into place and relaunch it. The caller shuts the app down right after.</summary>
