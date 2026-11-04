@@ -52,12 +52,12 @@ struct TerminalScreen: View {
         .onAppear { gateway.markViewed(entry.sessionId); bridge.sessionId = entry.sessionId.isEmpty ? entry.hostId : entry.sessionId; bridge.provider = entry.provider; bridge.proxy?.unit = DeleteUnit.forProvider(entry.provider) }
         .onDisappear { gateway.markViewed(entry.sessionId); speech.stop(); bridge.manualInput = nil; speech.onStopped = nil }
         .onChange(of: bridge.connected) { _, connected in
+            if connected, LaunchOptions.watchViewport, !watching { watching = true; bridge.watchViewport() }
             if connected, let z = LaunchOptions.zoom, !autoZoomed {
                 autoZoomed = true
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { bridge.testPinch(to: z) }
                 if LaunchOptions.focus { DispatchQueue.main.asyncAfter(deadline: .now() + 6.0) { LaunchOptions.log("raising keyboard"); bridge.focus(true) } }
                 if LaunchOptions.scrollTest { DispatchQueue.main.asyncAfter(deadline: .now() + 6.0) { bridge.scrollTest() } }
-                if LaunchOptions.watchViewport { bridge.watchViewport() }
             }
             guard connected, !autoSent, !LaunchOptions.sends.isEmpty else { return }
             autoSent = true
@@ -73,6 +73,7 @@ struct TerminalScreen: View {
 
     @State private var autoSent = false
     @State private var autoZoomed = false
+    @State private var watching = false
 
     private func paste() {
         guard let s = UIPasteboard.general.string, !s.isEmpty else { return }

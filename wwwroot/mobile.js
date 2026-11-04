@@ -152,6 +152,41 @@
   el.addEventListener('touchend', onTouchEnd);
   el.addEventListener('touchcancel', onTouchEnd);
 
+  // One finger moving up or down scrolls the way a nested scroller does on the phone: pulling the
+  // finger down (towards older output) pans the page to its top first, then turns xterm's scrollback;
+  // pushing it up turns the scrollback back to the newest output first, then pans the page down.
+  // xterm's own touch handling sits on the document and loses to the page's pan when zoomed, which
+  // left a swipe moving the page by its few spare pixels and the scrollback never moving.
+  let drag = null;
+  function pageTop() { return (window.visualViewport ? window.visualViewport.pageTop : window.scrollY) <= 1; }
+  el.addEventListener('touchstart', ev => {
+    drag = (!selecting && ev.touches.length === 1) ? { y: ev.touches[0].clientY, x: ev.touches[0].clientX, carry: 0, mode: null } : null;
+  }, { passive: true });
+  el.addEventListener('touchmove', ev => {
+    if (!drag || selecting || ev.touches.length !== 1) { drag = null; return; }
+    const t = ev.touches[0];
+    const dy = t.clientY - drag.y, dx = t.clientX - drag.x;
+    if (drag.mode === null) {
+      if (Math.abs(dy) < 6 && Math.abs(dx) < 6) return;
+      drag.mode = Math.abs(dy) >= Math.abs(dx) ? 'vertical' : 'horizontal';
+    }
+    if (drag.mode !== 'vertical') return;
+    const buf = term.buffer.active;
+    const cell = term._core._renderService.dimensions.css.cell.height || 16;
+    const olderWanted = dy > 0;
+    const scrollbackCan = olderWanted ? buf.viewportY > 0 : buf.viewportY < buf.baseY;
+    const pageShouldMove = olderWanted ? !pageTop() : buf.viewportY >= buf.baseY;
+    if (pageShouldMove || !scrollbackCan) { drag.y = t.clientY; drag.x = t.clientX; return; }
+    ev.preventDefault();
+    ev.stopPropagation();
+    drag.carry += dy;
+    const lines = Math.trunc(drag.carry / cell);
+    if (lines !== 0) { term.scrollLines(-lines); drag.carry -= lines * cell; }
+    drag.y = t.clientY; drag.x = t.clientX;
+  }, { passive: false });
+  el.addEventListener('touchend', () => { drag = null; });
+  el.addEventListener('touchcancel', () => { drag = null; });
+
   // A long press on a row starts selecting from that row, the way text is selected elsewhere on the
   // phone; the finger can then drag to take more rows, and the key bar's "copy" finishes it.
   let pressTimer = null, pressTouch = null;
