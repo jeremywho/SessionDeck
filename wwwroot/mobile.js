@@ -200,7 +200,7 @@
       if (!pressTouch) return;
       selecting = true;
       el.classList.add('selecting');
-      anchorRow = rowAt(pressTouch);
+      anchorRow = rowAt({ clientX: pressTouch.x, clientY: pressTouch.y });
       term.selectLines(anchorRow, anchorRow);
       post({ type: 'selecting', on: true, longPress: true });
       tapStart = null;
