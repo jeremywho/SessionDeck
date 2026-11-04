@@ -19,6 +19,21 @@ enum LaunchOptions {
 
     static var open: String? { value("--open") }
     static var closeAfter: Double? { value("--close-after").flatMap(Double.init) }
+
+    /// Every `--gesture swipe-down|swipe-up|long-press`, in order, played into the page as touch events.
+    static var gestures: [String] {
+        #if DEBUG
+        var out: [String] = []
+        var i = 0
+        while i < arguments.count {
+            if arguments[i] == "--gesture", i + 1 < arguments.count { out.append(arguments[i + 1]); i += 1 }
+            i += 1
+        }
+        return out
+        #else
+        return []
+        #endif
+    }
     static var watchViewport: Bool {
         #if DEBUG
         return arguments.contains("--watch-viewport")

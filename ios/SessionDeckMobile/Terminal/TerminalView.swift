@@ -53,6 +53,12 @@ struct TerminalScreen: View {
         .onDisappear { gateway.markViewed(entry.sessionId); speech.stop(); bridge.manualInput = nil; speech.onStopped = nil }
         .onChange(of: bridge.connected) { _, connected in
             if connected, LaunchOptions.watchViewport, !watching { watching = true; bridge.watchViewport() }
+            if connected, !gesturesPlayed, !LaunchOptions.gestures.isEmpty {
+                gesturesPlayed = true
+                for (i, g) in LaunchOptions.gestures.enumerated() {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 7.0 + Double(i) * 3.0) { bridge.playGesture(g) }
+                }
+            }
             if connected, let z = LaunchOptions.zoom, !autoZoomed {
                 autoZoomed = true
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { bridge.testPinch(to: z) }
@@ -74,6 +80,7 @@ struct TerminalScreen: View {
     @State private var autoSent = false
     @State private var autoZoomed = false
     @State private var watching = false
+    @State private var gesturesPlayed = false
 
     private func paste() {
         guard let s = UIPasteboard.general.string, !s.isEmpty else { return }
@@ -317,6 +324,39 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
         }
     }
 
+    /// Debug driving: play a touch sequence into the page (synthetic events reach the page's own
+    /// handlers, not iOS's pan, so this proves the page's scrolling and selection logic on the real page).
+    func playGesture(_ name: String) {
+        guard let webView else { return }
+        let dir = name == "swipe-up" ? -1 : 1
+        let script = """
+        (function(){
+          const el = document.querySelector('.xterm-screen') || document.getElementById('term');
+          const r = el.getBoundingClientRect();
+          const x = r.left + r.width / 2, y0 = r.top + Math.min(r.height, window.innerHeight) * 0.5;
+          function touch(type, y) {
+            const t = new Touch({ identifier: 7, target: el, clientX: x, clientY: y, pageX: x + window.scrollX, pageY: y + window.scrollY });
+            const list = type === 'touchend' ? [] : [t];
+            el.dispatchEvent(new TouchEvent(type, { touches: list, targetTouches: list, changedTouches: [t], bubbles: true, cancelable: true }));
+          }
+          const before = window.sdViewport ? window.sdViewport() : null;
+          touch('touchstart', y0);
+          if (NAME === 'long-press') {
+            return new Promise(res => setTimeout(() => { touch('touchend', y0); res(JSON.stringify({ before, after: window.sdViewport ? window.sdViewport() : null })); }, 700));
+          }
+          for (let i = 1; i <= 12; i++) touch('touchmove', y0 + DIR * i * 25);
+          touch('touchend', y0 + DIR * 300);
+          return Promise.resolve(JSON.stringify({ before, after: window.sdViewport ? window.sdViewport() : null }));
+        })()
+        """.replacingOccurrences(of: "NAME", with: Keys.jsLiteral(name)).replacingOccurrences(of: "DIR", with: String(dir))
+        webView.callAsyncJavaScript("return await (\(script));", arguments: [:], in: nil, in: .page) { result in
+            switch result {
+            case .success(let value): LaunchOptions.log("gesture \(name): \(value as? String ?? "\(String(describing: value))")")
+            case .failure(let error): LaunchOptions.log("gesture \(name) failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
     /// Debug: once a second, where xterm's viewport sits and where the page is scrolled to.
     func watchViewport() {
         guard let webView else { return }
@@ -396,6 +436,7 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
         case "selection": hasSelection = body["has"] as? Bool ?? false
         case "selecting":
             selecting = body["on"] as? Bool ?? false
+            LaunchOptions.log("selecting \(selecting) longPress=\(body["longPress"] as? Bool ?? false)")
             if body["longPress"] as? Bool == true { UIImpactFeedbackGenerator(style: .medium).impactOccurred() }
         case "size": applySavedZoom()
         case "replayed": land("replay finished")
