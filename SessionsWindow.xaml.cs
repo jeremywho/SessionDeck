@@ -477,8 +477,8 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         base.OnPreviewKeyDown(e);
     }
 
-    /// <summary>F13/F14 step up and down the list as shown; F15/F16 jump to the previous or next unread row,
-    /// wrapping round. Landing on a row does what a click does: its tab comes to the front.</summary>
+    /// <summary>F13/F14 step up and down the list as shown; F15/F16 jump to the nearest unread row above or below,
+    /// or to the top or bottom row when there is none. Landing on a row does what a click does: its tab comes to the front.</summary>
     internal void ListKey(string key)
     {
         var ordered = SortedRows().Where(r => !r.IsBackgroundAgent).ToList();
