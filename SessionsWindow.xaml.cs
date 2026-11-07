@@ -137,6 +137,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         Deck.LayoutChanged += SaveLayoutSoon;
         Deck.LayoutChanged += MarkShownRead;
         Deck.LayoutChanged += SyncFrontRow;
+        Deck.ListKey += ListKey;
         IsVisibleChanged += (_, _) => MarkShownRead();
         StateChanged += (_, _) => MarkShownRead();
         Deck.NewSessionRequested += kind =>
@@ -467,7 +468,34 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             e.Handled = true;
             return;
         }
+        if (e.Key is Key.F13 or Key.F14 or Key.F15 or Key.F16)
+        {
+            ListKey(e.Key.ToString());
+            e.Handled = true;
+            return;
+        }
         base.OnPreviewKeyDown(e);
+    }
+
+    /// <summary>F13/F14 step up and down the list as shown; F15/F16 jump to the previous or next unread row,
+    /// wrapping round. Landing on a row does what a click does: its tab comes to the front.</summary>
+    void ListKey(string key)
+    {
+        var ordered = SortedRows().Where(r => !r.IsBackgroundAgent).ToList();
+        string front = Deck.Active?.View.Host.Id ?? "";
+        int? current = ordered.FindIndex(r => r.Host.Id == front) is var i && i >= 0 ? i : null;
+        int? target = key switch
+        {
+            "F13" => ListNavigation.Step(ordered.Count, current, -1),
+            "F14" => ListNavigation.Step(ordered.Count, current, 1),
+            "F15" => ListNavigation.NextUnread(ordered.Select(r => r.IsUnread).ToList(), current, -1),
+            "F16" => ListNavigation.NextUnread(ordered.Select(r => r.IsUnread).ToList(), current, 1),
+            _ => null,
+        };
+        if (target is not { } t || t == current) return;
+        var row = ordered[t];
+        SessionsGrid.ScrollIntoView(row);
+        Deck.Open(row.Host);
     }
 
     /// <summary>Live grouping by session group, then the row order from settings. Nothing time-based

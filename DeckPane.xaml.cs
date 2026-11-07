@@ -73,6 +73,8 @@ internal partial class DeckPane : UserControl
 
     /// <summary>A pull requests message: prRefresh, prToggleSeries or focusSession.</summary>
     public event Action<string, JsonElement>? PrMessage;
+    /// <summary>A list-navigation key (F13 to F16) pressed while a terminal had the focus; the page keeps it from the CLI.</summary>
+    public event Action<string>? ListKey;
 
     /// <summary>The page reloaded; anything it showed besides terminals has to be sent again.</summary>
     public event Action? PageReloaded;
@@ -208,6 +210,9 @@ internal partial class DeckPane : UserControl
             case "prToggleSection":
             case "focusSession":
                 PrMessage?.Invoke(type, root);
+                return true;
+            case "listKey":
+                if (root.TryGetProperty("key", out var k) && k.ValueKind == JsonValueKind.String) ListKey?.Invoke(k.GetString() ?? "");
                 return true;
         }
         return false;

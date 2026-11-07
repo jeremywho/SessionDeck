@@ -355,6 +355,12 @@
     const isCopy = ev => (ev.ctrlKey && !ev.altKey && key(ev) === 'c' && (ev.shiftKey || term.hasSelection()))
       || (ev.ctrlKey && !ev.shiftKey && ev.key === 'Insert');
     term.attachCustomKeyEventHandler(ev => {
+      // F13 to F16 move through the session list (a stick or macro pad sends them); the CLI never sees them.
+      if (/^F1[3-6]$/.test(ev.key)) {
+        if (ev.type === 'keydown') post({ type: 'listKey', key: ev.key });
+        ev.preventDefault();
+        return false;
+      }
       if (isPaste(ev)) {
         if (ev.type === 'keydown') post({ type: 'paste', id });
         ev.preventDefault();
