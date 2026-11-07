@@ -66,6 +66,7 @@ internal sealed class App : Application
         _window.ResumeWhenAttached(orphaned);
         ShowWindow();
         DwmDiagnostics.Mark("main-window-shown");
+        RegisterListHotKeys();
 
         StartUpdater();
     }
@@ -181,6 +182,25 @@ internal sealed class App : Application
         // listening, and the button would stay hidden until the next check — the exact bug this is
         // meant to fix. StartUpdater does its own check moments later anyway.
         if (_updaterStarted) CheckForUpdateOnShow();
+    }
+
+    ListHotKeys? _listHotKeys;
+    System.Windows.Interop.HwndSource? _hotKeyHost;
+
+    /// <summary>A stick push from any app: the deck comes to the front first, then the key does what it does in the window.</summary>
+    void RegisterListHotKeys()
+    {
+        try
+        {
+            _hotKeyHost = new System.Windows.Interop.HwndSource(new System.Windows.Interop.HwndSourceParameters("SessionDeck hot keys") { Width = 0, Height = 0, WindowStyle = 0, ParentWindow = new IntPtr(-3) });
+            _listHotKeys = new ListHotKeys(_hotKeyHost, key =>
+            {
+                ShowWindow();
+                _window?.ListKey(key);
+            });
+            if (_listHotKeys.Owned.Count < 4) LogError(new InvalidOperationException("list hot keys owned elsewhere: " + string.Join(",", new[] { "F13", "F14", "F15", "F16" }.Except(_listHotKeys.Owned))));
+        }
+        catch (Exception ex) { LogError(ex); }
     }
 
     SettingsWindow? _settingsWindow;
@@ -321,6 +341,7 @@ internal sealed class App : Application
     void ExitApp()
     {
         // Hard-exit rather than Shutdown() — the latter trips a WPF telemetry crash in single-file builds.
+        _listHotKeys?.Dispose();
         _tray?.Dispose();
         DwmDiagnostics.Stop("tray exit");
         Environment.Exit(0);

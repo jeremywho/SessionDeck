@@ -479,7 +479,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
 
     /// <summary>F13/F14 step up and down the list as shown; F15/F16 jump to the previous or next unread row,
     /// wrapping round. Landing on a row does what a click does: its tab comes to the front.</summary>
-    void ListKey(string key)
+    internal void ListKey(string key)
     {
         var ordered = SortedRows().Where(r => !r.IsBackgroundAgent).ToList();
         string front = Deck.Active?.View.Host.Id ?? "";
