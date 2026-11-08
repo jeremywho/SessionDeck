@@ -125,28 +125,45 @@
     sock.onerror = () => {};
   }
 
-  // Selection by touch, by whole lines: xterm selects with a mouse, which a phone has not got. In
-  // selection mode a touch picks a line and a drag extends to the lines it crosses.
-  let anchorRow = null;
-  function rowAt(touch) {
+  // Selection by touch, snapped to words: xterm selects with a mouse, which a phone has not got. In
+  // selection mode a touch takes the word under the finger and a drag extends, word by word, to the
+  // word under the finger, across lines in either direction.
+  let anchorWord = null;
+  function cellAt(touch) {
     const rect = term.element.getBoundingClientRect();
     const cell = term._core._renderService.dimensions.css.cell;
-    const row = Math.floor((touch.clientY - rect.top) / cell.height);
-    return Math.max(0, Math.min(term.rows - 1, row)) + term.buffer.active.viewportY;
+    const row = Math.max(0, Math.min(term.rows - 1, Math.floor((touch.clientY - rect.top) / cell.height))) + term.buffer.active.viewportY;
+    const col = Math.max(0, Math.min(term.cols - 1, Math.floor((touch.clientX - rect.left) / cell.width)));
+    return { row, col };
+  }
+  function wordAt(cell) {
+    const line = term.buffer.active.getLine(cell.row);
+    const text = line ? line.translateToString(false) : '';
+    const blank = c => c >= text.length || /\s/.test(text[c]);
+    if (blank(cell.col)) return { row: cell.row, start: cell.col, end: cell.col };
+    let start = cell.col, end = cell.col;
+    while (start > 0 && !blank(start - 1)) start--;
+    while (end + 1 < term.cols && !blank(end + 1)) end++;
+    return { row: cell.row, start, end };
+  }
+  function selectWords(a, b) {
+    const first = a.row < b.row || (a.row === b.row && a.start <= b.start) ? a : b;
+    const last = first === a ? b : a;
+    const length = (last.row - first.row) * term.cols + (last.end - first.start) + 1;
+    term.select(first.start, first.row, Math.max(1, length));
   }
   function onTouchStart(ev) {
     if (!selecting || ev.touches.length !== 1) return;
     ev.preventDefault();
-    anchorRow = rowAt(ev.touches[0]);
-    term.selectLines(anchorRow, anchorRow);
+    anchorWord = wordAt(cellAt(ev.touches[0]));
+    selectWords(anchorWord, anchorWord);
   }
   function onTouchMove(ev) {
-    if (!selecting || anchorRow === null || ev.touches.length !== 1) return;
+    if (!selecting || anchorWord === null || ev.touches.length !== 1) return;
     ev.preventDefault();
-    const row = rowAt(ev.touches[0]);
-    term.selectLines(Math.min(anchorRow, row), Math.max(anchorRow, row));
+    selectWords(anchorWord, wordAt(cellAt(ev.touches[0])));
   }
-  function onTouchEnd() { anchorRow = null; }
+  function onTouchEnd() { anchorWord = null; }
   el.addEventListener('touchstart', onTouchStart, { passive: false });
   el.addEventListener('touchmove', onTouchMove, { passive: false });
   el.addEventListener('touchend', onTouchEnd);
@@ -200,8 +217,8 @@
       if (!pressTouch) return;
       selecting = true;
       el.classList.add('selecting');
-      anchorRow = rowAt({ clientX: pressTouch.x, clientY: pressTouch.y });
-      term.selectLines(anchorRow, anchorRow);
+      anchorWord = wordAt(cellAt({ clientX: pressTouch.x, clientY: pressTouch.y }));
+      selectWords(anchorWord, anchorWord);
       post({ type: 'selecting', on: true, longPress: true });
       tapStart = null;
     }, 450);

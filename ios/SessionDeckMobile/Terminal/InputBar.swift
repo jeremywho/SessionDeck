@@ -9,7 +9,7 @@ struct InputBar: View {
     let listening: Bool
     let onKey: (Key) -> Void
     let onNewline: () -> Void
-    let onPaste: () -> Void
+    let onPaste: (String) -> Void
     let onCopy: () -> Void
     let onSelect: () -> Void
     let onKeyboard: () -> Void
@@ -36,7 +36,7 @@ struct InputBar: View {
                     .buttonStyle(.bordered).font(.system(size: 13, design: .monospaced))
                     .accessibilityLabel("Newline inside a Claude prompt")
                 Divider().frame(height: 20)
-                Button("paste") { onPaste() }.buttonStyle(.bordered).font(.system(size: 13, design: .monospaced))
+                PasteButton(onPaste: onPaste).frame(width: 68, height: 30)
                 Button(selecting ? (hasSelection ? "copy" : "cancel") : "select") { selecting && hasSelection ? onCopy() : onSelect() }
                     .buttonStyle(.bordered).font(.system(size: 13, design: .monospaced))
                     .tint(selecting ? .orange : nil)

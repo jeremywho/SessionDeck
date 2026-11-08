@@ -82,8 +82,8 @@ struct TerminalScreen: View {
     @State private var watching = false
     @State private var gesturesPlayed = false
 
-    private func paste() {
-        guard let s = UIPasteboard.general.string, !s.isEmpty else { return }
+    private func paste(_ s: String) {
+        guard !s.isEmpty else { return }
         speech.stop()
         bridge.resetTyping()
         Task { if await bridge.input(Keys.pasteSequence(s)) == false { bridge.note = "Not connected. Nothing was pasted." } }
