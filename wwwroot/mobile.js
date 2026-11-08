@@ -317,6 +317,7 @@
   window.sdReconnect = () => { if (!ended) { retries = 0; connect(); } };
   // Debug: where xterm's viewport sits in its buffer.
   window.sdViewport = () => { const b = term.buffer.active; return { y: b.viewportY, base: b.baseY, rows: term.rows, lines: b.length }; };
+  window.sdSelectionText = () => term.hasSelection() ? term.getSelection() : '';
 
   term.onSelectionChange(() => { if (selecting) post({ type: 'selection', has: term.hasSelection() }); });
   connect();

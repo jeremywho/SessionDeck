@@ -328,6 +328,12 @@ final class TerminalBridge: NSObject, ObservableObject, WKScriptMessageHandler, 
     /// handlers, not iOS's pan, so this proves the page's scrolling and selection logic on the real page).
     func playGesture(_ name: String) {
         guard let webView else { return }
+        if name == "read-selection" {
+            webView.evaluateJavaScript("JSON.stringify({ has: term.hasSelection ? term.hasSelection() : null, text: (window.sdSelectionText ? window.sdSelectionText() : null) })") { result, _ in
+                LaunchOptions.log("gesture read-selection: \(result as? String ?? "n/a")")
+            }
+            return
+        }
         if name == "page-top" {
             let scroll = webView.scrollView
             scroll.setContentOffset(CGPoint(x: scroll.contentOffset.x, y: 0), animated: false)
