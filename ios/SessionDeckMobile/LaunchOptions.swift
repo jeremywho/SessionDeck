@@ -19,6 +19,8 @@ enum LaunchOptions {
 
     static var open: String? { value("--open") }
     static var closeAfter: Double? { value("--close-after").flatMap(Double.init) }
+    /// Debug: text put on the pasteboard at launch, so the paste button can be inspected with something to paste.
+    static var clipboard: String? { value("--clipboard") }
 
     /// Every `--gesture swipe-down|swipe-up|long-press`, in order, played into the page as touch events.
     static var gestures: [String] {

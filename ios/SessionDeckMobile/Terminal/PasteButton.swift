@@ -20,6 +20,9 @@ struct PasteButton: UIViewRepresentable {
         control.target = target
         control.translatesAutoresizingMaskIntoConstraints = false
         target.addSubview(control)
+        target.control = control
+        PasteButton.debugState(target, "created")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { PasteButton.debugState(target, "after 3 s") }
         NSLayoutConstraint.activate([
             control.leadingAnchor.constraint(equalTo: target.leadingAnchor),
             control.trailingAnchor.constraint(equalTo: target.trailingAnchor),
@@ -36,9 +39,19 @@ struct PasteButton: UIViewRepresentable {
         CGSize(width: 68, height: 30)
     }
 
+    /// Debug: what the control and its target think of the clipboard right now.
+    static func debugState(_ target: PasteTarget, _ when: String) {
+        let pb = UIPasteboard.general
+        let providers = pb.itemProviders
+        let types = providers.flatMap { $0.registeredTypeIdentifiers }
+        let can = target.canPaste(providers)
+        LaunchOptions.log("paste \(when): enabled=\(target.control?.isEnabled ?? false) bounds=\(target.control?.bounds.size ?? .zero) window=\(target.window != nil) hasStrings=\(pb.hasStrings) types=\(types) canPaste=\(can) config=\(target.pasteConfiguration?.acceptableTypeIdentifiers ?? [])")
+    }
+
     /// Where the pasted text lands: a view that accepts plain text, as the paste control requires.
     final class PasteTarget: UIView {
         var onPaste: ((String) -> Void)?
+        weak var control: UIPasteControl?
 
         override init(frame: CGRect) {
             super.init(frame: frame)
@@ -48,7 +61,8 @@ struct PasteButton: UIViewRepresentable {
         required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
         override func paste(itemProviders: [NSItemProvider]) {
-            guard let provider = itemProviders.first(where: { $0.canLoadObject(ofClass: NSString.self) }) else { return }
+            LaunchOptions.log("paste: handed \(itemProviders.count) item(s): \(itemProviders.flatMap { $0.registeredTypeIdentifiers })")
+            guard let provider = itemProviders.first(where: { $0.canLoadObject(ofClass: NSString.self) }) else { LaunchOptions.log("paste: no string item"); return }
             provider.loadObject(ofClass: NSString.self) { [weak self] object, _ in
                 guard let text = object as? String, !text.isEmpty else { return }
                 DispatchQueue.main.async { self?.onPaste?(text) }

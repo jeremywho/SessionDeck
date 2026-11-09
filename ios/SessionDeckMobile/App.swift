@@ -31,6 +31,7 @@ struct RootView: View {
         }
         .task {
             AudioSessionLog.watch()
+            if let text = LaunchOptions.clipboard { UIPasteboard.general.string = text; LaunchOptions.log("clipboard set to \(text.debugDescription)") }
             guard !autoPaired, gateway.pairing == nil, let p = LaunchOptions.pair else { return }
             autoPaired = true
             do {
