@@ -68,6 +68,18 @@ struct PasteButton: UIViewRepresentable {
 
         required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
+        /// The key bar is a horizontal scroll view that delays touches to tell a scroll from a tap; the
+        /// system paste control needs the touch at once or it never fires. Scrolling still works: the
+        /// scroll view cancels a touch that turns into a drag.
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            var view: UIView? = superview
+            while let v = view {
+                if let scroll = v as? UIScrollView { scroll.delaysContentTouches = false; break }
+                view = v.superview
+            }
+        }
+
         override func paste(itemProviders: [NSItemProvider]) {
             LaunchOptions.log("paste: handed \(itemProviders.count) item(s): \(itemProviders.flatMap { $0.registeredTypeIdentifiers })")
             guard let provider = itemProviders.first(where: { $0.canLoadObject(ofClass: NSString.self) }) else { LaunchOptions.log("paste: no string item"); return }

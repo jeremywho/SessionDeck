@@ -109,5 +109,26 @@ enum LaunchOptions {
         #endif
     }
 
-    static func log(_ step: String) { NSLog("sd-test %@", step) }
+    static func log(_ step: String) {
+        NSLog("sd-test %@", step)
+        #if DEBUG
+        appendToFile(step)
+        #endif
+    }
+
+    /// Debug builds also keep the log in Documents/sd-test.log, which `devicectl device copy from` can
+    /// fetch after a UI-test run (the console is not attached then).
+    static let logFile = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?.appendingPathComponent("sd-test.log")
+    private static let logQueue = DispatchQueue(label: "sd-test-log")
+    private static func appendToFile(_ step: String) {
+        guard let logFile else { return }
+        let line = "\(Date().formatted(.iso8601.time(includingFractionalSeconds: true))) \(step)\n"
+        logQueue.async {
+            if let handle = try? FileHandle(forWritingTo: logFile) {
+                handle.seekToEndOfFile(); handle.write(Data(line.utf8)); try? handle.close()
+            } else {
+                try? Data(line.utf8).write(to: logFile)
+            }
+        }
+    }
 }
