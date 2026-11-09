@@ -1,25 +1,24 @@
 import XCTest
 
-/// A real tap on the key bar's system paste button, with text on the pasteboard: the app log must
-/// show the paste being handed over (the system control cannot be triggered any other way).
+/// A real tap on the key bar's paste key, with text on the pasteboard, must hand that text over.
+/// The bar is shown alone (`--bar-only`), so nothing is typed into any session.
 final class PasteTests: XCTestCase {
-    func testTappingThePasteButtonHandsOverTheClipboard() throws {
-        let host = TestConfig.host
-        try XCTSkipIf(host.isEmpty, "TestConfig.host not set")
+    func testTappingThePasteKeyHandsOverTheClipboard() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["--open", host, "--clipboard", "paste-probe-7"]
+        app.launchArguments = ["--bar-only", "--clipboard", "paste-probe-7"]
         app.launch()
-        let web = app.webViews.firstMatch
-        XCTAssertTrue(web.waitForExistence(timeout: 20), "terminal web view did not appear")
-        sleep(3)
+
         let paste = app.buttons["Paste"].firstMatch
-        XCTAssertTrue(paste.waitForExistence(timeout: 5), "no Paste button in the key bar")
-        XCTAssertTrue(paste.isEnabled, "Paste button disabled with text on the pasteboard")
-        // On a phone the key bar is wider than the screen: bring the button into view before tapping.
+        XCTAssertTrue(paste.waitForExistence(timeout: 20), "no Paste key in the key bar")
+        XCTAssertTrue(paste.isEnabled, "Paste key disabled with text on the pasteboard")
+        // On a phone the bar is wider than the screen: bring the key into view before tapping.
         var swipes = 0
         while !paste.isHittable && swipes < 4 { app.scrollViews.firstMatch.swipeLeft(); swipes += 1; usleep(400_000) }
-        XCTAssertTrue(paste.isHittable, "Paste button not on screen after \(swipes) swipes")
+        XCTAssertTrue(paste.isHittable, "Paste key not on screen after \(swipes) swipes")
+
+        let pasted = app.staticTexts["pasted: paste-probe-7"]
+        XCTAssertFalse(pasted.exists, "the probe text is on screen before any paste")
         paste.tap()
-        sleep(3)
+        XCTAssertTrue(pasted.waitForExistence(timeout: 5), "tapping the Paste key handed nothing over")
     }
 }

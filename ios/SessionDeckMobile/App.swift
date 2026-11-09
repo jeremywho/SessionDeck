@@ -20,7 +20,9 @@ struct RootView: View {
 
     var body: some View {
         Group {
-            if gateway.pairing == nil {
+            if LaunchOptions.barOnly {
+                KeyBarProbe()
+            } else if gateway.pairing == nil {
                 PairView()
             } else {
                 SessionsView()

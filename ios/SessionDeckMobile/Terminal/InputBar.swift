@@ -36,8 +36,8 @@ struct InputBar: View {
                     .buttonStyle(.bordered).font(.system(size: 13, design: .monospaced))
                     .accessibilityLabel("Newline inside a Claude prompt")
                 Divider().frame(height: 20)
-                PasteButton(payloadType: String.self) { strings in if let s = strings.first { onPaste(s) } }
-                    .labelStyle(.titleOnly).controlSize(.small).tint(.secondary)
+                BarPasteButton(onPaste: onPaste)
+                    .frame(width: BarPasteButton.size.width, height: BarPasteButton.size.height)
                 Button(selecting ? (hasSelection ? "copy" : "cancel") : "select") { selecting && hasSelection ? onCopy() : onSelect() }
                     .buttonStyle(.bordered).font(.system(size: 13, design: .monospaced))
                     .tint(selecting ? .orange : nil)
@@ -45,6 +45,8 @@ struct InputBar: View {
             .padding(.horizontal, 8)
         }
         .padding(.vertical, 6)
-        .background(Color(white: 0.08))
+        .background(Color(white: Double(Self.backgroundWhite)))
     }
+
+    static let backgroundWhite: CGFloat = 0.08
 }

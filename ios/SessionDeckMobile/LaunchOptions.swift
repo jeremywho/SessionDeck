@@ -19,6 +19,14 @@ enum LaunchOptions {
 
     static var open: String? { value("--open") }
     static var closeAfter: Double? { value("--close-after").flatMap(Double.init) }
+    /// Debug: show the key bar alone (see KeyBarProbe), for UI tests that tap its keys.
+    static var barOnly: Bool {
+        #if DEBUG
+        return arguments.contains("--bar-only")
+        #else
+        return false
+        #endif
+    }
     /// Debug: text put on the pasteboard at launch, so the paste button can be inspected with something to paste.
     static var clipboard: String? { value("--clipboard") }
 
