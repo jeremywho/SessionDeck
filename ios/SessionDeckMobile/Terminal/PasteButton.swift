@@ -45,7 +45,15 @@ struct PasteButton: UIViewRepresentable {
         let providers = pb.itemProviders
         let types = providers.flatMap { $0.registeredTypeIdentifiers }
         let can = target.canPaste(providers)
-        LaunchOptions.log("paste \(when): enabled=\(target.control?.isEnabled ?? false) bounds=\(target.control?.bounds.size ?? .zero) window=\(target.window != nil) hasStrings=\(pb.hasStrings) types=\(types) canPaste=\(can) config=\(target.pasteConfiguration?.acceptableTypeIdentifiers ?? [])")
+        var hit = "n/a", scroll = "none"
+        if let control = target.control, let window = target.window {
+            let center = control.convert(CGPoint(x: control.bounds.midX, y: control.bounds.midY), to: window)
+            let view = window.hitTest(center, with: nil)
+            hit = view.map { "\(type(of: $0)) interactive=\($0.isUserInteractionEnabled) insideControl=\($0.isDescendant(of: control))" } ?? "nil"
+            var v: UIView? = target.superview
+            while let s = v { if let sv = s as? UIScrollView { scroll = "\(type(of: sv)) delays=\(sv.delaysContentTouches) cancels=\(sv.canCancelContentTouches)"; break }; v = s.superview }
+        }
+        LaunchOptions.log("paste \(when): enabled=\(target.control?.isEnabled ?? false) bounds=\(target.control?.bounds.size ?? .zero) window=\(target.window != nil) hasStrings=\(pb.hasStrings) types=\(types) canPaste=\(can) hit=\(hit) scroll=\(scroll) recognizers=\(target.control?.gestureRecognizers?.count ?? -1)")
     }
 
     /// Where the pasted text lands: a view that accepts plain text, as the paste control requires.
