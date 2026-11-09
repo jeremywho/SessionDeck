@@ -15,6 +15,10 @@ final class PasteTests: XCTestCase {
         let paste = app.buttons["Paste"].firstMatch
         XCTAssertTrue(paste.waitForExistence(timeout: 5), "no Paste button in the key bar")
         XCTAssertTrue(paste.isEnabled, "Paste button disabled with text on the pasteboard")
+        // On a phone the key bar is wider than the screen: bring the button into view before tapping.
+        var swipes = 0
+        while !paste.isHittable && swipes < 4 { app.scrollViews.firstMatch.swipeLeft(); swipes += 1; usleep(400_000) }
+        XCTAssertTrue(paste.isHittable, "Paste button not on screen after \(swipes) swipes")
         paste.tap()
         sleep(3)
     }
