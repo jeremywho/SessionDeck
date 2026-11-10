@@ -50,7 +50,14 @@ final class PastePermissionTests: XCTestCase {
         if !row.waitForExistence(timeout: 6) {
             // The link can land on the Apps list: pick this app out of it.
             let mine = settings.staticTexts["Session Deck"].firstMatch
-            print("PROBE settings: no row yet; Session Deck in the list: \(mine.exists)")
+            var scrolls = 0
+            while !mine.exists && scrolls < 8 {
+                let from = settings.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.8))
+                from.press(forDuration: 0.05, thenDragTo: settings.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.25)))
+                scrolls += 1
+                usleep(500_000)
+            }
+            print("PROBE settings: no row yet; Session Deck in the Apps list after \(scrolls) scrolls: \(mine.exists)")
             if mine.exists { mine.tap() }
         }
         guard row.waitForExistence(timeout: 6) else {
