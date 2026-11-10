@@ -47,8 +47,15 @@ final class PastePermissionTests: XCTestCase {
         XCTAssertTrue(settings.wait(for: .runningForeground, timeout: 15), "Settings did not come to the front")
 
         let row = settings.staticTexts["Paste from Other Apps"].firstMatch
-        guard row.waitForExistence(timeout: 8) else {
-            print("PROBE settings rows: \(settings.staticTexts.allElementsBoundByIndex.prefix(40).map(\.label))")
+        if !row.waitForExistence(timeout: 6) {
+            // The link can land on the Apps list: pick this app out of it.
+            let mine = settings.staticTexts["Session Deck"].firstMatch
+            print("PROBE settings: no row yet; Session Deck in the list: \(mine.exists)")
+            if mine.exists { mine.tap() }
+        }
+        guard row.waitForExistence(timeout: 6) else {
+            let all = settings.staticTexts.allElementsBoundByIndex.map(\.label)
+            print("PROBE settings texts (\(all.count)): \(all.filter { !$0.isEmpty }.suffix(60))")
             return XCTFail("no Paste from Other Apps row on the app's Settings page")
         }
         row.tap()
