@@ -27,6 +27,14 @@ enum LaunchOptions {
         return false
         #endif
     }
+    /// Debug: jump to this app's own page in Settings (where "Paste from Other Apps" lives).
+    static var openSettings: Bool {
+        #if DEBUG
+        return arguments.contains("--open-settings")
+        #else
+        return false
+        #endif
+    }
     /// Debug: text put on the pasteboard at launch, so the paste button can be inspected with something to paste.
     static var clipboard: String? { value("--clipboard") }
 

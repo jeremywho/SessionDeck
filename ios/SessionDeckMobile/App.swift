@@ -34,6 +34,10 @@ struct RootView: View {
         .task {
             AudioSessionLog.watch()
             if let text = LaunchOptions.clipboard { UIPasteboard.general.string = text; LaunchOptions.log("clipboard set to \(text.debugDescription)") }
+            if LaunchOptions.openSettings, let url = URL(string: UIApplication.openSettingsURLString) {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                await UIApplication.shared.open(url)
+            }
             guard !autoPaired, gateway.pairing == nil, let p = LaunchOptions.pair else { return }
             autoPaired = true
             do {

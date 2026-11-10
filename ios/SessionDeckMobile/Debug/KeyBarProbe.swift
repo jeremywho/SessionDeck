@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Debug screen (`--bar-only`): the key bar alone, attached to nothing, so a UI test can tap its keys
 /// without a session to type into. What the last key did shows as text.
@@ -13,7 +14,7 @@ struct KeyBarProbe: View {
             InputBar(selecting: false, hasSelection: false, keyboardShown: false, listening: false,
                      onKey: { last = "key: \($0.label)" },
                      onNewline: { last = "newline" },
-                     onPaste: { last = "pasted: \($0)" },
+                     onPaste: { last = "pasted: \(UIPasteboard.general.string ?? "<nothing>")" },
                      onCopy: { last = "copy" },
                      onSelect: { last = "select" },
                      onKeyboard: { last = "keyboard" },
