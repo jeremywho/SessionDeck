@@ -234,7 +234,7 @@ final class GatewayStore: ObservableObject {
     func isUnread(_ entry: CatalogEntry) -> Bool { Self.unread(entry, seenHere: viewed[entry.sessionId]) }
 
     /// Unread = finished a turn after anyone last looked: here (this device's own record) or anywhere the deck knows of.
-    static func unread(_ entry: CatalogEntry, seenHere: Date?) -> Bool {
+    nonisolated static func unread(_ entry: CatalogEntry, seenHere: Date?) -> Bool {
         guard entry.state == "Completed", !entry.hostExited else { return false }
         let here = seenHere.map { Int64(($0.timeIntervalSince1970 * 1000).rounded()) } ?? 0
         let seen = max(here, entry.readAtMs ?? 0)
