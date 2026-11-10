@@ -1,6 +1,7 @@
 import Foundation
 
-/// When this phone last looked at each session. The deck keeps its own ledger; the two do not sync yet.
+/// When this phone last looked at each session: the instant answer before the deck's own record comes
+/// back with the session list (see `CatalogEntry.readAtMs`).
 struct ViewedLedger {
     private let key = "viewedAt"
     private let defaults: UserDefaults

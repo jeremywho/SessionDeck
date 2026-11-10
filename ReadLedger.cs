@@ -27,6 +27,19 @@ internal sealed class ReadLedger
         return true;
     }
 
+    /// <summary>Fold in read marks kept elsewhere (a phone's): each session keeps its later mark. Returns whether anything moved.</summary>
+    public bool Merge(IReadOnlyDictionary<string, long> other)
+    {
+        bool changed = false;
+        foreach (var (sessionId, ms) in other)
+        {
+            if (sessionId.Length == 0 || (_readAt.TryGetValue(sessionId, out var seen) && seen >= ms)) continue;
+            _readAt[sessionId] = ms;
+            changed = true;
+        }
+        return changed;
+    }
+
     /// <summary>Forget sessions gone for longer than <paramref name="keep"/>; the live ones stay whatever their age.</summary>
     public int Prune(IEnumerable<string> liveSessionIds, DateTime now, TimeSpan keep)
     {

@@ -41,6 +41,8 @@ internal sealed class GatewayServer : IAsyncDisposable
 
     /// <summary>Starts a session for a phone and returns its host id; null when the request cannot be honoured. Set by the process.</summary>
     public Func<StartRequest, string?>? StartSession;
+    /// <summary>A phone has a session in view; false when the id means nothing. Set by the process.</summary>
+    public Func<string, bool>? MarkRead;
     /// <summary>Folders a phone may start a session in.</summary>
     public Func<List<string>> Folders = () => new();
     /// <summary>The latest machine load sample, or null before the first.</summary>
@@ -182,6 +184,9 @@ internal sealed class GatewayServer : IAsyncDisposable
             case ("POST", "/sessions"):
                 await Start(s, r);
                 return;
+            case ("POST", "/read"):
+                await Read(s, r);
+                return;
             case ("GET", "/devices"):
                 await MiniHttp.WriteJson(s, 200, "OK", JsonSerializer.Serialize(_devices.Devices.Select(d => new { d.Id, d.Name, d.PairedAtUtc, d.LastSeenUtc }), Json));
                 return;
@@ -206,6 +211,24 @@ internal sealed class GatewayServer : IAsyncDisposable
         string? hostId = StartSession(request);
         if (hostId == null) { await MiniHttp.WriteJson(s, 400, "Bad Request", "{\"error\":\"unknown provider or folder\"}"); return; }
         await MiniHttp.WriteJson(s, 201, "Created", JsonSerializer.Serialize(new { hostId }, Json));
+    }
+
+    /// <summary><c>POST /read {"sessionId": "..."}</c>: the phone opened that session, so it is read on every screen.</summary>
+    async Task Read(NetworkStream s, MiniHttp.Request r)
+    {
+        if (MarkRead == null) { await MiniHttp.WriteStatus(s, 501, "Not Implemented"); return; }
+        var body = await MiniHttp.ReadBody(s, r, MaxBody);
+        string sessionId = "";
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object && doc.RootElement.TryGetProperty("sessionId", out var id) && id.ValueKind == JsonValueKind.String)
+                sessionId = id.GetString() ?? "";
+        }
+        catch (JsonException) { }
+        if (sessionId.Length == 0 || sessionId.Length > 128) { await MiniHttp.WriteStatus(s, 400, "Bad Request"); return; }
+        MarkRead(sessionId);
+        await MiniHttp.WriteStatus(s, 204, "No Content");
     }
 
     async Task Pair(NetworkStream s, MiniHttp.Request r, DateTime now)

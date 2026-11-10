@@ -114,6 +114,7 @@ internal static class GatewayProcess
         var devices = new DeviceStore(Path.Combine(Settings.DataDir, "devices.json"));
         string adminToken = Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
         var catalog = new SessionCatalog();
+        var phoneRead = new PhoneReadStore(Path.Combine(Settings.DataDir, PhoneReadStore.FileName));
         var hosts = new Dictionary<string, HostRecord>(StringComparer.OrdinalIgnoreCase);
         var gate = new object();
         List<CatalogEntry> current = new();
@@ -126,7 +127,7 @@ internal static class GatewayProcess
             {
                 CodexScanner.Probe();
                 var pairs = SessionPipeline.Pair(SessionPipeline.Scan(prune: false));
-                var built = catalog.Build(pairs, Settings.Peek(), DateTime.UtcNow);
+                var built = catalog.Build(pairs, Settings.Peek(), DateTime.UtcNow, phoneRead.Snapshot());
                 lock (gate)
                 {
                     hosts.Clear();
@@ -146,6 +147,12 @@ internal static class GatewayProcess
             adminToken, settings.Gateway.Relay.Key);
         server.QuitRequested += () => quit.TrySetResult();
         server.Folders = () => SessionStarter.Folders(Settings.Peek());
+        server.MarkRead = sessionId =>
+        {
+            // The other phones learn at once; the deck folds the file in on its next refresh.
+            if (phoneRead.Mark(sessionId, DateTime.UtcNow)) Task.Run(() => { try { loop.Tick(); } catch (Exception ex) { App.LogError(ex); } });
+            return true;
+        };
         server.Machine = () => machine.Latest;
         server.StartSession = request =>
         {

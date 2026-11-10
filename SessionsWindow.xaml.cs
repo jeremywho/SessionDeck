@@ -1535,7 +1535,8 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     {
         var ledger = ReadLedger;
         var now = DateTime.UtcNow;
-        bool changed = false;
+        // What was opened on a phone is read here too; the gateway keeps those marks in a file of its own.
+        bool changed = ledger.Merge(Gateway.PhoneReadStore.Read(System.IO.Path.Combine(Settings.DataDir, Gateway.PhoneReadStore.FileName)));
         foreach (var row in Rows)
         {
             if (IsShown(row)) changed |= ledger.MarkRead(row.LiveSessionId, now);

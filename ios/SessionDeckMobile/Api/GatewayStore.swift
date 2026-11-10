@@ -225,12 +225,20 @@ final class GatewayStore: ObservableObject {
         let now = Date()
         viewed[sessionId] = now
         ledger.set(sessionId, now)
+        // Tell the deck, so the session is read on the desktop and on the other devices too.
+        if let body = try? JSONEncoder().encode(["sessionId": sessionId]), let request = authorized("read", method: "POST", body: body) {
+            Task { _ = try? await URLSession.shared.data(for: request) }
+        }
     }
 
-    func isUnread(_ entry: CatalogEntry) -> Bool {
+    func isUnread(_ entry: CatalogEntry) -> Bool { Self.unread(entry, seenHere: viewed[entry.sessionId]) }
+
+    /// Unread = finished a turn after anyone last looked: here (this device's own record) or anywhere the deck knows of.
+    static func unread(_ entry: CatalogEntry, seenHere: Date?) -> Bool {
         guard entry.state == "Completed", !entry.hostExited else { return false }
-        guard let seen = viewed[entry.sessionId] else { return true }
-        return entry.stateSince > seen
+        let here = seenHere.map { Int64(($0.timeIntervalSince1970 * 1000).rounded()) } ?? 0
+        let seen = max(here, entry.readAtMs ?? 0)
+        return seen == 0 || entry.stateSinceMs > seen
     }
 
     // MARK: events feed

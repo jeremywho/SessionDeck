@@ -17,6 +17,8 @@ struct CatalogEntry: Codable, Identifiable, Hashable {
     let cwd: String
     let hostExited: Bool
     let mobileReady: Bool
+    /// When anyone last looked at the session, on the desktop or a phone (unix ms, the deck's clock); absent on older gateways.
+    let readAtMs: Int64?
 
     var id: String { hostId }
     var stateSince: Date { Date(timeIntervalSince1970: Double(stateSinceMs) / 1000) }

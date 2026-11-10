@@ -18,7 +18,8 @@ internal sealed record CatalogEntry(
     int SortPriority,
     string Cwd,
     bool HostExited,
-    bool MobileReady);
+    bool MobileReady,
+    long ReadAtMs = 0);
 
 /// <summary>
 /// The session list in the order the deck shows it, built from the pipeline's pairs. Rows are kept
@@ -31,7 +32,8 @@ internal sealed class SessionCatalog
     static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     readonly Dictionary<string, SessionRow> _rows = new(StringComparer.OrdinalIgnoreCase);
 
-    public List<CatalogEntry> Build(List<(Host.HostRecord Host, SessionInfo Info)> pairs, Settings settings, DateTime nowUtc)
+    /// <param name="phoneRead">When a phone last looked at each session; the deck's own ledger comes from <paramref name="settings"/>.</param>
+    public List<CatalogEntry> Build(List<(Host.HostRecord Host, SessionInfo Info)> pairs, Settings settings, DateTime nowUtc, IReadOnlyDictionary<string, long>? phoneRead = null)
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var rows = new List<SessionRow>(pairs.Count);
@@ -52,10 +54,19 @@ internal sealed class SessionCatalog
         var ordered = byName
             ? rows.OrderBy(r => r.GroupOrder).ThenBy(r => r.HostExited).ThenBy(r => r.Name, StringComparer.CurrentCulture)
             : rows.OrderBy(r => r.GroupOrder).ThenBy(r => r.SortPriority).ThenBy(r => r.Name, StringComparer.CurrentCulture);
-        return ordered.Select(Entry).ToList();
+        return ordered.Select(r => Entry(r, ReadAtMs(r.LiveSessionId, settings, phoneRead))).ToList();
     }
 
-    static CatalogEntry Entry(SessionRow r) => new(
+    /// <summary>The latest moment anyone looked at the session, on the desktop or on a phone; 0 when nobody has.</summary>
+    internal static long ReadAtMs(string sessionId, Settings settings, IReadOnlyDictionary<string, long>? phoneRead)
+    {
+        if (sessionId.Length == 0) return 0;
+        long deck = settings.ReadAt != null && settings.ReadAt.TryGetValue(sessionId, out var d) ? d : 0;
+        long phone = phoneRead != null && phoneRead.TryGetValue(sessionId, out var p) ? p : 0;
+        return Math.Max(deck, phone);
+    }
+
+    static CatalogEntry Entry(SessionRow r, long readAtMs) => new(
         r.Host.Id,
         r.LiveSessionId,
         string.Equals(r.Host.Provider, "Shell", StringComparison.OrdinalIgnoreCase) ? "Shell" : r.Provider.ToString(),
@@ -70,7 +81,8 @@ internal sealed class SessionCatalog
         r.SortPriority,
         r.Cwd,
         r.HostExited,
-        r.Host.Protocol >= 4 && !r.Host.HasExited);
+        r.Host.Protocol >= 4 && !r.Host.HasExited,
+        readAtMs);
 
     public static string ToJson(IReadOnlyList<CatalogEntry> entries) => JsonSerializer.Serialize(entries, Json);
 }
