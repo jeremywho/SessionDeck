@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Net.WebSockets;
@@ -52,11 +53,15 @@ internal sealed class FakeHost : IAsyncDisposable
             foreach (var (text, data) in Script)
                 await _ws.SendAsync(data, text ? WebSocketMessageType.Text : WebSocketMessageType.Binary, true, _stop.Token);
             var buf = new byte[16384];
+            var message = new MemoryStream();
             while (_ws.State == WebSocketState.Open)
             {
                 var res = await _ws.ReceiveAsync(buf, _stop.Token);
                 if (res.MessageType == WebSocketMessageType.Close) break;
-                Received.Enqueue(Encoding.UTF8.GetString(buf, 0, res.Count));
+                message.Write(buf, 0, res.Count);
+                if (!res.EndOfMessage) continue;
+                Received.Enqueue(Encoding.UTF8.GetString(message.ToArray()));
+                message.SetLength(0);
             }
             _clientClosed.TrySetResult();
         }

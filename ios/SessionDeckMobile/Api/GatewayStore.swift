@@ -207,8 +207,8 @@ final class GatewayStore: ObservableObject {
     }
 
     /// Start a session on the deck; returns the new host id, which the list will show once the gateway sees it.
-    func startSession(provider: String, cwd: String, name: String, prompt: String) async throws -> String {
-        let body = try JSONEncoder().encode(["provider": provider, "cwd": cwd, "name": name, "prompt": prompt])
+    func startSession(provider: String, cwd: String, name: String, prompt: String, chat: Bool = false) async throws -> String {
+        let body = try JSONEncoder().encode(StartBody(provider: provider, cwd: cwd, name: name, prompt: prompt, chat: chat))
         guard let request = authorized("sessions", method: "POST", body: body) else { throw GatewayError.badResponse }
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw GatewayError.badResponse }

@@ -88,7 +88,9 @@
 .chat .composer textarea { display: block; width: 100%; box-sizing: border-box; font: inherit; color: var(--fg); background: transparent; border: 0; outline: 0; padding: 0; margin: 0; resize: none; min-height: 1.65em; scrollbar-width: thin; }
 .chat .composer textarea::placeholder { color: var(--fg3); }
 .chat .composer-row { display: flex; align-items: center; gap: 2px; padding-top: 10px; min-width: 0; margin-left: -6px; }
-.chat select.pick { flex: 0 1 auto; field-sizing: content; min-width: 0; max-width: 230px; font: inherit; font-size: 0.8125em; color: var(--fg2); background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 3px 4px; cursor: pointer; text-overflow: ellipsis; }
+.chat select.pick { flex: 0 1 auto; appearance: none; -webkit-appearance: none; box-sizing: border-box; min-width: 0; max-width: 230px; font: inherit; font-size: 0.8125em; color: var(--fg2); border: 1px solid transparent; border-radius: 6px; padding: 3px 18px 3px 6px; cursor: pointer; text-overflow: ellipsis;
+  background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath d='M2 3.5 5 6.5 8 3.5' fill='none' stroke='%238a8d93' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 5px center; }
+.chat .pick-ruler { position: absolute; visibility: hidden; pointer-events: none; white-space: pre; font-size: 0.8125em; }
 .chat select.pick:hover:not(:disabled) { color: var(--fg); border-color: var(--pr-line-strong); }
 .chat select.pick:disabled { color: var(--fg3); cursor: default; }
 .chat select.pick option { background: var(--bg-solid); color: var(--fg); }
@@ -113,3 +115,18 @@
 .chat .slash-name { color: var(--fg); }
 .chat .slash-hint { margin-left: 8px; font-size: 0.92em; color: var(--fg3); }
 .chat .slash-description { grid-column: 2; color: var(--fg2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat button.chat-attach { flex: none; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; margin-right: 2px; border-color: transparent; border-radius: 8px; color: var(--fg2); }
+.chat button.chat-attach:hover { border-color: var(--pr-line-strong); color: var(--fg); }
+.chat button.chat-attach[hidden], .chat select.pick[hidden] { display: none; }
+
+/* A phone: the pane is the whole page, served by the gateway (mobile-chat.html). */
+.pane.chat.touch { position: fixed; inset: 0; background: var(--bg-solid); --chat-side: 14px; -webkit-text-size-adjust: 100%; }
+.pane.chat.touch .chat-column { padding-top: 16px; }
+.pane.chat.touch .msg.user { max-width: 90%; }
+.pane.chat.touch .chat-compose { padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
+.pane.chat.touch .composer { padding: 10px 10px 6px 12px; }
+.pane.chat.touch select.pick { max-width: 34vw; }
+.pane.chat.touch .md pre, .pane.chat.touch .tool-body pre { font-size: 0.8em; }
+.pane.chat.touch button.slash-option { grid-template-columns: minmax(0, 1fr); row-gap: 2px; padding: 8px 10px; }
+.pane.chat.touch .slash-description { grid-column: 1; }
+.pane.chat.touch .slash-menu { max-height: 46vh; }

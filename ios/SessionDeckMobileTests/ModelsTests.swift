@@ -90,10 +90,44 @@ final class ModelsTests: XCTestCase {
             return try JSONDecoder().decode(CatalogEntry.self, from: Data(json.utf8))
         }
         XCTAssertNil(try entry(#","hostExited":false,"mobileReady":true"#).closedReason)
-        XCTAssertEqual(try entry(#","hostExited":true,"mobileReady":false,"kind":"chat""#).closedReason, "ended")
-        XCTAssertEqual(try entry(#","hostExited":false,"mobileReady":false,"kind":"chat""#).closedReason, "chat session, opens on the desktop")
+        XCTAssertEqual(try entry(#","hostExited":true,"mobileReady":false,"kind":"chat","chatReady":false"#).closedReason, "ended")
+        XCTAssertEqual(try entry(#","hostExited":false,"mobileReady":false,"kind":"chat""#).closedReason, "update the deck to open chats here")
         XCTAssertEqual(try entry(#","hostExited":false,"mobileReady":false,"kind":"""#).closedReason, "restart from the desktop to open here")
         XCTAssertEqual(try entry(#","hostExited":false,"mobileReady":false"#).closedReason, "restart from the desktop to open here")
+    }
+
+    func testAChatSessionOpensAsAConversationWhenTheGatewayCanRelayIt() throws {
+        func entry(_ rest: String) throws -> CatalogEntry {
+            let json = """
+            {"hostId":"h","sessionId":"s","provider":"Claude","name":"n","modelChip":"","effort":"","state":"Idle","stateSinceMs":0,"subagents":0,"group":"","groupOrder":0,"sortPriority":0,"cwd":""\(rest)}
+            """
+            return try JSONDecoder().decode(CatalogEntry.self, from: Data(json.utf8))
+        }
+        let chat = try entry(#","hostExited":false,"mobileReady":false,"kind":"chat","chatReady":true"#)
+        XCTAssertTrue(chat.opensAsChat)
+        XCTAssertTrue(chat.opens)
+        XCTAssertNil(chat.closedReason)
+        // A gateway from before it could relay a chat says nothing of chatReady: the row stays closed.
+        XCTAssertFalse(try entry(#","hostExited":false,"mobileReady":false,"kind":"chat""#).opens)
+        XCTAssertFalse(try entry(#","hostExited":true,"mobileReady":false,"kind":"chat","chatReady":true"#).opens)
+        // A terminal session is never a chat, and still opens as it did.
+        let terminal = try entry(#","hostExited":false,"mobileReady":true,"kind":"","chatReady":false"#)
+        XCTAssertFalse(terminal.opensAsChat)
+        XCTAssertTrue(terminal.opens)
+    }
+
+    @MainActor func testStartingAChatAsksForOneAndOnlyWebLinksLeaveTheApp() throws {
+        let body = try JSONEncoder().encode(StartBody(provider: "Claude", cwd: "", name: "", prompt: "", chat: true))
+        let sent = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+        XCTAssertEqual(sent?["chat"] as? Bool, true)
+        XCTAssertEqual(sent?["provider"] as? String, "Claude")
+
+        XCTAssertEqual(ChatBridge.externalURL("https://example.com/a?b=1")?.host, "example.com")
+        XCTAssertNil(ChatBridge.externalURL("javascript:alert(1)"))
+        XCTAssertNil(ChatBridge.externalURL("file:///etc/passwd"))
+        XCTAssertNil(ChatBridge.externalURL(nil))
+        let pairing = Pairing(host: "192.0.2.10", port: 7420, token: "t", deviceId: "d")
+        XCTAssertEqual(ChatWebView.pageURL(pairing).absoluteString, "http://192.0.2.10:7420/mobile/mobile-chat.html")
     }
 
     func testThePairingQRParses() {

@@ -381,6 +381,13 @@ public class ChatStreamTests : IDisposable
         var entries = new SessionCatalog().Build(new() { (Host("term", ""), Info("term")), (Host("chat", ChatStream.Kind), Info("chat")) }, new Settings(), T0.AddMinutes(1), null);
         Assert.True(entries.Single(e => e.HostId == "term").MobileReady);
         Assert.False(entries.Single(e => e.HostId == "chat").MobileReady);
+        // A phone opens it as a conversation instead: the gateway says it can relay one, and only while it runs.
+        Assert.True(entries.Single(e => e.HostId == "chat").ChatReady);
+        Assert.False(entries.Single(e => e.HostId == "term").ChatReady);
+        Assert.Contains("\"chatReady\":true", SessionCatalog.ToJson(entries));
+        var ended = Host("gone", ChatStream.Kind);
+        ended.ExitCode = 0;
+        Assert.False(new SessionCatalog().Build(new() { (ended, Info("gone")) }, new Settings(), T0.AddMinutes(1), null).Single().ChatReady);
         Assert.Contains("\"hostId\":\"chat\"", SessionCatalog.ToJson(entries));
         Assert.Contains("\"kind\":\"chat\"", SessionCatalog.ToJson(entries));
         Assert.Contains("\"kind\":\"\"", SessionCatalog.ToJson(entries));

@@ -2,7 +2,7 @@
 // The lines here are shaped like the ones Claude Code 2.1.322 wrote in stream-json mode, cut down to the fields the pane reads.
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { ChatModel, LineReader, Wire, toolBrief, commandQuery, matchCommands, modelInForce } = require('../../wwwroot/chat.js');
+const { ChatModel, LineReader, Wire, toolBrief, commandQuery, matchCommands, modelInForce, shortModel } = require('../../wwwroot/chat.js');
 
 const init = { type: 'system', subtype: 'init', session_id: 's1', model: 'claude-haiku-5-5' };
 const echo = text => ({ type: 'user', isReplay: true, message: { role: 'user', content: text }, parent_tool_use_id: null });
@@ -306,4 +306,12 @@ test('the model in force is found among aliases: the one picked here, else a nam
   assert.equal(modelInForce(models, 'claude-haiku-5-5', '').value, 'haiku');
   assert.equal(modelInForce(models, 'something-else', ''), null);
   assert.equal(modelInForce([{ value: 'default', resolved: 'x' }], 'x', '').value, 'default');
+});
+
+test('a phone shows a model by the part of its name that tells it apart', () => {
+  assert.equal(shortModel('Claude Fable 5.2'), 'Fable 5.2');
+  assert.equal(shortModel('Default (recommended)'), 'Default');
+  assert.equal(shortModel('Haiku'), 'Haiku');
+  assert.equal(shortModel('Claude'), 'Claude');
+  assert.equal(shortModel('claude-opus-5-5'), 'claude-opus-5-5');
 });

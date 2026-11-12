@@ -309,7 +309,6 @@ internal sealed class GatewayServer : IAsyncDisposable
         var host = _hostById(hostId);
         if (host == null || host.HasExited) { await MiniHttp.WriteStatus(s, 404, "Not Found"); return; }
         if (host.Protocol < 4) { await MiniHttp.WriteJson(s, 409, "Conflict", "{\"error\":\"restart from the desktop to open here\"}"); return; }
-        if (host.IsChat) { await MiniHttp.WriteJson(s, 409, "Conflict", "{\"error\":\"chat sessions open on the desktop only\"}"); return; }
         long after = r.Query.TryGetValue("after", out var a) && long.TryParse(a, out var parsed) ? parsed : 0;
         await MiniHttp.WriteUpgrade(s, r.WebSocketKey);
         using var ws = WebSocket.CreateFromStream(s, new WebSocketCreationOptions { IsServer = true, KeepAliveInterval = TimeSpan.FromSeconds(30) });

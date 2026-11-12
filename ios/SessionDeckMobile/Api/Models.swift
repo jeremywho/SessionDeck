@@ -19,16 +19,24 @@ struct CatalogEntry: Codable, Identifiable, Hashable {
     let mobileReady: Bool
     /// When anyone last looked at the session, on the desktop or a phone (unix ms, the deck's clock); absent on older gateways.
     let readAtMs: Int64?
-    /// "chat" for a session that is a conversation pane on the desktop and has no terminal to show here; empty or absent otherwise.
+    /// "chat" for a session that is a conversation rather than a terminal; empty or absent otherwise.
     let kind: String?
+    /// The gateway can relay this chat session to a phone; absent on a gateway from before it could.
+    let chatReady: Bool?
 
     var id: String { hostId }
 
+    /// A chat session this gateway will open here: shown as the conversation page, not as a terminal.
+    var opensAsChat: Bool { kind == "chat" && chatReady == true && !hostExited }
+
+    /// Whether tapping the row opens the session.
+    var opens: Bool { mobileReady || opensAsChat }
+
     /// Why the session cannot be opened on this device; nil when it can.
     var closedReason: String? {
-        if mobileReady { return nil }
+        if opens { return nil }
         if hostExited { return "ended" }
-        return kind == "chat" ? "chat session, opens on the desktop" : "restart from the desktop to open here"
+        return kind == "chat" ? "update the deck to open chats here" : "restart from the desktop to open here"
     }
     var stateSince: Date { Date(timeIntervalSince1970: Double(stateSinceMs) / 1000) }
 
@@ -66,6 +74,15 @@ struct Meta: Codable {
 
 struct StartResponse: Codable {
     let hostId: String
+}
+
+/// What the app asks the deck to start. `chat` asks for a Claude session as a conversation instead of a terminal.
+struct StartBody: Codable, Equatable {
+    let provider: String
+    let cwd: String
+    let name: String
+    let prompt: String
+    let chat: Bool
 }
 
 struct PairResponse: Codable {

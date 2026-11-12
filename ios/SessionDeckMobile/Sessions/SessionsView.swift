@@ -17,9 +17,9 @@ struct SessionsView: View {
         return "Build \(version) (\(build)) \(commit)"
     }
 
-    private func start(_ provider: String) {
+    private func start(_ provider: String, chat: Bool = false) {
         Task {
-            do { awaitingHost = try await gateway.startSession(provider: provider, cwd: "", name: "", prompt: "") }
+            do { awaitingHost = try await gateway.startSession(provider: provider, cwd: "", name: "", prompt: "", chat: chat) }
             catch { startError = error.localizedDescription }
         }
     }
@@ -55,7 +55,7 @@ struct SessionsView: View {
                 ForEach(grouped, id: \.name) { group in
                     Section(group.name.isEmpty ? "" : group.name) {
                         ForEach(group.entries) { entry in
-                            if entry.mobileReady {
+                            if entry.opens {
                                 NavigationLink(value: entry) { SessionRowView(entry: entry, unread: gateway.isUnread(entry)) }
                             } else {
                                 SessionRowView(entry: entry, unread: false)
@@ -71,13 +71,16 @@ struct SessionsView: View {
             }
             .listStyle(.insetGrouped)
             .navigationTitle("Sessions")
-            .navigationDestination(for: CatalogEntry.self) { entry in TerminalScreen(entry: entry) }
+            .navigationDestination(for: CatalogEntry.self) { entry in
+                if entry.opensAsChat { ChatScreen(entry: entry) } else { TerminalScreen(entry: entry) }
+            }
             .refreshable { await gateway.refresh() }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     // The deck's own "+" right-click: a new session in the home folder with the deck's flags.
                     Menu {
                         Button { start("Claude") } label: { Label("New Claude session", systemImage: "sparkle") }
+                        Button { start("Claude", chat: true) } label: { Label("New Claude chat", systemImage: "bubble.left") }
                         Button { start("Codex") } label: { Label("New Codex session", systemImage: "diamond") }
                         Button { start("Agy") } label: { Label("New AGY session", systemImage: "diamond.inset.filled") }
                         Button { start("Shell") } label: { Label("New terminal", systemImage: "terminal") }
@@ -110,7 +113,7 @@ struct SessionsView: View {
             .onChange(of: gateway.sessions) { _, sessions in
                 if let hostId = awaitingHost, let entry = sessions.first(where: { $0.hostId == hostId }) {
                     awaitingHost = nil
-                    if entry.mobileReady { path = [entry] }
+                    if entry.opens { path = [entry] }
                 }
                 guard !autoOpened, let hostId = LaunchOptions.open, let entry = sessions.first(where: { $0.hostId == hostId }) else { return }
                 autoOpened = true

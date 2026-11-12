@@ -156,7 +156,10 @@ internal static class GatewayProcess
         server.Machine = () => machine.Latest;
         server.StartSession = request =>
         {
-            var plan = SessionStarter.Plan(request, Settings.Peek());
+            StartPlan? plan;
+            // A chat needs claude.exe itself; without it there is nothing to start and the phone is told so.
+            try { plan = SessionStarter.Plan(request, Settings.Peek()); }
+            catch (InvalidOperationException ex) { Log($"a phone asked for a session that cannot be started: {ex.Message}"); return null; }
             if (plan == null) return null;
             var host = SessionStarter.Start(plan);
             Log($"started {plan.Provider} host {host.Id} in {plan.Cwd} for a phone");

@@ -199,16 +199,43 @@ public class GatewayServerTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task Attach_refuses_a_chat_session_which_has_no_terminal_to_show()
+    public async Task A_chat_session_is_relayed_to_a_phone_and_a_message_with_an_image_in_it_crosses_whole()
     {
+        await using var host = new FakeHost();
+        host.Record.Kind = ChatStream.Kind;
+        _hosts[host.Record.Id] = host.Record;
         string token = await PairAsync();
-        _hosts["chat"] = new HostRecord { Id = "chat", Protocol = 4, Port = 1, Token = "x", Kind = ChatStream.Kind };
-        using var raw = new HttpClient { BaseAddress = new Uri(Base) };
-        var req = new HttpRequestMessage(HttpMethod.Get, $"/sessions/chat/attach?token={token}");
-        req.Headers.Add("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==");
-        var res = await raw.SendAsync(req);
-        Assert.Equal(HttpStatusCode.Conflict, res.StatusCode);
-        Assert.Contains("chat sessions open on the desktop only", await res.Content.ReadAsStringAsync());
+        using var ws = new ClientWebSocket();
+        await ws.ConnectAsync(Ws($"/sessions/{host.Record.Id}/attach?token={token}&after=0"), CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Contains("\"type\":\"snapshot\"", await NextText(ws));
+
+        string message = "{\"type\":\"input\",\"data\":\"{\\\"type\\\":\\\"user\\\",\\\"image\\\":\\\"" + new string('Q', 300_000) + "\\\"}\\n\"}";
+        await ws.SendAsync(Encoding.UTF8.GetBytes(message), WebSocketMessageType.Text, true, CancellationToken.None);
+        // A phone still cannot end the session from here: only what is typed goes through.
+        await ws.SendAsync(Encoding.UTF8.GetBytes("{\"type\":\"kill\"}"), WebSocketMessageType.Text, true, CancellationToken.None);
+        await ws.SendAsync(Encoding.UTF8.GetBytes("{\"type\":\"input\",\"data\":\"after\"}"), WebSocketMessageType.Text, true, CancellationToken.None);
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (host.Received.Count < 2 && DateTime.UtcNow < deadline) await Task.Delay(20);
+        Assert.Equal(2, host.Received.Count);
+        Assert.Equal(message.Length, host.Received.First().Length);
+        Assert.Equal("{\"type\":\"input\",\"data\":\"after\"}", host.Received.Last());
+        await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task The_chat_page_and_what_it_loads_are_served_to_a_phone()
+    {
+        using var c = new HttpClient { BaseAddress = new Uri(Base) };
+        string page = await c.GetStringAsync("/mobile/mobile-chat.html");
+        foreach (var file in new[] { "chat.css", "marked.js", "chat.js" })
+        {
+            Assert.Contains($"\"{file}\"", page);
+            var res = await c.GetAsync("/mobile/" + file);
+            Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+            Assert.True((await res.Content.ReadAsByteArrayAsync()).Length > 1000, file);
+        }
+        Assert.Contains("ChatPane.create", page);
+        Assert.Contains("/sessions/", page);
     }
 
     [Fact]

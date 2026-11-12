@@ -1,0 +1,60 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<title>chat</title>
+<link rel="stylesheet" href="chat.css">
+<style>
+  html { color-scheme: dark; }
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #0c0c0c; }
+</style>
+</head>
+<body>
+<div id="chat" class="pane"></div>
+<script src="marked.js"></script>
+<script src="chat.js"></script>
+<script>
+(() => {
+  // One chat session as a phone sees it: the deck's own chat pane, attached through the gateway.
+  // The native shell injects window.SD = { token, hostId }; a browser can pass them as a query.
+  const params = new URLSearchParams(location.search);
+  const SD = Object.assign({ token: params.get('token') || '', hostId: params.get('host') || '' }, window.SD || {});
+  const native = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.sd;
+
+  function copy(text) {
+    if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(text).catch(() => { }); return; }
+    // Over plain http on the home network there is no clipboard API; a selected, off-screen box still copies.
+    const box = document.createElement('textarea');
+    box.value = text;
+    box.setAttribute('readonly', '');
+    box.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
+    document.body.appendChild(box);
+    box.select();
+    try { document.execCommand('copy'); } catch { }
+    box.remove();
+  }
+
+  // In the app, links and the clipboard are the app's to handle; in a plain browser the page does what it can.
+  function post(message) {
+    if (native) { native.postMessage(message); return; }
+    if (message.type === 'copy') copy(message.text || '');
+    else if (message.type === 'open') window.open(message.uri, '_blank', 'noopener');
+  }
+
+  const el = document.getElementById('chat');
+  el.classList.add('touch');
+  const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
+  const pane = ChatPane.create({
+    el, id: SD.hostId, post, touch: true,
+    socketUrl: seq => `${scheme}://${location.host}/sessions/${encodeURIComponent(SD.hostId)}/attach?token=${encodeURIComponent(SD.token)}&after=${seq}`,
+  });
+  pane.applyLook({
+    font: 'Menlo', size: 12, onDark: true,
+    ink: { '--fg': '#e8e9eb', '--fg2': '#b8bbc2', '--fg3': '#8a8d93', '--pr-red': '#f2555a', '--pr-amber': '#e5b84f', '--pr-green': '#5bc46b', '--pr-blue': '#7fb3ff',
+           '--pr-line': 'rgba(138, 141, 147, 0.22)', '--pr-line-strong': 'rgba(138, 141, 147, 0.5)', '--bg-solid': '#0c0c0c' },
+  });
+})();
+</script>
+</body>
+</html>

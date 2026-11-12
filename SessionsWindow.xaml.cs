@@ -691,9 +691,12 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     {
         var dlg = new NewSessionWindow(this, _app.Settings, initial);
         if (dlg.ShowDialog() != true || dlg.Result is not { } r) return;
-        var plan = SessionStarter.Plan(new StartRequest(r.Provider.ToString(), r.Cwd, r.Name ?? "", r.Prompt ?? "", r.Model ?? "", r.Effort ?? "", r.Chat), _app.Settings);
-        if (plan == null) { LiveLabel.Text = "That folder does not exist."; return; }
-        try { Deck.Open(SessionStarter.Start(plan)); }
+        try
+        {
+            var plan = SessionStarter.Plan(new StartRequest(r.Provider.ToString(), r.Cwd, r.Name ?? "", r.Prompt ?? "", r.Model ?? "", r.Effort ?? "", r.Chat), _app.Settings);
+            if (plan == null) { LiveLabel.Text = "That folder does not exist."; return; }
+            Deck.Open(SessionStarter.Start(plan));
+        }
         catch (Exception ex)
         {
             App.LogError(ex);

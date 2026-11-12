@@ -20,7 +20,8 @@ internal sealed record CatalogEntry(
     bool HostExited,
     bool MobileReady,
     long ReadAtMs = 0,
-    string Kind = "");
+    string Kind = "",
+    bool ChatReady = false);
 
 /// <summary>
 /// The session list in the order the deck shows it, built from the pipeline's pairs. Rows are kept
@@ -84,7 +85,8 @@ internal sealed class SessionCatalog
         r.HostExited,
         r.Host.Protocol >= 4 && !r.Host.HasExited && !r.Host.IsChat,
         readAtMs,
-        r.Host.Kind);
+        r.Host.Kind,
+        r.Host.IsChat && !r.Host.HasExited);
 
     public static string ToJson(IReadOnlyList<CatalogEntry> entries) => JsonSerializer.Serialize(entries, Json);
 }

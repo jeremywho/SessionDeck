@@ -354,10 +354,16 @@
     return same.find(m => m.value === picked) || same.find(m => m.value === model) || same.find(m => m.value !== 'default') || same[0] || null;
   }
 
-  const MODES = [['default', 'Ask permissions'], ['acceptEdits', 'Accept edits'], ['plan', 'Plan mode'], ['bypassPermissions', 'Bypass permissions']];
+  // Each permission mode with its label, and the one-word label a phone has room for.
+  const MODES = [['default', 'Ask permissions', 'Ask'], ['acceptEdits', 'Accept edits', 'Edits'], ['plan', 'Plan mode', 'Plan'], ['bypassPermissions', 'Bypass permissions', 'Bypass']];
+
+  // "Claude Fable 5.2" -> "Fable 5.2", "Default (recommended)" -> "Default".
+  function shortModel(name) {
+    return name.replace(/^Claude\s+/, '').replace(/\s*\(.*\)\s*$/, '') || name;
+  }
   const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 
-  const api = { ChatModel, LineReader, Wire, toolBrief, textOf, commandQuery, matchCommands, modelInForce };
+  const api = { ChatModel, LineReader, Wire, toolBrief, textOf, commandQuery, matchCommands, modelInForce, shortModel };
   if (typeof module !== 'undefined' && module.exports) { module.exports = api; return; }
 
   // ================= the page side =================
@@ -455,7 +461,19 @@
     const stateText = h('span', 'composer-state');
     const action = h('button', 'chat-send');
     action.type = 'button';
-    row.append(modelPick, effortPick, modePick, stateText, action);
+    // Pasting is how an image gets in on a desktop; a phone has no such gesture worth relying on, so there is a button too.
+    const picker = document.createElement('input');
+    picker.type = 'file';
+    picker.accept = 'image/png,image/jpeg,image/gif,image/webp';
+    picker.multiple = true;
+    picker.hidden = true;
+    const addImage = h('button', 'chat-attach');
+    addImage.type = 'button';
+    addImage.setAttribute('aria-label', 'Attach image');
+    addImage.title = 'Attach image';
+    addImage.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M8 3v10M3 8h10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
+    addImage.hidden = true;
+    row.append(addImage, picker, modelPick, effortPick, modePick, stateText, action);
     card.append(menu, shelf, input, row);
     compose.appendChild(card);
     el.append(scroll, compose);
@@ -536,6 +554,16 @@
         }
       }
       if (document.activeElement !== select) select.value = value;
+      fit(select);
+    }
+
+    // A select is as wide as its longest option unless told otherwise; these are as wide as the choice they show.
+    const ruler = h('span', 'pick-ruler');
+    el.appendChild(ruler);
+    function fit(select) {
+      const shown = select.selectedOptions[0];
+      ruler.textContent = shown ? shown.textContent : '';
+      select.style.width = Math.ceil(ruler.getBoundingClientRect().width) + 26 + 'px';
     }
 
     // The session's model, effort and permission mode, as the CLI lists and reports them. Nothing shows until it has:
@@ -548,15 +576,17 @@
       modelPick.hidden = !live || !s.model;
       effortPick.hidden = !live || !s.effort;
       modePick.hidden = !live || !s.mode;
+      addImage.hidden = !hostTakesImages || state === 'ended';
       for (const p of [modelPick, effortPick, modePick]) p.disabled = state === 'offline';
       if (!live) return;
-      const modelPairs = models.map(m => [m.value, m.name || m.value, m.description || '']);
+      // Three full labels do not fit across a phone: there the model drops its "Claude" and the mode is one word.
+      const modelPairs = models.map(m => [m.value, opts.touch ? shortModel(m.name || m.value) : m.name || m.value, m.description || '']);
       if (!inForce && s.model) modelPairs.push([s.model, s.model, '']);
       options(modelPick, modelPairs, inForce ? inForce.value : s.model);
       const levels = inForce && inForce.efforts && inForce.efforts.length ? inForce.efforts.slice() : EFFORTS.slice();
       if (s.effort && !levels.includes(s.effort)) levels.push(s.effort);
       options(effortPick, levels.map(l => [l, l, 'Effort']), s.effort);
-      const modePairs = MODES.map(m => m.slice());
+      const modePairs = MODES.map(m => [m[0], opts.touch ? m[2] : m[1]]);
       if (s.mode && !MODES.some(m => m[0] === s.mode)) modePairs.push([s.mode, s.mode]);
       options(modePick, modePairs, s.mode);
     }
@@ -569,7 +599,10 @@
     effortPick.addEventListener('change', () => change(effortPick, Wire.set('apply_flag_settings', { settings: { effortLevel: effortPick.value } })));
     modePick.addEventListener('change', () => change(modePick, Wire.set('set_permission_mode', { mode: modePick.value })));
     // Losing focus without a choice puts back what is in force; a choice is put back by the session's own answer.
-    for (const p of [modelPick, effortPick, modePick]) p.addEventListener('blur', () => schedule());
+    for (const p of [modelPick, effortPick, modePick]) {
+      p.addEventListener('blur', () => schedule());
+      p.addEventListener('change', () => fit(p));
+    }
 
     // Builds the element for an item, or updates the one it has and returns it.
     function render(item, node) {
@@ -843,6 +876,14 @@
     }
 
     // A paste that carries text is text, even when the clipboard also holds a picture of it (a copy from a document does that).
+    addImage.addEventListener('click', () => picker.click());
+    picker.addEventListener('change', () => {
+      const files = Array.from(picker.files || []).filter(f => f.type.startsWith('image/'));
+      picker.value = '';
+      if (files.length) attach(files);
+      if (!opts.touch) input.focus();
+    });
+
     input.addEventListener('paste', ev => {
       const data = ev.clipboardData;
       if (!data || Array.from(data.types).includes('text/plain')) return;
@@ -911,11 +952,15 @@
     input.addEventListener('input', () => { menuActive = 0; grow(); paintMenu(); paintStatus(); });
     input.addEventListener('keydown', ev => {
       if (menuKey(ev)) return;
-      if (ev.key === 'Enter' && !ev.shiftKey && !ev.ctrlKey && !ev.altKey && !ev.isComposing) { ev.preventDefault(); submit(); }
+      // On a touch keyboard Return is a new line, as in any message box there; the button sends.
+      if (ev.key === 'Enter' && !opts.touch && !ev.shiftKey && !ev.ctrlKey && !ev.altKey && !ev.isComposing) { ev.preventDefault(); submit(); }
       else if (ev.key === 'Escape') { ev.preventDefault(); interrupt(); }
     });
     input.addEventListener('focus', () => { if (opts.onFocus) opts.onFocus(); });
-    input.addEventListener('blur', () => { if (!menu.hidden) { menuClosedFor = input.value; paintMenu(); } });
+    // A tap on one of the menu's rows can take the focus for a moment on a touch screen: the menu closes only if the focus stays away.
+    input.addEventListener('blur', () => setTimeout(() => {
+      if (document.activeElement !== input && !menu.hidden) { menuClosedFor = input.value; paintMenu(); }
+    }, 250));
     action.addEventListener('click', () => { if (action.classList.contains('stop')) interrupt(); else submit(); input.focus(); });
     el.addEventListener('keydown', ev => {
       // F13 to F16 move through the session list, as they do from a terminal pane.
@@ -927,7 +972,8 @@
 
     function connect() {
       if (closed) return;
-      const sock = new WebSocket(`ws://127.0.0.1:${port}/attach?token=${encodeURIComponent(token)}&after=${seq}`);
+      // The deck attaches to the host itself; a phone attaches through the gateway, which names its own address.
+      const sock = new WebSocket(opts.socketUrl ? opts.socketUrl(seq) : `ws://127.0.0.1:${port}/attach?token=${encodeURIComponent(token)}&after=${seq}`);
       sock.binaryType = 'arraybuffer';
       ws = sock;
       let openedAt = 0;
