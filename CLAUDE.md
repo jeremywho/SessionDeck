@@ -194,6 +194,25 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
   folded into the running turn and gets no `result` of its own.
 - **A viewer answers permission requests; the host declines every other control request**
   (`ChatStream.Decline`), because an unanswered one stalls the turn.
+- **The host asks the CLI what it offers and what is in force, once, for every viewer.** At start
+  it sends `initialize` (id `sd-initialize`) and `get_settings` (id `sd-settings`); the answers
+  become a `catalog` frame (models, slash commands, cut to what a picker and a menu show) and a
+  `settings` frame (permission mode, model, effort), sent on change and at attach. A viewer changes
+  one with `set_model`, `set_permission_mode` or `apply_flag_settings {effortLevel}` under an id
+  starting `sd-set-`; the host asks `get_settings` again after it and after every `result`, which
+  is how a typed `/model` or `/effort` is picked up.
+- **An answer to a control request is kept in the ring only when it settles a permission
+  request** (`ChatStream.Durable` is asked before `Apply`). The rest are live-only, and the host's
+  own two are not sent to viewers at all: `initialize` alone is about 30 KB.
+- **Image bytes never enter the ring.** A pasted image goes to the CLI as a base64 image block in
+  the user message; `ChatStream.WithoutImageData` empties `source.data` (leaving `omitted`) on the
+  echoed line and on history read from the transcript. The pane shows its own preview for what it
+  sent and "1 image attached" for anything else.
+- **Slash commands are just messages.** A local one (`/context`, `/effort`, `/rename`) is never
+  echoed: the CLI answers with a synthetic assistant message and a `result`, so the pane settles
+  its pending bubble at the end of the turn. `set_model` and friends replay a
+  `<local-command-stdout>` user line, which is no turn (the host must not go busy on it) and
+  shows as a note.
 - **A resumed process says nothing about earlier turns.** The host seeds the ring from the
   transcript at start (`ChatStream.History`, lines marked `history`), so a viewer has one source.
 - **The CLI registers itself** in `~/.claude/sessions` (`kind: interactive`, `entrypoint:

@@ -18,14 +18,28 @@ internal sealed class ChatStream
     /// <summary>Flags every chat launch carries; the session flags and the hook settings follow them.</summary>
     public const string ProtocolFlags = "-p --input-format stream-json --output-format stream-json --verbose --include-partial-messages --replay-user-messages --permission-prompt-tool stdio";
 
+    /// <summary>The host's own requests to the CLI carry these ids, so their answers are told from a viewer's.</summary>
+    public const string InitializeId = "sd-initialize";
+    public const string SettingsId = "sd-settings";
+
+    /// <summary>A viewer changing the model, the effort or the permission mode names its request with this prefix; the host then asks what is in force.</summary>
+    public const string SetPrefix = "sd-set-";
+
     readonly HashSet<string> _openRequests = new(StringComparer.Ordinal);
+    string _catalog = "";
+    string _mode = "", _model = "", _effort = "";
+
+    /// <summary>What <see cref="Apply"/> changed: the host record, the lists the CLI offers, the settings in force; and whether to ask the CLI for its settings again.</summary>
+    public readonly record struct Change(bool Record, bool Catalog, bool Settings, bool Refresh);
 
     /// <summary>
     /// Kept for a viewer that attaches later, or only passed to the viewers attached now. Token deltas
     /// and per-turn bookkeeping are the bulk of the stream and are worth nothing once the finished
-    /// message has arrived, so they never take scrollback from the conversation itself.
+    /// message has arrived, so they never take scrollback from the conversation itself. An answer to
+    /// a control request is kept only when it settles a permission request: that is part of the
+    /// conversation, where the answer to "which models are there" is not. Ask before <see cref="Apply"/>.
     /// </summary>
-    public static bool Durable(JsonElement line)
+    public bool Durable(JsonElement line)
     {
         switch (Text(line, "type"))
         {
@@ -34,28 +48,33 @@ internal sealed class ChatStream
                 return false;
             case "system":
                 return Text(line, "subtype") is not ("init" or "status" or "thinking_tokens" or "hook_started" or "hook_progress" or "hook_response" or "session_title_changed");
+            case "control_response":
+                return line.TryGetProperty("response", out var response) && _openRequests.Contains(Text(response, "request_id"));
             default:
                 return true;
         }
     }
 
-    /// <summary>Fold one outbound line into the record; true when the record changed.</summary>
-    public bool Apply(JsonElement line, HostRecord record, DateTime now)
+    /// <summary>Fold one outbound line into the record and into what this knows of the session's lists and settings.</summary>
+    public Change Apply(JsonElement line, HostRecord record, DateTime now)
     {
-        string before = Signature(record);
+        string before = Signature(record), catalog = _catalog, settings = SettingsFrame();
+        bool refresh = false;
         switch (Text(line, "type"))
         {
             case "system":
                 if (Text(line, "subtype") == "init")
                 {
                     if (Text(line, "session_id") is { Length: > 0 } session) record.SessionId = session;
-                    if (Text(line, "model") is { Length: > 0 } model) record.Model = model;
+                    if (Text(line, "model") is { Length: > 0 } model) record.Model = _model = model;
+                    if (Text(line, "permissionMode") is { Length: > 0 } mode) _mode = mode;
                     Status(record, "busy", now);
                 }
                 else if (Text(line, "subtype") == "session_title_changed" && Text(line, "title") is { Length: > 0 } named) record.Title = named;
                 break;
             case "user":
-                if (line.TryGetProperty("isReplay", out var replay) && replay.ValueKind == JsonValueKind.True)
+                // The CLI replays what a local command printed ("Set model to …") as if it were typed; that starts no turn.
+                if (line.TryGetProperty("isReplay", out var replay) && replay.ValueKind == JsonValueKind.True && !IsLocalCommandOutput(line))
                 {
                     record.LastEvent = "UserPromptSubmit";
                     Status(record, "busy", now);
@@ -75,8 +94,18 @@ internal sealed class ChatStream
                 }
                 break;
             case "control_response":
-                if (line.TryGetProperty("response", out var response) && _openRequests.Remove(Text(response, "request_id")) && _openRequests.Count == 0)
-                    Status(record, "busy", now);
+                if (!line.TryGetProperty("response", out var response)) break;
+                string id = Text(response, "request_id");
+                if (_openRequests.Remove(id)) { if (_openRequests.Count == 0) Status(record, "busy", now); break; }
+                if (Text(response, "subtype") != "success") break;
+                response.TryGetProperty("response", out var answer);
+                if (id == InitializeId) Introduced(answer);
+                else if (id == SettingsId) InForce(answer, record);
+                else if (id.StartsWith(SetPrefix, StringComparison.Ordinal))
+                {
+                    if (Text(answer, "mode") is { Length: > 0 } set) _mode = set;
+                    refresh = true;
+                }
                 break;
             case "control_cancel_request":
                 if (_openRequests.Remove(Text(line, "request_id")) && _openRequests.Count == 0) Status(record, "busy", now);
@@ -85,9 +114,126 @@ internal sealed class ChatStream
                 _openRequests.Clear();
                 record.LastEvent = "Stop";
                 Status(record, "idle", now);
+                // A typed /model or /effort changes them with no answer of its own; the end of a turn is when to look.
+                refresh = true;
                 break;
         }
-        return Signature(record) != before;
+        return new Change(Signature(record) != before, _catalog != catalog, SettingsFrame() != settings, refresh);
+    }
+
+    /// <summary>The CLI's answer to <c>initialize</c>: the models and commands it offers, cut to what a picker and a menu show.</summary>
+    void Introduced(JsonElement answer)
+    {
+        if (answer.ValueKind != JsonValueKind.Object) return;
+        if (Text(answer, "current_permission_mode") is { Length: > 0 } mode) _mode = mode;
+        var buffer = new ArrayBufferWriter<byte>();
+        using (var w = new Utf8JsonWriter(buffer))
+        {
+            w.WriteStartObject();
+            w.WriteString("type", "catalog");
+            w.WriteStartArray("models");
+            if (answer.TryGetProperty("models", out var models) && models.ValueKind == JsonValueKind.Array)
+                foreach (var m in models.EnumerateArray())
+                {
+                    if (Text(m, "value").Length == 0) continue;
+                    w.WriteStartObject();
+                    w.WriteString("value", Text(m, "value"));
+                    w.WriteString("resolved", Text(m, "resolvedModel"));
+                    w.WriteString("name", Text(m, "displayName"));
+                    w.WriteString("description", Text(m, "description"));
+                    w.WriteStartArray("efforts");
+                    if (m.TryGetProperty("supportedEffortLevels", out var levels) && levels.ValueKind == JsonValueKind.Array)
+                        foreach (var level in levels.EnumerateArray())
+                            if (level.ValueKind == JsonValueKind.String) w.WriteStringValue(level.GetString());
+                    w.WriteEndArray();
+                    w.WriteEndObject();
+                }
+            w.WriteEndArray();
+            w.WriteStartArray("commands");
+            if (answer.TryGetProperty("commands", out var commands) && commands.ValueKind == JsonValueKind.Array)
+                foreach (var c in commands.EnumerateArray())
+                {
+                    string name = Text(c, "name");
+                    if (name.Length == 0 || name.StartsWith("__", StringComparison.Ordinal)) continue;
+                    string description = Text(c, "description");
+                    w.WriteStartObject();
+                    w.WriteString("name", name);
+                    w.WriteString("description", description.Length <= 240 ? description : description[..239] + "…");
+                    w.WriteString("hint", Text(c, "argumentHint"));
+                    w.WriteEndObject();
+                }
+            w.WriteEndArray();
+            w.WriteEndObject();
+        }
+        _catalog = Encoding.UTF8.GetString(buffer.WrittenSpan);
+    }
+
+    /// <summary>The CLI's answer to <c>get_settings</c>: the model and effort in force now.</summary>
+    void InForce(JsonElement answer, HostRecord record)
+    {
+        if (answer.ValueKind != JsonValueKind.Object || !answer.TryGetProperty("applied", out var applied)) return;
+        if (Text(applied, "model") is { Length: > 0 } model) record.Model = _model = model;
+        _effort = Text(applied, "effort");
+    }
+
+    /// <summary>The frame that tells a viewer what the CLI offers; empty until the CLI has said.</summary>
+    public string CatalogFrame() => _catalog;
+
+    /// <summary>The frame that tells a viewer the permission mode, model and effort in force.</summary>
+    public string SettingsFrame() => JsonSerializer.Serialize(new { type = "settings", mode = _mode, model = _model, effort = _effort });
+
+    /// <summary>The CLI's answer to one of the host's own questions: tens of kilobytes no viewer reads; viewers get the frames made from it.</summary>
+    public static bool AnswersTheHost(JsonElement line) =>
+        Text(line, "type") == "control_response" && line.TryGetProperty("response", out var response)
+        && Text(response, "request_id") is InitializeId or SettingsId;
+
+    public static string InitializeLine() => ControlLine(InitializeId, "initialize");
+
+    public static string SettingsLine() => ControlLine(SettingsId, "get_settings");
+
+    static string ControlLine(string id, string subtype) =>
+        JsonSerializer.Serialize(new { type = "control_request", request_id = id, request = new { subtype } });
+
+    static bool IsLocalCommandOutput(JsonElement userLine) =>
+        userLine.TryGetProperty("message", out var message) && message.TryGetProperty("content", out var content)
+        && content.ValueKind == JsonValueKind.String && (content.GetString() ?? "").TrimStart().StartsWith("<local-command-", StringComparison.Ordinal);
+
+    /// <summary>
+    /// The line without the bytes of any image in it. A pasted screenshot is megabytes of base64, and
+    /// one of them would push the conversation out of the scrollback; what stays says an image was there.
+    /// </summary>
+    public static byte[] WithoutImageData(byte[] line)
+    {
+        if (line.AsSpan().IndexOf("\"base64\""u8) < 0) return line;
+        System.Text.Json.Nodes.JsonNode? root;
+        try { root = System.Text.Json.Nodes.JsonNode.Parse(line); }
+        catch (JsonException) { return line; }
+        if (root == null || !Strip(root)) return line;
+        return Encoding.UTF8.GetBytes(root.ToJsonString());
+    }
+
+    static bool Strip(System.Text.Json.Nodes.JsonNode node)
+    {
+        bool changed = false;
+        if (node is System.Text.Json.Nodes.JsonArray array)
+        {
+            foreach (var item in array)
+                if (item != null) changed |= Strip(item);
+        }
+        else if (node is System.Text.Json.Nodes.JsonObject obj)
+        {
+            if (obj["type"] is System.Text.Json.Nodes.JsonValue type && type.TryGetValue<string>(out var kind) && kind == "image"
+                && obj["source"] is System.Text.Json.Nodes.JsonObject source
+                && source["data"] is System.Text.Json.Nodes.JsonValue data && data.TryGetValue<string>(out var bytes) && bytes.Length > 0)
+            {
+                source["omitted"] = bytes.Length;
+                source["data"] = "";
+                return true;
+            }
+            foreach (var pair in obj.ToList())
+                if (pair.Value != null) changed |= Strip(pair.Value);
+        }
+        return changed;
     }
 
     static void Status(HostRecord record, string status, DateTime now)
@@ -220,7 +366,7 @@ internal sealed class ChatStream
                 message.WriteTo(w);
                 w.WriteEndObject();
             }
-            return buffer.WrittenSpan.ToArray();
+            return WithoutImageData(buffer.WrittenSpan.ToArray());
         }
         catch (JsonException) { return null; }
     }

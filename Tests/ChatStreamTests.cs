@@ -30,19 +30,19 @@ public class ChatStreamTests : IDisposable
         var record = new HostRecord { AgentStatus = "idle", StatusAt = T0 };
         var chat = new ChatStream();
 
-        Assert.True(chat.Apply(Line(Init), record, T0.AddSeconds(1)));
+        Assert.True(chat.Apply(Line(Init), record, T0.AddSeconds(1)).Record);
         Assert.Equal(("busy", "live-1", "claude-haiku-5-5"), (record.AgentStatus, record.SessionId, record.Model));
         Assert.Equal(T0.AddSeconds(1), record.StatusAt);
 
-        Assert.True(chat.Apply(Line(Echo), record, T0.AddSeconds(2)));
+        Assert.True(chat.Apply(Line(Echo), record, T0.AddSeconds(2)).Record);
         Assert.Equal(("UserPromptSubmit", ""), (record.LastEvent, record.Title));
         Assert.Equal(T0.AddSeconds(1), record.StatusAt);
 
-        Assert.True(chat.Apply(Line(ToolUse), record, T0.AddSeconds(3)));
+        Assert.True(chat.Apply(Line(ToolUse), record, T0.AddSeconds(3)).Record);
         Assert.Equal("Write", record.LastTool);
-        Assert.False(chat.Apply(Line(ToolUse), record, T0.AddSeconds(4)));
+        Assert.False(chat.Apply(Line(ToolUse), record, T0.AddSeconds(4)).Record);
 
-        Assert.True(chat.Apply(Line(Result), record, T0.AddSeconds(5)));
+        Assert.True(chat.Apply(Line(Result), record, T0.AddSeconds(5)).Record);
         Assert.Equal(("idle", "Stop"), (record.AgentStatus, record.LastEvent));
         Assert.Equal(T0.AddSeconds(5), record.StatusAt);
     }
@@ -52,9 +52,9 @@ public class ChatStreamTests : IDisposable
     {
         var record = new HostRecord { Title = "billing" };
         var chat = new ChatStream();
-        Assert.True(chat.Apply(Line("""{"type":"system","subtype":"session_title_changed","title":"billing rework"}"""), record, T0));
+        Assert.True(chat.Apply(Line("""{"type":"system","subtype":"session_title_changed","title":"billing rework"}"""), record, T0).Record);
         Assert.Equal("billing rework", record.Title);
-        Assert.False(chat.Apply(Line("""{"type":"system","subtype":"session_title_changed","title":""}"""), record, T0));
+        Assert.False(chat.Apply(Line("""{"type":"system","subtype":"session_title_changed","title":""}"""), record, T0).Record);
         Assert.Equal("billing rework", record.Title);
     }
 
@@ -86,7 +86,7 @@ public class ChatStreamTests : IDisposable
     public void An_answer_to_something_else_changes_nothing()
     {
         var record = new HostRecord { AgentStatus = "idle" };
-        Assert.False(new ChatStream().Apply(Line(Answer("interrupt-1")), record, T0));
+        Assert.False(new ChatStream().Apply(Line(Answer("interrupt-1")), record, T0).Record);
         Assert.Equal("idle", record.AgentStatus);
     }
 
@@ -103,8 +103,135 @@ public class ChatStreamTests : IDisposable
     [InlineData(Result, true)]
     [InlineData("""{"type":"control_request","request_id":"r1","request":{"subtype":"can_use_tool"}}""", true)]
     [InlineData("""{"type":"something_new"}""", true)]
+    [InlineData("""{"type":"control_response","response":{"subtype":"success","request_id":"sd-set-1","response":{"mode":"plan"}}}""", false)]
     public void Only_the_conversation_itself_is_kept_for_a_later_viewer(string json, bool kept) =>
-        Assert.Equal(kept, ChatStream.Durable(Line(json)));
+        Assert.Equal(kept, new ChatStream().Durable(Line(json)));
+
+    [Fact]
+    public void An_answer_is_part_of_the_conversation_only_when_it_settles_a_permission_request()
+    {
+        var chat = new ChatStream();
+        var record = new HostRecord { AgentStatus = "busy" };
+        Assert.False(chat.Durable(Line(Answer("r1"))));
+        chat.Apply(Line(Ask("r1")), record, T0);
+        Assert.True(chat.Durable(Line(Answer("r1"))));
+        chat.Apply(Line(Answer("r1")), record, T0);
+        Assert.False(chat.Durable(Line(Answer("r1"))));
+    }
+
+    const string Introduction = """
+        {"type":"control_response","response":{"subtype":"success","request_id":"sd-initialize","response":{
+          "current_permission_mode":"bypassPermissions","account":{"email":"someone@example.com"},
+          "models":[
+            {"value":"default","resolvedModel":"claude-opus-5-5","displayName":"Default (recommended)","description":"Use the default model","supportedEffortLevels":["low","medium","high"],"supportsFastMode":true},
+            {"value":"haiku","resolvedModel":"claude-haiku-5-5","displayName":"Haiku","description":"Fast","supportedEffortLevels":[]},
+            {"displayName":"no value"}],
+          "commands":[
+            {"name":"compact","description":"Clear history but keep a summary","argumentHint":"<optional instructions>","builtin":true},
+            {"name":"__remote-workflow","description":"internal","argumentHint":""},
+            {"name":"council","description":"LONG","argumentHint":""}]}}}
+        """;
+
+    [Fact]
+    public void The_cli_introduces_itself_once_and_viewers_get_its_models_and_commands_cut_to_what_they_show()
+    {
+        var chat = new ChatStream();
+        var record = new HostRecord();
+        Assert.Equal("", chat.CatalogFrame());
+        var introduction = Line(Introduction.Replace("LONG", new string('x', 400)));
+        Assert.True(ChatStream.AnswersTheHost(introduction));
+        Assert.False(chat.Durable(introduction));
+        var change = chat.Apply(introduction, record, T0);
+        Assert.Equal((false, true, true, false), (change.Record, change.Catalog, change.Settings, change.Refresh));
+
+        var catalog = Line(chat.CatalogFrame());
+        Assert.Equal("catalog", catalog.GetProperty("type").GetString());
+        var models = catalog.GetProperty("models").EnumerateArray().ToList();
+        Assert.Equal(new[] { "default", "haiku" }, models.Select(m => m.GetProperty("value").GetString()));
+        Assert.Equal(("claude-opus-5-5", "Default (recommended)", "Use the default model"),
+            (models[0].GetProperty("resolved").GetString(), models[0].GetProperty("name").GetString(), models[0].GetProperty("description").GetString()));
+        Assert.Equal(new[] { "low", "medium", "high" }, models[0].GetProperty("efforts").EnumerateArray().Select(e => e.GetString()));
+        Assert.False(models[0].TryGetProperty("supportsFastMode", out _));
+        var commands = catalog.GetProperty("commands").EnumerateArray().ToList();
+        Assert.Equal(new[] { "compact", "council" }, commands.Select(c => c.GetProperty("name").GetString()));
+        Assert.Equal("<optional instructions>", commands[0].GetProperty("hint").GetString());
+        Assert.Equal(240, commands[1].GetProperty("description").GetString()!.Length);
+        Assert.DoesNotContain("someone@example.com", chat.CatalogFrame());
+
+        Assert.Equal("bypassPermissions", Line(chat.SettingsFrame()).GetProperty("mode").GetString());
+        Assert.False(chat.Apply(introduction, record, T0).Catalog);
+    }
+
+    [Fact]
+    public void The_settings_in_force_follow_the_cli_and_the_host_asks_again_when_they_may_have_moved()
+    {
+        var chat = new ChatStream();
+        var record = new HostRecord { AgentStatus = "idle" };
+        (string Mode, string Model, string Effort) Settings()
+        {
+            var f = Line(chat.SettingsFrame());
+            return (f.GetProperty("mode").GetString()!, f.GetProperty("model").GetString()!, f.GetProperty("effort").GetString()!);
+        }
+        Assert.Equal(("", "", ""), Settings());
+
+        var applied = Line("""{"type":"control_response","response":{"subtype":"success","request_id":"sd-settings","response":{"effective":{"hooks":{}},"applied":{"model":"claude-haiku-5-5","effort":"medium"}}}}""");
+        Assert.True(ChatStream.AnswersTheHost(applied));
+        var change = chat.Apply(applied, record, T0);
+        Assert.Equal((true, false, true, false), (change.Record, change.Catalog, change.Settings, change.Refresh));
+        Assert.Equal(("", "claude-haiku-5-5", "medium"), Settings());
+        Assert.Equal("claude-haiku-5-5", record.Model);
+
+        // A viewer switched the mode: the answer names it, and the host asks what else is in force.
+        var set = Line("""{"type":"control_response","response":{"subtype":"success","request_id":"sd-set-7","response":{"mode":"plan"}}}""");
+        Assert.False(ChatStream.AnswersTheHost(set));
+        change = chat.Apply(set, record, T0);
+        Assert.Equal((true, true), (change.Settings, change.Refresh));
+        Assert.Equal("plan", Settings().Mode);
+
+        // A refused switch changes nothing and asks nothing.
+        change = chat.Apply(Line("""{"type":"control_response","response":{"subtype":"error","request_id":"sd-set-8","error":"no such model"}}"""), record, T0);
+        Assert.Equal((false, false), (change.Settings, change.Refresh));
+
+        // The CLI says "Set model to …" as if it had been typed; that is no turn.
+        change = chat.Apply(Line("""{"type":"user","isReplay":true,"message":{"role":"user","content":"<local-command-stdout>Set model to `sonnet`</local-command-stdout>"}}"""), record, T0);
+        Assert.False(change.Record);
+        Assert.Equal("idle", record.AgentStatus);
+
+        // Each turn says its model and mode as it starts, and its end is when a typed /model or /effort is picked up.
+        chat.Apply(Line("""{"type":"system","subtype":"init","session_id":"s","model":"claude-sonnet-5-5","permissionMode":"acceptEdits"}"""), record, T0);
+        Assert.Equal(("acceptEdits", "claude-sonnet-5-5", "medium"), Settings());
+        Assert.True(chat.Apply(Line(Result), record, T0).Refresh);
+    }
+
+    [Fact]
+    public void An_images_bytes_stay_out_of_the_scrollback_and_everything_else_is_left_as_it_was()
+    {
+        string data = new string('A', 5000);
+        var typed = Encoding.UTF8.GetBytes("""{"type":"user","isReplay":true,"message":{"role":"user","content":[{"type":"text","text":"what is this \"base64\" thing"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"DATA"}}]}}""".Replace("DATA", data));
+        var stripped = Line(Encoding.UTF8.GetString(ChatStream.WithoutImageData(typed)));
+        var content = stripped.GetProperty("message").GetProperty("content");
+        Assert.Equal("what is this \"base64\" thing", content[0].GetProperty("text").GetString());
+        Assert.Equal(("", 5000, "image/png"), (content[1].GetProperty("source").GetProperty("data").GetString(), content[1].GetProperty("source").GetProperty("omitted").GetInt32(), content[1].GetProperty("source").GetProperty("media_type").GetString()));
+        Assert.True(stripped.GetProperty("isReplay").GetBoolean());
+        Assert.True(ChatStream.WithoutImageData(typed).Length < 400);
+
+        // An image a tool returned sits deeper; it goes the same way.
+        var returned = Encoding.UTF8.GetBytes("""{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":[{"type":"image","source":{"type":"base64","media_type":"image/jpeg","data":"DATA"}}]}]}}""".Replace("DATA", data));
+        Assert.DoesNotContain(data, Encoding.UTF8.GetString(ChatStream.WithoutImageData(returned)));
+
+        var plain = Encoding.UTF8.GetBytes(Echo);
+        Assert.Same(plain, ChatStream.WithoutImageData(plain));
+        var mention = Encoding.UTF8.GetBytes("""{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"the \"base64\" encoding"}]}}""");
+        Assert.Same(mention, ChatStream.WithoutImageData(mention));
+        var broken = Encoding.UTF8.GetBytes("{\"base64\" not json");
+        Assert.Same(broken, ChatStream.WithoutImageData(broken));
+
+        string path = Path.Combine(_dir, "with-image.jsonl");
+        File.WriteAllText(path, Encoding.UTF8.GetString(typed).Replace("\"isReplay\":true,", "") + "\n");
+        var history = ChatStream.History(path, 1 << 20).Single();
+        Assert.True(history.Length < 400);
+        Assert.Equal(5000, Line(Encoding.UTF8.GetString(history)).GetProperty("message").GetProperty("content")[1].GetProperty("source").GetProperty("omitted").GetInt32());
+    }
 
     [Fact]
     public void A_request_nobody_can_answer_is_declined_and_a_permission_request_is_left_for_the_person()

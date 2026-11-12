@@ -259,7 +259,13 @@ internal static class HostProgram
 
         var reader = new Thread(chat ? ChatReadLoop : ReadLoop) { IsBackground = true, Name = "pty-read" };
         reader.Start();
-        if (chat) new Thread(DrainChatErrors) { IsBackground = true, Name = "chat-stderr" }.Start();
+        if (chat)
+        {
+            new Thread(DrainChatErrors) { IsBackground = true, Name = "chat-stderr" }.Start();
+            // What the CLI offers and what is in force, asked once so every viewer can be told without asking itself.
+            WriteChatInput(ChatStream.InitializeLine());
+            WriteChatInput(ChatStream.SettingsLine());
+        }
         if (spec.InitialPrompt.Length > 0)
         {
             if (chat) WriteChatInput(ChatStream.UserLine(spec.InitialPrompt));
@@ -419,8 +425,9 @@ internal static class HostProgram
         while (length > 0 && (raw[length - 1] == (byte)'\r' || raw[length - 1] == (byte)' ')) length--;
         if (length == 0) return;
         byte[] line = length == raw.Length ? raw : raw[..length];
-        bool durable, changed;
-        string? renamed, decline;
+        bool durable, ownAnswer;
+        ChatStream.Change change;
+        string? renamed, decline, catalog = null, settings = null;
         try
         {
             using var doc = JsonDocument.Parse(line);
@@ -428,22 +435,28 @@ internal static class HostProgram
             lock (_record)
             {
                 string title = _record.Title;
-                changed = _chat.Apply(root, _record, DateTime.UtcNow);
+                durable = _chat.Durable(root);
+                change = _chat.Apply(root, _record, DateTime.UtcNow);
                 renamed = _record.Title != title ? _record.Title : null;
+                if (change.Catalog) catalog = _chat.CatalogFrame();
+                if (change.Settings) settings = _chat.SettingsFrame();
             }
-            durable = ChatStream.Durable(root);
             decline = ChatStream.Decline(root);
+            ownAnswer = ChatStream.AnswersTheHost(root);
         }
         catch (JsonException)
         {
             AppendChatLine(ChatStream.HostLine("output", Encoding.UTF8.GetString(line)));
             return;
         }
-        if (changed) WriteRecord();
+        if (change.Record) WriteRecord();
         if (renamed != null) Broadcast(true, Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { type = "title", title = renamed })));
-        if (durable) AppendChatLine(line);
-        else Broadcast(true, ChatStream.LiveFrame(line));
+        if (catalog != null) Broadcast(true, Encoding.UTF8.GetBytes(catalog));
+        if (settings != null) Broadcast(true, Encoding.UTF8.GetBytes(settings));
+        if (durable) AppendChatLine(ChatStream.WithoutImageData(line));
+        else if (!ownAnswer) Broadcast(true, ChatStream.LiveFrame(line));
         if (decline != null) WriteChatInput(decline);
+        if (change.Refresh) WriteChatInput(ChatStream.SettingsLine());
     }
 
     static void WriteChatInput(string line)
@@ -583,6 +596,13 @@ internal static class HostProgram
                     : SnapshotJson(start, end, _record.Title, _pty.Cols, _pty.Rows);
                 client.Out.Writer.TryWrite((true, Encoding.UTF8.GetBytes(snapshot)));
                 if (data.Length > 0) client.Out.Writer.TryWrite((false, data));
+                if (_pipe != null)
+                {
+                    string catalog, settings;
+                    lock (_record) { catalog = _chat.CatalogFrame(); settings = _chat.SettingsFrame(); }
+                    if (catalog.Length > 0) client.Out.Writer.TryWrite((true, Encoding.UTF8.GetBytes(catalog)));
+                    client.Out.Writer.TryWrite((true, Encoding.UTF8.GetBytes(settings)));
+                }
                 Clients.Add(client);
             }
         }

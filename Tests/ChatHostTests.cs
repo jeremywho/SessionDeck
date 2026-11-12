@@ -29,23 +29,33 @@ public class ChatHostTests : IDisposable
 
     // Each message gets a turn: the session line, the message echoed, a token delta, a reply, the result.
     // "ask" stops at a permission request, "mcp" at a request only the host can answer, "quit" ends the process.
+    // It answers the host's initialize and get_settings, and takes an effort change.
     const string FakeCli = """
         [Console]::InputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
         $out = [Console]::Out
         $out.WriteLine('a line that is not part of the protocol')
+        $effort = 'high'
         while ($null -ne ($line = [Console]::In.ReadLine())) {
             $m = $line | ConvertFrom-Json
             if ($m.type -eq 'user') {
                 $text = $m.message.content
-                $out.WriteLine('{"type":"system","subtype":"init","session_id":"live-session","model":"fake-model"}')
+                $content = $text
+                if ($text -isnot [string]) { $text = 'an image' }
+                $out.WriteLine('{"type":"system","subtype":"init","session_id":"live-session","model":"fake-model","permissionMode":"default"}')
                 if ($text -like 'h*') { $out.WriteLine('{"type":"system","subtype":"session_title_changed","title":"named by the cli"}') }
-                $out.WriteLine((@{ type = 'user'; isReplay = $true; message = @{ role = 'user'; content = $text } } | ConvertTo-Json -Compress -Depth 6))
+                $out.WriteLine((@{ type = 'user'; isReplay = $true; message = @{ role = 'user'; content = $content } } | ConvertTo-Json -Compress -Depth 8))
                 if ($text -eq 'quit') { [Console]::Error.WriteLine('fake cli: told to quit'); exit 3 }
                 if ($text -eq 'ask') { $out.WriteLine('{"type":"control_request","request_id":"r1","request":{"subtype":"can_use_tool","tool_name":"Write","input":{},"tool_use_id":"t1"}}'); continue }
                 if ($text -eq 'mcp') { $out.WriteLine('{"type":"control_request","request_id":"m1","request":{"subtype":"mcp_message"}}'); continue }
                 $out.WriteLine('{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"echo"}}}')
                 $out.WriteLine((@{ type = 'assistant'; message = @{ role = 'assistant'; content = @(@{ type = 'text'; text = "echo: $text" }) } } | ConvertTo-Json -Compress -Depth 6))
                 $out.WriteLine('{"type":"result","subtype":"success","is_error":false}')
+            }
+            elseif ($m.type -eq 'control_request') {
+                $id = $m.request_id
+                if ($m.request.subtype -eq 'initialize') { $out.WriteLine('{"type":"control_response","response":{"subtype":"success","request_id":"' + $id + '","response":{"current_permission_mode":"default","models":[{"value":"fake","resolvedModel":"fake-model","displayName":"Fake","description":"","supportedEffortLevels":["low","high"]}],"commands":[{"name":"compact","description":"Summarize","argumentHint":""}]}}}') }
+                elseif ($m.request.subtype -eq 'get_settings') { $out.WriteLine('{"type":"control_response","response":{"subtype":"success","request_id":"' + $id + '","response":{"applied":{"model":"fake-model","effort":"' + $effort + '"}}}}') }
+                elseif ($m.request.subtype -eq 'apply_flag_settings') { $effort = $m.request.settings.effortLevel; $out.WriteLine('{"type":"control_response","response":{"subtype":"success","request_id":"' + $id + '"}}') }
             }
             elseif ($m.type -eq 'control_response') {
                 $out.WriteLine($line)
@@ -91,6 +101,12 @@ public class ChatHostTests : IDisposable
         Assert.Equal("said before the restart", first[0].GetProperty("message").GetProperty("content").GetString());
         Assert.Equal("a line that is not part of the protocol", first[2].GetProperty("text").GetString());
 
+        await viewer.Pump(() => viewer.Catalog.HasValue && viewer.Settings.Any(f => f.GetProperty("effort").GetString() == "high"));
+        Assert.Equal("fake", viewer.Catalog!.Value.GetProperty("models")[0].GetProperty("value").GetString());
+        Assert.Equal("compact", viewer.Catalog.Value.GetProperty("commands")[0].GetProperty("name").GetString());
+        Assert.Equal(("default", "fake-model", "high"), SettingsOf(viewer));
+        Assert.Empty(viewer.Live);
+
         await viewer.Send(ChatStream.UserLine("héllo wörld"));
         var turn = await viewer.Until(l => Type(l) == "result");
         Assert.Equal(new[] { "user", "assistant", "result" }, turn.Select(Type));
@@ -122,9 +138,27 @@ public class ChatHostTests : IDisposable
         {
             var replay = await late.Until(l => Type(l) == "result" && late.Lines.Count(x => Type(x) == "result") == 3);
             Assert.Equal(viewer.Lines.Select(l => l.GetRawText()), replay.Select(l => l.GetRawText()));
-            Assert.Empty(late.Live);
             Assert.DoesNotContain(replay, l => Type(l) == "stream_event" || Type(l) == "system");
+            // What the CLI offers and what is in force reach a viewer that was not there when the CLI said so.
+            await late.Pump(() => late.Catalog.HasValue && late.Settings.Count > 0);
+            Assert.Equal("fake", late.Catalog!.Value.GetProperty("models")[0].GetProperty("value").GetString());
+            Assert.Equal(("default", "fake-model", "high"), SettingsOf(late));
+            Assert.Empty(late.Live);
         }
+
+        // A viewer changes the effort: the CLI's bare "done" is followed by the host asking what is in force and telling every viewer.
+        await viewer.Send("""{"type":"control_request","request_id":"sd-set-1","request":{"subtype":"apply_flag_settings","settings":{"effortLevel":"low"}}}""");
+        await viewer.Pump(() => viewer.Settings.Any(f => f.GetProperty("effort").GetString() == "low"));
+        Assert.Equal(("default", "fake-model", "low"), SettingsOf(viewer));
+        Assert.Equal("sd-set-1", viewer.Live[^1].GetProperty("response").GetProperty("request_id").GetString());
+
+        // A pasted image goes to the CLI whole and into the scrollback without its bytes.
+        string image = new string('Q', 20000);
+        await viewer.Send("""{"type":"user","message":{"role":"user","content":[{"type":"text","text":"look"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"DATA"}}]},"parent_tool_use_id":null,"session_id":""}""".Replace("DATA", image));
+        var pasted = await viewer.Until(l => Type(l) == "result");
+        var source = pasted[0].GetProperty("message").GetProperty("content")[1].GetProperty("source");
+        Assert.Equal(("", 20000), (source.GetProperty("data").GetString(), source.GetProperty("omitted").GetInt32()));
+        Assert.Equal("echo: an image", pasted[1].GetProperty("message").GetProperty("content")[0].GetProperty("text").GetString());
 
         await viewer.Send(ChatStream.UserLine("quit"));
         var last = await viewer.Until(l => Type(l) == "host");
@@ -151,6 +185,9 @@ public class ChatHostTests : IDisposable
 
     static string Type(JsonElement line) => line.GetProperty("type").GetString() ?? "";
 
+    static (string? Mode, string? Model, string? Effort) SettingsOf(Viewer v) =>
+        (v.Settings[^1].GetProperty("mode").GetString(), v.Settings[^1].GetProperty("model").GetString(), v.Settings[^1].GetProperty("effort").GetString());
+
     /// <summary>A viewer as the deck page is one: scrollback bytes split into lines, live lines kept apart.</summary>
     sealed class Viewer : IDisposable
     {
@@ -163,6 +200,14 @@ public class ChatHostTests : IDisposable
         public List<JsonElement> Lines { get; } = new();
         public List<JsonElement> Live { get; } = new();
         public List<string> Titles { get; } = new();
+        public JsonElement? Catalog { get; private set; }
+        public List<JsonElement> Settings { get; } = new();
+
+        /// <summary>Read frames until <paramref name="done"/> holds.</summary>
+        public async Task Pump(Func<bool> done)
+        {
+            while (!done()) await Read();
+        }
 
         public async Task<int> Exited()
         {
@@ -211,6 +256,8 @@ public class ChatHostTests : IDisposable
                     case "snapshot": Snapshot = frame; break;
                     case "live": Live.Add(frame.GetProperty("line").Clone()); break;
                     case "title": Titles.Add(frame.GetProperty("title").GetString() ?? ""); break;
+                    case "catalog": Catalog = frame; break;
+                    case "settings": Settings.Add(frame); break;
                     case "exit": _exit.TrySetResult(frame.GetProperty("code").GetInt32()); break;
                 }
                 return;

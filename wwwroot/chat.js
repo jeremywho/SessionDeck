@@ -5,6 +5,7 @@
   'use strict';
 
   const INTERRUPTED = '[Request interrupted by user';
+  const SET_PREFIX = 'sd-set-';
 
   function textOf(content) {
     if (typeof content === 'string') return content;
@@ -23,7 +24,11 @@
   }
 
   class ChatModel {
-    constructor() { this.reset(); }
+    constructor() {
+      this.catalog = { models: [], commands: [] };
+      this.settings = { mode: '', model: '', effort: '' };
+      this.reset();
+    }
 
     reset() {
       this.items = [];
@@ -53,10 +58,23 @@
     }
 
     // A message typed here, shown at once and matched with the session's own copy when that arrives.
-    sent(text) {
-      const item = this.add({ kind: 'user', text, pending: true });
+    // `images` are this viewer's own previews of what was attached; the session's copy carries none.
+    sent(text, images) {
+      const item = this.add({ kind: 'user', text, images: images || [], pending: true });
       this.pending.push(item);
       return item;
+    }
+
+    setCatalog(frame) {
+      this.catalog = {
+        models: Array.isArray(frame.models) ? frame.models : [],
+        commands: Array.isArray(frame.commands) ? frame.commands : [],
+      };
+    }
+
+    setSettings(frame) {
+      this.settings = { mode: frame.mode || '', model: frame.model || '', effort: frame.effort || '' };
+      if (this.settings.model) this.model = this.settings.model;
     }
 
     // A line kept in the host's scrollback: the conversation itself.
@@ -80,6 +98,12 @@
       if (line.type === 'system' && line.subtype === 'init') {
         if (line.model) this.model = line.model;
         this.busy = true;
+        return;
+      }
+      if (line.type === 'control_response') {
+        // A setting the CLI refused to change: said once, here, to whoever is watching.
+        const r = line.response || {};
+        if (r.subtype === 'error' && String(r.request_id || '').startsWith(SET_PREFIX)) this.add({ kind: 'note', tone: 'error', text: String(r.error || 'The setting was not changed') });
         return;
       }
       if (line.type !== 'stream_event' || line.parent_tool_use_id) return;
@@ -115,23 +139,30 @@
         if (handled) return;
       }
       const text = textOf(content);
-      if (!text) return;
-      if (text.trim().startsWith(INTERRUPTED)) { this.settleDrafts(); this.add({ kind: 'note', tone: 'plain', text: 'Interrupted' }); return; }
+      const imageCount = Array.isArray(content) ? content.filter(b => b && b.type === 'image').length : 0;
+      if (!text && !imageCount) return;
+      const lead = text.trim();
+      if (lead.startsWith(INTERRUPTED)) { this.settleDrafts(); this.add({ kind: 'note', tone: 'plain', text: 'Interrupted' }); return; }
       if (line.compactSummary) { this.add({ kind: 'note', tone: 'plain', text: 'Earlier conversation was summarized', detail: text }); return; }
+      // What a local command printed ("Set model to …") comes back as if it had been typed: it is a note. Other markup is for the model alone.
+      const printed = /^<local-command-stdout>([\s\S]*?)<\/local-command-stdout>\s*$/.exec(lead);
+      if (printed) { if (printed[1].trim()) this.add({ kind: 'note', tone: 'plain', text: printed[1].trim() }); return; }
+      if (lead.startsWith('<')) return;
       if (!line.isReplay && !line.history) {
-        // Said by the CLI on the person's behalf (a finished background task): a note, unless it is markup meant for the model alone.
-        if (!text.trim().startsWith('<')) this.add({ kind: 'note', tone: 'plain', text: text.length > 300 ? text.slice(0, 300) + '…' : text });
+        // Said by the CLI on the person's behalf (a finished background task).
+        this.add({ kind: 'note', tone: 'plain', text: text.length > 300 ? text.slice(0, 300) + '…' : text });
         return;
       }
       if (!line.history) this.busy = true;
-      const i = this.pending.findIndex(p => p.text === text);
+      const i = this.pending.findIndex(p => p.text === text && (p.images || []).length === imageCount);
       if (i >= 0) {
         const item = this.pending.splice(i, 1)[0];
         item.pending = false;
+        item.confirmed = true;
         this.touch(item);
         return;
       }
-      this.add({ kind: 'user', text, history: !!line.history });
+      this.add({ kind: 'user', text, imageCount, history: !!line.history });
     }
 
     assistant(line) {
@@ -213,6 +244,10 @@
     result(line) {
       this.busy = false;
       this.settleDrafts();
+      // A local command (/context, /effort) is never echoed, so its bubble has nothing to be matched with: the
+      // end of the turn settles it. It stays matchable for one more turn, in case its echo was only late.
+      this.pending = this.pending.filter(p => !p.settled);
+      for (const p of this.pending) { p.pending = false; p.settled = true; this.touch(p); }
       for (const [id, req] of this.requests) if (req.open) this.close(id, 'cancelled');
       for (const tool of this.tools.values()) if (!tool.result && !tool.stopped) { tool.stopped = true; this.touch(tool); }
       if (line.is_error && line.subtype !== 'error_during_execution') {
@@ -246,7 +281,12 @@
   // ---- what a viewer sends ----
 
   const Wire = {
-    user: text => JSON.stringify({ type: 'user', message: { role: 'user', content: text }, parent_tool_use_id: null, session_id: '' }),
+    // `content` is the text, or text and image blocks when something was attached.
+    user: content => JSON.stringify({ type: 'user', message: { role: 'user', content }, parent_tool_use_id: null, session_id: '' }),
+    content: (text, images) => !images || !images.length ? text
+      : (text ? [{ type: 'text', text }] : []).concat(images.map(i => ({ type: 'image', source: { type: 'base64', media_type: i.mediaType, data: i.data } }))),
+    // A change to the running session: set_model {model}, set_permission_mode {mode}, apply_flag_settings {settings:{effortLevel}}.
+    set: (subtype, fields) => JSON.stringify({ type: 'control_request', request_id: SET_PREFIX + Date.now().toString(36) + Math.random().toString(36).slice(2, 8), request: Object.assign({ subtype }, fields) }),
     interrupt: () => JSON.stringify({ type: 'control_request', request_id: 'interrupt-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8), request: { subtype: 'interrupt' } }),
     allow: (request, answers) => JSON.stringify({
       type: 'control_response',
@@ -291,7 +331,33 @@
     return s.length > 140 ? s.slice(0, 139) + '…' : s;
   }
 
-  const api = { ChatModel, LineReader, Wire, toolBrief, textOf };
+  // What follows a leading "/" while the message is still that one word; null when the message is not a command being typed.
+  function commandQuery(message) {
+    const m = /^\/(\S*)$/.exec(message);
+    return m ? m[1] : null;
+  }
+
+  // The commands whose name holds `query`: the one it names exactly, then those that start with it, then the rest, each in the CLI's order.
+  function matchCommands(commands, query) {
+    const q = query.toLowerCase();
+    const rank = c => { const n = c.name.toLowerCase(); return n === q ? 0 : n.startsWith(q) ? 1 : 2; };
+    return commands.filter(c => c.name.toLowerCase().includes(q))
+      .map((c, i) => ({ c, i }))
+      .sort((a, b) => rank(a.c) - rank(b.c) || a.i - b.i)
+      .map(x => x.c);
+  }
+
+  // Which entry of the model list is the one in force. The session reports the full model id; the list is keyed by
+  // alias, and two aliases can name the same model, so the one last picked here wins, then a named alias over "default".
+  function modelInForce(models, model, picked) {
+    const same = models.filter(m => m.value === model || m.resolved === model);
+    return same.find(m => m.value === picked) || same.find(m => m.value === model) || same.find(m => m.value !== 'default') || same[0] || null;
+  }
+
+  const MODES = [['default', 'Ask permissions'], ['acceptEdits', 'Accept edits'], ['plan', 'Plan mode'], ['bypassPermissions', 'Bypass permissions']];
+  const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+
+  const api = { ChatModel, LineReader, Wire, toolBrief, textOf, commandQuery, matchCommands, modelInForce };
   if (typeof module !== 'undefined' && module.exports) { module.exports = api; return; }
 
   // ================= the page side =================
@@ -365,23 +431,38 @@
     const scroll = h('div', 'chat-scroll');
     const column = h('div', 'chat-column');
     const empty = h('div', 'chat-empty', 'Type a message to start.');
-    column.appendChild(empty);
+    const working = h('div', 'working', 'Working…');
+    working.hidden = true;
+    column.append(empty, working);
     scroll.appendChild(column);
+
+    // The composer is one card: what is attached, the message, and under it the session's settings and the send button.
     const compose = h('div', 'chat-compose');
-    const box = h('div', 'chat-box');
+    const card = h('div', 'composer');
+    const menu = h('div', 'slash-menu');
+    menu.setAttribute('role', 'listbox');
+    menu.setAttribute('aria-label', 'Commands');
+    menu.hidden = true;
+    const shelf = h('div', 'attachments');
+    shelf.hidden = true;
     const input = document.createElement('textarea');
     input.rows = 1;
     input.placeholder = 'Message Claude';
     input.spellcheck = false;
-    const action = h('button', 'chat-send', 'Send');
+    const row = h('div', 'composer-row');
+    const pick = label => { const s = document.createElement('select'); s.className = 'pick'; s.title = label; s.setAttribute('aria-label', label); s.hidden = true; return s; };
+    const modelPick = pick('Model'), effortPick = pick('Effort'), modePick = pick('Permission mode');
+    const stateText = h('span', 'composer-state');
+    const action = h('button', 'chat-send');
     action.type = 'button';
-    box.append(input, action);
-    const status = h('div', 'chat-status');
-    const statusText = h('span', 'chat-state');
-    const statusModel = h('span', 'chat-model');
-    status.append(statusText, statusModel);
-    compose.append(box, status);
+    row.append(modelPick, effortPick, modePick, stateText, action);
+    card.append(menu, shelf, input, row);
+    compose.appendChild(card);
     el.append(scroll, compose);
+
+    const ARROW = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M8 13V3.5M3.5 8 8 3.5 12.5 8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    const SQUARE = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1.5" fill="currentColor"/></svg>';
+    let shots = [], nextShot = 1, preparing = false, pickedModel = '', drawnCatalog = null, menuItems = [], menuActive = 0, menuClosedFor = null;
 
     const sendLine = line => { if (ws && ws.readyState === WebSocket.OPEN) { ws.send(JSON.stringify({ type: 'input', data: line + '\n' })); return true; } return false; };
 
@@ -407,7 +488,7 @@
           nodes.set(item, fresh);
           const next = model.items[model.items.indexOf(item) + 1];
           const before = next ? nodes.get(next) : null;
-          if (before && before.parentNode === column) column.insertBefore(fresh, before); else column.appendChild(fresh);
+          column.insertBefore(fresh, before && before.parentNode === column ? before : working);
         } else if (fresh !== node) {
           node.replaceWith(fresh);
           nodes.set(item, fresh);
@@ -422,18 +503,73 @@
     function paintStatus() {
       const state = !connected && model.ended === null ? 'offline' : model.state;
       el.dataset.state = state;
-      statusText.textContent = state === 'busy' ? 'Working…'
+      working.hidden = state !== 'busy';
+      stateText.textContent = preparing ? 'Preparing image…'
         : state === 'waiting' ? 'Answer required'
         : state === 'ended' ? (model.ended === '' ? 'Session ended' : `Session ended (exit ${model.ended})`)
         : state === 'offline' ? 'Reconnecting…'
-        : 'Ready';
-      statusModel.textContent = model.model;
-      const stop = state === 'busy' && !input.value.trim();
-      action.textContent = stop ? 'Stop' : 'Send';
-      action.classList.toggle('stop', stop);
-      action.disabled = state === 'ended' || state === 'offline' || (!stop && !input.value.trim());
+        : '';
+      const nothing = !input.value.trim() && !shots.length;
+      const stop = state === 'busy' && nothing;
+      if (action.classList.contains('stop') !== stop || !action.firstChild) {
+        action.innerHTML = stop ? SQUARE : ARROW;
+        action.classList.toggle('stop', stop);
+        action.setAttribute('aria-label', stop ? 'Stop' : 'Send');
+        action.title = stop ? 'Stop (Esc)' : 'Send (Enter)';
+      }
+      action.disabled = state === 'ended' || state === 'offline' || preparing || (!stop && nothing);
       input.disabled = state === 'ended';
+      paintPickers(state);
     }
+
+    function options(select, pairs, value) {
+      const want = pairs.map(p => p.join('\u0000')).join('\u0001');
+      if (select.dataset.options !== want) {
+        select.dataset.options = want;
+        select.textContent = '';
+        for (const [v, label, title] of pairs) {
+          const o = document.createElement('option');
+          o.value = v;
+          o.textContent = label;
+          if (title) o.title = title;
+          select.appendChild(o);
+        }
+      }
+      if (document.activeElement !== select) select.value = value;
+    }
+
+    // The session's model, effort and permission mode, as the CLI lists and reports them. Nothing shows until it has:
+    // a host from before these were sent has no list, and a picker that cannot say what is in force is worse than none.
+    function paintPickers(state) {
+      const { models } = model.catalog;
+      const s = model.settings;
+      const live = models.length > 0 && state !== 'ended';
+      const inForce = live ? modelInForce(models, s.model, pickedModel) : null;
+      modelPick.hidden = !live || !s.model;
+      effortPick.hidden = !live || !s.effort;
+      modePick.hidden = !live || !s.mode;
+      for (const p of [modelPick, effortPick, modePick]) p.disabled = state === 'offline';
+      if (!live) return;
+      const modelPairs = models.map(m => [m.value, m.name || m.value, m.description || '']);
+      if (!inForce && s.model) modelPairs.push([s.model, s.model, '']);
+      options(modelPick, modelPairs, inForce ? inForce.value : s.model);
+      const levels = inForce && inForce.efforts && inForce.efforts.length ? inForce.efforts.slice() : EFFORTS.slice();
+      if (s.effort && !levels.includes(s.effort)) levels.push(s.effort);
+      options(effortPick, levels.map(l => [l, l, 'Effort']), s.effort);
+      const modePairs = MODES.map(m => m.slice());
+      if (s.mode && !MODES.some(m => m[0] === s.mode)) modePairs.push([s.mode, s.mode]);
+      options(modePick, modePairs, s.mode);
+    }
+
+    function change(select, line) {
+      if (!sendLine(line)) paintStatus();
+      input.focus();
+    }
+    modelPick.addEventListener('change', () => { pickedModel = modelPick.value; change(modelPick, Wire.set('set_model', { model: modelPick.value })); });
+    effortPick.addEventListener('change', () => change(effortPick, Wire.set('apply_flag_settings', { settings: { effortLevel: effortPick.value } })));
+    modePick.addEventListener('change', () => change(modePick, Wire.set('set_permission_mode', { mode: modePick.value })));
+    // Losing focus without a choice puts back what is in force; a choice is put back by the session's own answer.
+    for (const p of [modelPick, effortPick, modePick]) p.addEventListener('blur', () => schedule());
 
     // Builds the element for an item, or updates the one it has and returns it.
     function render(item, node) {
@@ -441,7 +577,15 @@
         case 'user': {
           node = node || h('div', 'msg user');
           node.classList.toggle('pending', !!item.pending);
-          node.textContent = item.text;
+          node.textContent = '';
+          if (item.text) node.appendChild(h('div', 'user-text', item.text));
+          if (item.images && item.images.length) {
+            const strip = h('div', 'user-images');
+            for (const url of item.images) { const img = document.createElement('img'); img.src = url; img.alt = 'Attached image'; strip.appendChild(img); }
+            node.appendChild(strip);
+          } else if (item.imageCount) {
+            node.appendChild(h('div', 'user-attached', item.imageCount === 1 ? '1 image attached' : `${item.imageCount} images attached`));
+          }
           return node;
         }
         case 'assistant': {
@@ -612,16 +756,27 @@
 
     function grow() {
       input.style.height = 'auto';
-      // scrollHeight leaves out the border, which the box's own height (border-box) includes.
-      input.style.height = Math.min(input.scrollHeight + 2, Math.max(120, el.clientHeight * 0.4)) + 'px';
+      input.style.height = Math.min(input.scrollHeight, Math.max(120, el.clientHeight * 0.4)) + 'px';
     }
 
-    function submit() {
+    async function submit() {
       const text = input.value.trim();
-      if (!text) return;
-      if (!sendLine(Wire.user(text))) return;
-      model.sent(text);
+      const taken = shots.filter(s => !s.error);
+      if ((!text && !taken.length) || preparing) return;
+      let images = [];
+      if (taken.length) {
+        preparing = true;
+        paintStatus();
+        try { images = await Promise.all(taken.map(s => s.ready)); }
+        catch { preparing = false; paintShelf(); paintStatus(); return; }
+        preparing = false;
+      }
+      if (!sendLine(Wire.user(Wire.content(text, images)))) { paintStatus(); return; }
+      model.sent(text, taken.map(s => s.url));
+      shots = [];
       input.value = '';
+      paintShelf();
+      paintMenu();
       grow();
       schedule();
       scroll.scrollTop = scroll.scrollHeight;
@@ -629,12 +784,136 @@
 
     function interrupt() { if (model.state === 'busy' || model.state === 'waiting') sendLine(Wire.interrupt()); }
 
-    input.addEventListener('input', () => { grow(); paintStatus(); });
+    // ---- attached images ----
+
+    // The image as the session gets it: as pasted when it is a kind and size the API takes, else redrawn smaller.
+    async function prepare(file) {
+      const MAX_SIDE = 2000, MAX_BYTES = 3.5 * 1024 * 1024;
+      let blob = file;
+      let type = file.type === 'image/jpg' ? 'image/jpeg' : file.type;
+      const bitmap = await createImageBitmap(file);
+      const scale = Math.min(1, MAX_SIDE / Math.max(bitmap.width, bitmap.height));
+      if (scale < 1 || file.size > MAX_BYTES || !['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(type)) {
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+        canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+        canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+        blob = await new Promise(done => canvas.toBlob(done, 'image/png'));
+        type = 'image/png';
+        if (blob.size > MAX_BYTES) { blob = await new Promise(done => canvas.toBlob(done, 'image/jpeg', 0.85)); type = 'image/jpeg'; }
+      }
+      bitmap.close();
+      const data = await new Promise((done, fail) => {
+        const r = new FileReader();
+        r.onload = () => done(String(r.result).split(',')[1] || '');
+        r.onerror = () => fail(r.error);
+        r.readAsDataURL(blob);
+      });
+      return { mediaType: type, data };
+    }
+
+    function attach(files) {
+      for (const file of files) {
+        const shot = { id: nextShot++, url: URL.createObjectURL(file), error: '' };
+        shot.ready = prepare(file);
+        shot.ready.catch(() => { shot.error = 'This image could not be read'; paintShelf(); paintStatus(); });
+        shots.push(shot);
+      }
+      paintShelf();
+      paintStatus();
+    }
+
+    function paintShelf() {
+      shelf.textContent = '';
+      shelf.hidden = shots.length === 0;
+      for (const shot of shots) {
+        const chip = h('div', 'shot' + (shot.error ? ' failed' : ''));
+        const img = document.createElement('img');
+        img.src = shot.url;
+        img.alt = 'Image to send';
+        const remove = h('button', 'shot-remove', '×');
+        remove.type = 'button';
+        remove.setAttribute('aria-label', 'Remove image');
+        remove.title = 'Remove image';
+        remove.addEventListener('click', () => { shots = shots.filter(s => s !== shot); URL.revokeObjectURL(shot.url); paintShelf(); paintStatus(); input.focus(); });
+        chip.append(img, remove);
+        if (shot.error) chip.appendChild(h('span', 'shot-error', shot.error));
+        shelf.appendChild(chip);
+      }
+    }
+
+    // A paste that carries text is text, even when the clipboard also holds a picture of it (a copy from a document does that).
+    input.addEventListener('paste', ev => {
+      const data = ev.clipboardData;
+      if (!data || Array.from(data.types).includes('text/plain')) return;
+      const files = Array.from(data.files).filter(f => f.type.startsWith('image/'));
+      if (!files.length) return;
+      ev.preventDefault();
+      attach(files);
+    });
+
+    // ---- the command menu ----
+
+    function paintMenu() {
+      const query = commandQuery(input.value);
+      menuItems = query === null || menuClosedFor === input.value ? [] : matchCommands(model.catalog.commands, query);
+      if (menuClosedFor !== null && menuClosedFor !== input.value) menuClosedFor = null;
+      if (menuActive >= menuItems.length) menuActive = 0;
+      menu.hidden = menuItems.length === 0;
+      menu.textContent = '';
+      menuItems.forEach((command, i) => {
+        const option = h('button', 'slash-option' + (i === menuActive ? ' active' : ''));
+        option.type = 'button';
+        option.tabIndex = -1;
+        option.setAttribute('role', 'option');
+        option.setAttribute('aria-selected', String(i === menuActive));
+        const lead = h('span', 'slash-lead');
+        lead.appendChild(h('span', 'slash-name', '/' + command.name));
+        if (command.hint) lead.appendChild(h('span', 'slash-hint', command.hint));
+        option.appendChild(lead);
+        option.appendChild(h('span', 'slash-description', command.description || ''));
+        if (command.description) option.title = command.description;
+        // The message box keeps the focus: the menu is steered from it.
+        option.addEventListener('mousedown', ev => ev.preventDefault());
+        option.addEventListener('click', () => choose(command, true));
+        menu.appendChild(option);
+      });
+      const active = menu.children[menuActive];
+      if (active) active.scrollIntoView({ block: 'nearest' });
+    }
+
+    // Tab completes the name; Enter runs a command that takes nothing more, and completes one that does.
+    function choose(command, run) {
+      if (run && !command.hint) { input.value = '/' + command.name; submit(); return; }
+      input.value = '/' + command.name + ' ';
+      input.setSelectionRange(input.value.length, input.value.length);
+      grow();
+      paintMenu();
+      paintStatus();
+      input.focus();
+    }
+
+    function menuKey(ev) {
+      if (menu.hidden || ev.isComposing) return false;
+      if (ev.key === 'ArrowDown') menuActive = (menuActive + 1) % menuItems.length;
+      else if (ev.key === 'ArrowUp') menuActive = (menuActive - 1 + menuItems.length) % menuItems.length;
+      else if (ev.key === 'Tab' && !ev.shiftKey) { choose(menuItems[menuActive], false); ev.preventDefault(); return true; }
+      else if (ev.key === 'Enter' && !ev.shiftKey) { choose(menuItems[menuActive], true); ev.preventDefault(); return true; }
+      else if (ev.key === 'Escape') menuClosedFor = input.value;
+      else return false;
+      ev.preventDefault();
+      paintMenu();
+      return true;
+    }
+
+    input.addEventListener('input', () => { menuActive = 0; grow(); paintMenu(); paintStatus(); });
     input.addEventListener('keydown', ev => {
+      if (menuKey(ev)) return;
       if (ev.key === 'Enter' && !ev.shiftKey && !ev.ctrlKey && !ev.altKey && !ev.isComposing) { ev.preventDefault(); submit(); }
       else if (ev.key === 'Escape') { ev.preventDefault(); interrupt(); }
     });
     input.addEventListener('focus', () => { if (opts.onFocus) opts.onFocus(); });
+    input.addEventListener('blur', () => { if (!menu.hidden) { menuClosedFor = input.value; paintMenu(); } });
     action.addEventListener('click', () => { if (action.classList.contains('stop')) interrupt(); else submit(); input.focus(); });
     el.addEventListener('keydown', ev => {
       // F13 to F16 move through the session list, as they do from a terminal pane.
@@ -660,6 +939,8 @@
             seq = msg.start;
             if (msg.title) post({ type: 'title', id, title: msg.title });
           } else if (msg.type === 'live') model.live(msg.line);
+          else if (msg.type === 'catalog') { model.setCatalog(msg); paintMenu(); }
+          else if (msg.type === 'settings') model.setSettings(msg);
           else if (msg.type === 'title') post({ type: 'title', id, title: msg.title });
           else if (msg.type === 'exit') { model.exited(msg.code); closed = true; post({ type: 'exit', id, code: msg.code }); }
           schedule();
@@ -709,6 +990,8 @@
         closed = true;
         if (frame) cancelAnimationFrame(frame);
         try { if (ws) ws.close(); } catch { }
+        for (const shot of shots) URL.revokeObjectURL(shot.url);
+        for (const item of model.items) for (const url of item.images || []) URL.revokeObjectURL(url);
       },
     };
   }
