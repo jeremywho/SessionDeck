@@ -230,6 +230,23 @@ public class ChatStreamTests : IDisposable
     }
 
     [Fact]
+    public void A_new_sessions_transcript_is_expected_under_its_folders_slug_and_an_existing_one_is_found_there()
+    {
+        string projects = Path.Combine(_dir, "projects");
+        string expected = Path.Combine(projects, "C--Work-my-repo", "abc-123.jsonl");
+        Assert.Equal(expected, SessionScanner.TranscriptPathFor("abc-123", @"C:\Work\my repo", projects));
+        Directory.CreateDirectory(Path.GetDirectoryName(expected)!);
+        File.WriteAllText(expected, "{}");
+        Assert.Equal(expected, SessionScanner.TranscriptPathFor("abc-123", @"C:\Work\my repo", projects));
+        Assert.Equal("", SessionScanner.TranscriptPathFor("", @"C:\Work\my repo", projects));
+
+        // A transcript that sits under another folder's slug is not hunted for: starting a session must not walk the tree.
+        Directory.CreateDirectory(Path.Combine(projects, "elsewhere"));
+        File.WriteAllText(Path.Combine(projects, "elsewhere", "moved-9.jsonl"), "{}");
+        Assert.Equal(Path.Combine(projects, "C--Work-my-repo", "moved-9.jsonl"), SessionScanner.TranscriptPathFor("moved-9", @"C:\Work\my repo", projects));
+    }
+
+    [Fact]
     public void A_chat_session_is_listed_for_a_phone_but_not_offered_as_a_terminal()
     {
         HostRecord Host(string id, string kind) => new() { Id = id, SessionId = "s-" + id, Provider = "Claude", AgentStatus = "idle", StatusAt = T0, Protocol = 4, Title = id, StartedAt = T0.AddHours(-1), Kind = kind };

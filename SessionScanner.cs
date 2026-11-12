@@ -60,8 +60,9 @@ internal static class SessionScanner
         var liveIds = new HashSet<string>(list.ConvertAll(x => x.SessionId));
         foreach (var key in new List<string>(_detailCache.Keys))
             if (!liveIds.Contains(key)) _detailCache.Remove(key);
-        foreach (var key in new List<string>(_fallback.Keys))
-            if (!liveIds.Contains(key)) _fallback.Remove(key);
+        lock (_fallback)
+            foreach (var key in new List<string>(_fallback.Keys))
+                if (!liveIds.Contains(key)) _fallback.Remove(key);
         _subagents.Retain(new HashSet<string>(list.Select(SubagentsDir), StringComparer.OrdinalIgnoreCase));
 
         return list;
@@ -211,12 +212,21 @@ internal static class SessionScanner
         catch { return false; }
     }
 
-    /// <summary>Where the session's transcript is, or where Claude will write it once something has been said.</summary>
-    public static string TranscriptPathFor(string sessionId, string cwd)
+    /// <summary>
+    /// Where the session's transcript is, or where Claude will write it once something has been said.
+    /// Never walks the projects tree: this runs on a click, and a session that has said nothing yet
+    /// would cost the whole walk. A transcript an earlier lookup found elsewhere is still used.
+    /// </summary>
+    public static string TranscriptPathFor(string sessionId, string cwd) => TranscriptPathFor(sessionId, cwd, ProjectsDir);
+
+    internal static string TranscriptPathFor(string sessionId, string cwd, string projectsDir)
     {
         if (sessionId.Length == 0) return "";
-        string found = TranscriptPath(new SessionInfo { SessionId = sessionId, Cwd = cwd });
-        return found.Length > 0 ? found : Path.Combine(ProjectsDir, Regex.Replace(cwd, "[^a-zA-Z0-9]", "-"), sessionId + ".jsonl");
+        string expected = Path.Combine(projectsDir, Regex.Replace(cwd, "[^a-zA-Z0-9]", "-"), sessionId + ".jsonl");
+        if (File.Exists(expected)) return expected;
+        FallbackProbe? earlier;
+        lock (_fallback) _fallback.TryGetValue(sessionId, out earlier);
+        return earlier is { Path.Length: > 0 } && File.Exists(earlier.Path) ? earlier.Path : expected;
     }
 
     static string TranscriptPath(SessionInfo s)
@@ -226,7 +236,9 @@ internal static class SessionScanner
         string p = Path.Combine(ProjectsDir, slug, s.SessionId + ".jsonl");
         if (File.Exists(p)) return p;
 
-        if (_fallback.TryGetValue(s.SessionId, out var prev))
+        FallbackProbe? prev;
+        lock (_fallback) _fallback.TryGetValue(s.SessionId, out prev);
+        if (prev != null)
         {
             if (prev.Path.Length > 0 && File.Exists(prev.Path)) return prev.Path;
             if (DateTime.UtcNow - prev.At < FallbackRetry) return "";   // recent miss — don't re-walk yet
@@ -240,7 +252,7 @@ internal static class SessionScanner
                              .FirstOrDefault() ?? "";
         }
         catch { }
-        _fallback[s.SessionId] = new FallbackProbe(found, DateTime.UtcNow);
+        lock (_fallback) _fallback[s.SessionId] = new FallbackProbe(found, DateTime.UtcNow);
         return found;
     }
 
