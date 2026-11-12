@@ -462,7 +462,7 @@
 
     const ARROW = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M8 13V3.5M3.5 8 8 3.5 12.5 8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
     const SQUARE = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1.5" fill="currentColor"/></svg>';
-    let shots = [], nextShot = 1, preparing = false, pickedModel = '', drawnCatalog = null, menuItems = [], menuActive = 0, menuClosedFor = null;
+    let shots = [], nextShot = 1, preparing = false, hostTakesImages = false, pickedModel = '', drawnCatalog = null, menuItems = [], menuActive = 0, menuClosedFor = null;
 
     const sendLine = line => { if (ws && ws.readyState === WebSocket.OPEN) { ws.send(JSON.stringify({ type: 'input', data: line + '\n' })); return true; } return false; };
 
@@ -849,6 +849,8 @@
       const files = Array.from(data.files).filter(f => f.type.startsWith('image/'));
       if (!files.length) return;
       ev.preventDefault();
+      // A host from before images were handled would keep the whole image in its scrollback and lose the conversation to it.
+      if (!hostTakesImages) { model.add({ kind: 'note', tone: 'plain', text: 'Restart this session to attach images: it was started by an older version.' }); schedule(); return; }
       attach(files);
     });
 
@@ -940,7 +942,7 @@
             if (msg.title) post({ type: 'title', id, title: msg.title });
           } else if (msg.type === 'live') model.live(msg.line);
           else if (msg.type === 'catalog') { model.setCatalog(msg); paintMenu(); }
-          else if (msg.type === 'settings') model.setSettings(msg);
+          else if (msg.type === 'settings') { hostTakesImages = true; model.setSettings(msg); }
           else if (msg.type === 'title') post({ type: 'title', id, title: msg.title });
           else if (msg.type === 'exit') { model.exited(msg.code); closed = true; post({ type: 'exit', id, code: msg.code }); }
           schedule();
