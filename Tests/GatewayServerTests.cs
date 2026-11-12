@@ -274,6 +274,12 @@ public class GatewayServerTests : IAsyncDisposable
         Assert.Equal("agy", seen!.Provider);
         Assert.Equal("C:/x", seen.Cwd);
         Assert.Equal("hi", seen.Prompt);
+        Assert.False(seen.Chat);
+
+        // The app's "New Claude chat" sends the same request with chat set, as the app encodes it.
+        var chat = await c.PostAsync("/sessions", new StringContent("{\"provider\":\"agy\",\"cwd\":\"\",\"name\":\"\",\"prompt\":\"\",\"chat\":true}", Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.Created, chat.StatusCode);
+        Assert.True(seen.Chat);
 
         var refused = await c.PostAsync("/sessions", new StringContent("{\"provider\":\"vim\",\"cwd\":\"C:/x\"}", Encoding.UTF8, "application/json"));
         Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);

@@ -222,8 +222,20 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
   (`Tests/js/chat.test.js`, run by `ChatPageTests`). Markdown is `marked` with raw HTML escaped,
   then scrubbed to a tag whitelist; never render model text any other way. The pane takes its ink
   from the terminal scheme's background, not the app theme (`chatLook` in `deck.html`).
-- **Phones list a chat session but cannot open it** (`CatalogEntry.Kind`, `MobileReady` false,
-  gateway attach answers 409).
+- **A phone opens a chat as the same pane.** The gateway serves `/mobile/mobile-chat.html`, which
+  hosts `chat.js` full screen (`touch: true`) and attaches through the gateway's relay
+  (`socketUrl`), exactly as `mobile.html` does for a terminal; the app's `ChatScreen` is a web
+  view around it. A chat pane change therefore reaches phones with the deck update, not an app
+  build. `CatalogEntry.MobileReady` stays false for a chat (an older app must not open it as a
+  terminal) and `ChatReady` says this gateway relays it. `AttachRelay` still forwards only
+  `input`, which is everything a chat sends.
+- **Phone differences live behind `opts.touch`:** Return is a new line and the button sends, an
+  attach button stands in for paste, and under 600 px the pickers use one-word labels because
+  three full ones do not fit.
+- **Testing the phone path without the live deck:** an isolated gateway (`SD_DATA_DIR`, its own
+  port) lists hosts spawned under the same data dir; a debug app launch with `--pair host:port
+  CODE` sets the built-in relay aside and reaches only that gateway (`--open`, `--send` work for
+  chats too).
 - **Try one without touching the live deck:** spawn `--host` with a chat `HostSpec` under its own
   `HostsDir`; `Tests/ChatHostTests.cs` does exactly that against a script standing in for the CLI.
 

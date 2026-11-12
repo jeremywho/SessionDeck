@@ -118,9 +118,9 @@ session's commands (arrows to move, Tab to complete, Enter to run); the model, e
 mode under the message box change the running session; a pasted image is attached and sent with
 the message. It is an ordinary Claude
 session underneath: it shows in the list with the same states, survives a deck restart, and comes
-back after a reboot with its conversation. Chat sessions are Claude only, need the native
-`claude.exe`, use the default login, and open on the desktop only (a phone lists them but cannot
-open them).
+back after a reboot with its conversation. The phone app opens a chat as the same conversation
+(Return adds a line there and the button sends; `+` attaches an image) and can start one from its
+`+` menu. Chat sessions are Claude only, need the native `claude.exe`, and use the default login.
 
 ## Docking
 Right-click the tray icon → **Dock to** → an edge or corner, and the window **snaps there on the
