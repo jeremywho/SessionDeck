@@ -31,7 +31,7 @@ internal sealed class TerminalView
     static string DefaultTitle(HostRecord h) =>
         h.Provider + " · " + (string.IsNullOrEmpty(h.Cwd) ? "" : Path.GetFileName(h.Cwd.TrimEnd('\\', '/')));
 
-    public void Open() => _browser.Post(new { type = "open", id = Host.Id, port = Host.Port, token = Host.Token });
+    public void Open() => _browser.Post(new { type = "open", id = Host.Id, port = Host.Port, token = Host.Token, kind = Host.Kind, exited = Exited });
     public void Close() => _browser.Post(new { type = "close", id = Host.Id });
 
     /// <summary>Ask the host to end its child. Works whether or not the page is attached.</summary>

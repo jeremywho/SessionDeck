@@ -147,6 +147,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
                 case "codex": NewCodexSessionButton_Click(this, new RoutedEventArgs()); break;
                 case "shell": SpawnShellIntoDeck(); break;
                 case "agy": SpawnAgyIntoDeck(); break;
+                case "chat": NewChatSession(); break;
                 case var p when p.StartsWith("profile:", StringComparison.Ordinal): NewProfileSession(p["profile:".Length..]); break;
                 default: NewSessionButton_Click(this, new RoutedEventArgs()); break;
             }
@@ -664,6 +665,22 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         SpawnIntoDeck(sessionId, SessionProvider.Claude, HostManager.NewClaudeCommand(sessionId, null, _app.Settings.ResumeFlags, launcher: launcher), HomeDir, null, profile: profile);
     }
 
+    /// <summary>A new Claude conversation in a chat pane rather than a terminal: same flags, same kind of session underneath.</summary>
+    void NewChatSession()
+    {
+        try
+        {
+            string sessionId = Guid.NewGuid().ToString();
+            var host = HostManager.Spawn(sessionId, SessionProvider.Claude, HostManager.NewClaudeChatCommand(sessionId, null, _app.Settings.ResumeFlags), HomeDir, null, kind: Host.ChatStream.Kind);
+            Deck.Open(host);
+        }
+        catch (Exception ex)
+        {
+            App.LogError(ex);
+            LiveLabel.Text = "Could not start the chat: " + ex.Message;
+        }
+    }
+
     // Codex has no --name, so there are no named counterparts to these two — see NewCodexCommand.
     void NewCodexSessionButton_Click(object sender, RoutedEventArgs e) =>
         SpawnIntoDeck("", SessionProvider.Codex, HostManager.NewCodexCommand(_app.Settings.CodexFlags), HomeDir, null);
@@ -674,7 +691,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     {
         var dlg = new NewSessionWindow(this, _app.Settings, initial);
         if (dlg.ShowDialog() != true || dlg.Result is not { } r) return;
-        var plan = SessionStarter.Plan(new StartRequest(r.Provider.ToString(), r.Cwd, r.Name ?? "", r.Prompt ?? "", r.Model ?? "", r.Effort ?? ""), _app.Settings);
+        var plan = SessionStarter.Plan(new StartRequest(r.Provider.ToString(), r.Cwd, r.Name ?? "", r.Prompt ?? "", r.Model ?? "", r.Effort ?? "", r.Chat), _app.Settings);
         if (plan == null) { LiveLabel.Text = "That folder does not exist."; return; }
         try { Deck.Open(SessionStarter.Start(plan)); }
         catch (Exception ex)
@@ -739,21 +756,34 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     {
         string cwd = string.IsNullOrWhiteSpace(s.Cwd) ? HomeDir : s.Cwd;
         string launcher = ClaudeProfiles.CommandFor(s.Profile);
-        string cmd = s.Provider switch
+        bool chat = s.Kind == Host.ChatStream.Kind && s.Provider == SessionProvider.Claude;
+        try
         {
-            SessionProvider.Codex => HostManager.ResumeCodexCommand(s.Id, _app.Settings.CodexFlags),
-            SessionProvider.Agy => HostManager.ResumeAgyCommand(s.Id, HostManager.AgyDefaultFlags),
-            _ => SessionScanner.HasTranscript(s.Id, cwd)
-                ? HostManager.ResumeClaudeCommand(s.Id, _app.Settings.ResumeFlags, launcher)
-                : HostManager.NewClaudeCommand(s.Id, s.Name, _app.Settings.ResumeFlags, launcher: launcher),
-        };
-        try { return HostManager.Spawn(s.Id, s.Provider, cmd, cwd, s.Name, profile: s.Profile); }
+            string cmd = s.Provider switch
+            {
+                SessionProvider.Codex => HostManager.ResumeCodexCommand(s.Id, _app.Settings.CodexFlags),
+                SessionProvider.Agy => HostManager.ResumeAgyCommand(s.Id, HostManager.AgyDefaultFlags),
+                _ => ClaudeCommandFor(s.Id, s.Name, SessionScanner.HasTranscript(s.Id, cwd), launcher, chat),
+            };
+            return HostManager.Spawn(s.Id, s.Provider, cmd, cwd, s.Name, profile: s.Profile, kind: chat ? Host.ChatStream.Kind : "");
+        }
         catch (Exception ex)
         {
             App.LogError(ex);
             LiveLabel.Text = "Could not start the session host: " + ex.Message;
             return null;
         }
+    }
+
+    /// <summary>
+    /// The launch that brings a Claude conversation back: resumed when it has a transcript, started
+    /// fresh under its own id when nothing was ever said, and as a chat when that is what it was.
+    /// </summary>
+    string ClaudeCommandFor(string sessionId, string? name, bool hasTranscript, string launcher, bool chat)
+    {
+        string flags = _app.Settings.ResumeFlags;
+        if (chat) return hasTranscript ? HostManager.ResumeClaudeChatCommand(sessionId, flags) : HostManager.NewClaudeChatCommand(sessionId, name, flags);
+        return hasTranscript ? HostManager.ResumeClaudeCommand(sessionId, flags, launcher) : HostManager.NewClaudeCommand(sessionId, name, flags, launcher: launcher);
     }
 
     List<SavedSession> _resumeOnAttach = new();
@@ -998,7 +1028,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         var claimed = new HashSet<SessionInfo>();
         var byHost = SessionPipeline.Pair(scan, claimed);
         foreach (var (h, info) in byHost)
-            if (h.Provider == "Agy" && info.Name.Length > 0) Deck.FindByHost(h.Id)?.View.Rename(info.Name);
+            if ((h.Provider == "Agy" || h.IsChat) && info.Name.Length > 0) Deck.FindByHost(h.Id)?.View.Rename(info.Name);
 
         var seen = new HashSet<string>();
         int added = 0;
@@ -1041,9 +1071,10 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         foreach (var x in byHost)
             if (_rowsById.TryGetValue(x.Host.Id, out var r)) rowOf.TryAdd(x.Info, r);
         SessionRegistry.Snapshot(
-            byHost.Where(x => (!x.Host.HasExited || x.Host.WasKilled) && x.Host.AgentStatus != "ended" && x.Info.SessionId.Length > 0 && IsRestorable(x.Info)).Select(x => x.Info).ToList(),
+            byHost.Where(x => (!x.Host.HasExited || x.Host.WasKilled) && x.Host.AgentStatus != "ended" && x.Info.SessionId.Length > 0 && (x.Host.IsChat || IsRestorable(x.Info))).Select(x => x.Info).ToList(),
             s => rowOf.TryGetValue(s, out var r) && r.State is SessionState.Completed or SessionState.Idle ? r.LastChanged : null,
-            s => rowOf.TryGetValue(s, out var r) ? r.Host.Profile : "");
+            s => rowOf.TryGetValue(s, out var r) ? r.Host.Profile : "",
+            s => rowOf.TryGetValue(s, out var r) ? r.Host.Kind : "");
         SaveLayoutIfSessionsMoved();
         ApplyReadLedger();
         SyncFrontRow();
@@ -1656,9 +1687,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             {
                 SessionProvider.Codex => HostManager.ResumeCodexCommand(sessionId, _app.Settings.CodexFlags),
                 SessionProvider.Agy => HostManager.ResumeAgyCommand(sessionId, HostManager.AgyDefaultFlags),
-                _ => hasTranscript
-                    ? HostManager.ResumeClaudeCommand(sessionId, _app.Settings.ResumeFlags, launcher)
-                    : HostManager.NewClaudeCommand(sessionId, null, _app.Settings.ResumeFlags, launcher: launcher),
+                _ => ClaudeCommandFor(sessionId, null, hasTranscript, launcher, host.IsChat),
             };
 
             if (!host.HasExited)
@@ -1673,7 +1702,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
                 }
             }
 
-            var next = HostManager.Spawn(sessionId, provider, cmd, host.Cwd, host.Title, profile: host.Profile);
+            var next = HostManager.Spawn(sessionId, provider, cmd, host.Cwd, host.Title, profile: host.Profile, kind: host.Kind);
             _successors[next.Id] = inherit;
             Deck.ReplaceHost(host.Id, next);
             HostManager.Forget(host);

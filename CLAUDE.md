@@ -177,6 +177,37 @@ user's open PRs. Design: `docs/superpowers/specs/2026-09-29-pr-pane-design.md`.
   it with `gh search prs`. Use it before theorising about a wrong row.
 - **Page messages without a terminal `id`** go to `DeckBrowser.PageMessage` → `DeckPane.RoutePage`.
 
+## Chat sessions (`Host/ChatStream.cs`, `Host/PipeChild.cs`, `wwwroot/chat.js`)
+A chat session is a Claude session with a conversation pane instead of a terminal. Claude only;
+default login only; desktop only. Measured against Claude Code 2.1.322.
+- **Same host, different child.** `HostSpec.Kind = "chat"` makes the host start the CLI on plain
+  pipes (`PipeChild`) instead of a pseudoconsole, as `claude -p --input-format stream-json
+  --output-format stream-json … --permission-prompt-tool stdio`. No shell wrapper and no hook
+  settings: `HostManager.NewClaudeChatCommand` names `claude.exe` in full, and the stream says what
+  hooks would. `HostRecord.Kind`/`SavedSession.Kind` carry it through restart, resume and reboot.
+- **The ring holds the conversation, one JSON line each.** `ChatStream.Durable` keeps `user`,
+  `assistant`, `result` and control lines; token deltas (`stream_event`) and per-turn `system`
+  lines go to attached viewers only, as `{"type":"live","line":…}` text frames, so they never
+  push the conversation out of scrollback.
+- **Status comes from the stream** (`ChatStream.Apply`): a `system init` or replayed user line is
+  busy, an open `can_use_tool` request is waiting, `result` is idle. A message sent mid-turn is
+  folded into the running turn and gets no `result` of its own.
+- **A viewer answers permission requests; the host declines every other control request**
+  (`ChatStream.Decline`), because an unanswered one stalls the turn.
+- **A resumed process says nothing about earlier turns.** The host seeds the ring from the
+  transcript at start (`ChatStream.History`, lines marked `history`), so a viewer has one source.
+- **The CLI registers itself** in `~/.claude/sessions` (`kind: interactive`, `entrypoint:
+  sdk-cli`), so the row gets name, model and context like any Claude session; the tab is renamed
+  from that name.
+- **Page side:** `ChatModel` in `chat.js` has no DOM and is tested under Node
+  (`Tests/js/chat.test.js`, run by `ChatPageTests`). Markdown is `marked` with raw HTML escaped,
+  then scrubbed to a tag whitelist; never render model text any other way. The pane takes its ink
+  from the terminal scheme's background, not the app theme (`chatLook` in `deck.html`).
+- **Phones list a chat session but cannot open it** (`CatalogEntry.Kind`, `MobileReady` false,
+  gateway attach answers 409).
+- **Try one without touching the live deck:** spawn `--host` with a chat `HostSpec` under its own
+  `HostsDir`; `Tests/ChatHostTests.cs` does exactly that against a script standing in for the CLI.
+
 ## Status → display state (`SessionState.cs`)
 `busy`→Working · `waiting`→Awaiting · `idle`→Completed (green ✓) · `shell`→Working · default→Idle.
 **Error** is *not* a status — it's read from the transcript (`isApiErrorMessage`) and sorts to the top.

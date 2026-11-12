@@ -61,7 +61,7 @@ struct SessionsView: View {
                                 SessionRowView(entry: entry, unread: false)
                                     .opacity(0.45)
                                     .overlay(alignment: .bottomTrailing) {
-                                        Text(entry.hostExited ? "ended" : "restart from the desktop to open here")
+                                        Text(entry.closedReason ?? "")
                                             .font(.caption2).foregroundStyle(.secondary)
                                     }
                             }

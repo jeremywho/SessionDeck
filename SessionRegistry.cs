@@ -93,10 +93,10 @@ internal static class SessionRegistry
 
     /// <summary>Rewrite the file when anything about the live interactive set changes (not just the
     /// id-set — a rename or cwd change must persist too), plus a periodic checkpoint for LastSeen.</summary>
-    public static void Snapshot(IReadOnlyList<SessionInfo> liveInteractive, Func<SessionInfo, DateTime?>? settledAt = null, Func<SessionInfo, string>? profileOf = null) =>
-        Snapshot(liveInteractive, DateTime.UtcNow, settledAt, profileOf);
+    public static void Snapshot(IReadOnlyList<SessionInfo> liveInteractive, Func<SessionInfo, DateTime?>? settledAt = null, Func<SessionInfo, string>? profileOf = null, Func<SessionInfo, string>? kindOf = null) =>
+        Snapshot(liveInteractive, DateTime.UtcNow, settledAt, profileOf, kindOf);
 
-    internal static void Snapshot(IReadOnlyList<SessionInfo> liveInteractive, DateTime nowUtc, Func<SessionInfo, DateTime?>? settledAt = null, Func<SessionInfo, string>? profileOf = null)
+    internal static void Snapshot(IReadOnlyList<SessionInfo> liveInteractive, DateTime nowUtc, Func<SessionInfo, DateTime?>? settledAt = null, Func<SessionInfo, string>? profileOf = null, Func<SessionInfo, string>? kindOf = null)
     {
         if (Frozen) return;
 
@@ -115,13 +115,13 @@ internal static class SessionRegistry
             known[s.SessionId] = new SavedSession
             {
                 Id = s.SessionId, Cwd = s.Cwd, Name = s.DisplayName, Model = s.Model, LastSeen = now,
-                Provider = s.Provider, LastChanged = settled.GetValueOrDefault(s.SessionId), Profile = Profile(s),
+                Provider = s.Provider, LastChanged = settled.GetValueOrDefault(s.SessionId), Profile = Profile(s), Kind = kindOf?.Invoke(s) ?? "",
             };
         }
         foreach (var id in known.Keys.Where(id => !liveIds.Contains(id)).ToList())
             if (_forgotten.Contains(id) || now - known[id].LastSeen >= (long)KeepAfterLoss.TotalMilliseconds) known.Remove(id);
 
-        var parts = known.Values.Select(s => $"{s.Id}|{s.Name}|{s.Cwd}|{s.Model}|{(int)s.Provider}|{s.LastChanged}|{s.Profile}|{liveIds.Contains(s.Id)}").ToList();
+        var parts = known.Values.Select(s => $"{s.Id}|{s.Name}|{s.Cwd}|{s.Model}|{(int)s.Provider}|{s.LastChanged}|{s.Profile}|{s.Kind}|{liveIds.Contains(s.Id)}").ToList();
         parts.Sort(StringComparer.Ordinal);
         string sig = string.Join("\n", parts);
 

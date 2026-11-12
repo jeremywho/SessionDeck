@@ -5,7 +5,7 @@ using System.Windows.Controls;
 namespace SessionDeck;
 
 /// <summary>What the New-session dialog decided. Empty strings mean "the CLI's own default".</summary>
-internal sealed record NewSessionRequest(SessionProvider Provider, string Cwd, string Name, string Model, string Effort, string Prompt);
+internal sealed record NewSessionRequest(SessionProvider Provider, string Cwd, string Name, string Model, string Effort, string Prompt, bool Chat = false);
 
 /// <summary>Modal launcher for a deck session. <c>ShowDialog() == true</c> when <see cref="Result"/> is set.</summary>
 internal partial class NewSessionWindow : Wpf.Ui.Controls.FluentWindow
@@ -34,12 +34,14 @@ internal partial class NewSessionWindow : Wpf.Ui.Controls.FluentWindow
 
     void Provider_Changed(object sender, RoutedEventArgs e)
     {
-        if (ModelBox == null || EffortBox == null) return;
+        if (ModelBox == null || EffortBox == null || ChatBox == null) return;
         bool codex = Provider == SessionProvider.Codex;
         Fill(ModelBox, codex ? CodexModels : ClaudeModels, codex ? _settings.LastCodexModel : _settings.LastClaudeModel);
         Fill(EffortBox, codex ? CodexEfforts : ClaudeEfforts, codex ? _settings.LastCodexEffort : _settings.LastClaudeEffort);
         NameBox.IsEnabled = !codex;
         NameBox.ToolTip = codex ? "Codex names a thread from inside the TUI" : null;
+        ChatBox.IsEnabled = !codex;
+        if (codex) ChatBox.IsChecked = false;
         string flags = codex ? _settings.CodexFlags : _settings.ResumeFlags;
         FlagsNote.Text = flags.Length > 0 ? "Also: " + flags : "";
         FlagsNote.ToolTip = flags.Length > 0 ? "Flags from Settings, appended to every launch" : null;
@@ -87,7 +89,7 @@ internal partial class NewSessionWindow : Wpf.Ui.Controls.FluentWindow
         else { _settings.LastClaudeModel = model; _settings.LastClaudeEffort = effort; }
         _settings.RememberFolder(cwd);
         _settings.Save();
-        Result = new NewSessionRequest(Provider, cwd, codex ? "" : NameBox.Text.Trim(), model, effort, PromptBox.Text.Trim());
+        Result = new NewSessionRequest(Provider, cwd, codex ? "" : NameBox.Text.Trim(), model, effort, PromptBox.Text.Trim(), !codex && ChatBox.IsChecked == true);
         DialogResult = true;
     }
 }

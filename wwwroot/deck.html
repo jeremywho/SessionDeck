@@ -5,6 +5,7 @@
 <title>terminal</title>
 <link rel="stylesheet" href="xterm.css">
 <link rel="stylesheet" href="prs.css">
+<link rel="stylesheet" href="chat.css">
 <style>
   html { color-scheme: dark; }
   html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: transparent; }
@@ -63,6 +64,8 @@
 <script src="addon-unicode11.js"></script>
 <script src="addon-web-links.js"></script>
 <script src="prs.js"></script>
+<script src="marked.js"></script>
+<script src="chat.js"></script>
 <script>
 (() => {
   const q = new URLSearchParams(location.search);
@@ -132,12 +135,21 @@
   function setSurface() {
     document.documentElement.style.setProperty('--bg', hexToRgba(baseOf().background, look.opacity / 100));
     document.documentElement.style.setProperty('--bg-solid', hexToRgba(baseOf().background, 1));
-    document.documentElement.style.setProperty('--fg3', dark ? '#8a8d93' : '#6b6f78');
-    const vars = dark
-      ? { '--fg': '#e8e9eb', '--fg2': '#b8bbc2', '--pr-red': '#f2555a', '--pr-amber': '#e5b84f', '--pr-green': '#5bc46b', '--pr-blue': '#7fb3ff', '--pr-line': 'rgba(138, 141, 147, 0.22)', '--pr-line-strong': 'rgba(138, 141, 147, 0.5)' }
-      : { '--fg': '#1a1c1f', '--fg2': '#3c4043', '--pr-red': '#c62828', '--pr-amber': '#9a6b00', '--pr-green': '#2e7d32', '--pr-blue': '#1e5bc6', '--pr-line': 'rgba(0, 0, 0, 0.12)', '--pr-line-strong': 'rgba(0, 0, 0, 0.35)' };
-    for (const [k, v] of Object.entries(vars)) document.documentElement.style.setProperty(k, v);
+    for (const [k, v] of Object.entries(inkFor(dark))) document.documentElement.style.setProperty(k, v);
     document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+  }
+  function inkFor(onDark) {
+    return onDark
+      ? { '--fg': '#e8e9eb', '--fg2': '#b8bbc2', '--fg3': '#8a8d93', '--pr-red': '#f2555a', '--pr-amber': '#e5b84f', '--pr-green': '#5bc46b', '--pr-blue': '#7fb3ff', '--pr-line': 'rgba(138, 141, 147, 0.22)', '--pr-line-strong': 'rgba(138, 141, 147, 0.5)' }
+      : { '--fg': '#1a1c1f', '--fg2': '#3c4043', '--fg3': '#6b6f78', '--pr-red': '#c62828', '--pr-amber': '#9a6b00', '--pr-green': '#2e7d32', '--pr-blue': '#1e5bc6', '--pr-line': 'rgba(0, 0, 0, 0.12)', '--pr-line-strong': 'rgba(0, 0, 0, 0.35)' };
+  }
+  // A chat pane sits on the terminal surface, whose colour comes from the terminal scheme and not from
+  // the app theme: its text takes the ink that reads on that surface, as a terminal's own text does.
+  function chatLook() {
+    const hex = baseOf().background.replace('#', '');
+    const n = parseInt(hex.length === 3 ? hex.split('').map(c => c + c).join('') : hex.slice(0, 6), 16);
+    const onDark = 0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255) < 128;
+    return { font: look.font, size: look.size, onDark, ink: inkFor(onDark) };
   }
   setSurface();
 
@@ -323,8 +335,31 @@
     if (p.ws && p.ws.readyState === WebSocket.OPEN) p.ws.send(JSON.stringify(obj));
   }
 
-  function open(id, port, token) {
+  // A chat session has no terminal: its pane is a conversation, wrapped so the column code can treat it like any other.
+  function openChat(id, port, token, exited) {
+    const el = document.createElement('div');
+    el.className = 'pane';
+    document.body.appendChild(el);
+    const chat = ChatPane.create({
+      el, id, port, token, post, exited,
+      onFocus: () => {
+        const gi = groups.findIndex(g => g.id === id);
+        if (gi >= 0 && gi !== focused) { focused = gi; layout(); }
+        post({ type: 'focused', id });
+      },
+    });
+    chat.applyLook(chatLook());
+    panes.set(id, {
+      id, port, token, el, chat, ws: null, ended: false,
+      term: { focus: () => chat.focus(), dispose: () => chat.dispose(), paste: text => chat.paste(text), options: {} },
+      fit: { fit() {} },
+      ro: { disconnect() {} },
+    });
+  }
+
+  function open(id, port, token, kind, exited) {
     if (panes.has(id)) return;
+    if (kind === 'chat') { openChat(id, port, token, !!exited); return; }
     const el = document.createElement('div');
     el.className = 'pane';
     document.body.appendChild(el);
@@ -586,6 +621,7 @@
       p.term.options.fontSize = o.fontSize;
       p.term.options.lineHeight = o.lineHeight;
       p.fit.fit();
+      if (p.chat) p.chat.applyLook(chatLook());
     }
   }
 
@@ -673,7 +709,7 @@
       const m = ev.data;
       if (!m || !m.type) return;
       switch (m.type) {
-        case 'open': open(m.id, m.port, m.token); break;
+        case 'open': open(m.id, m.port, m.token, m.kind, m.exited); break;
         case 'layout':
           groups = m.groups.map(g => ({ id: g.id || null, frac: Number(g.frac) || 1, kind: g.kind || 'tabs' }));
           focused = Math.min(m.focused ?? focused, Math.max(0, groups.length - 1));
@@ -699,7 +735,7 @@
           break;
         }
         case 'fit': for (const p of panes.values()) p.fit.fit(); break;
-        case 'kill': { const p = panes.get(m.id); if (p) send(p, { type: 'kill' }); break; }
+        case 'kill': { const p = panes.get(m.id); if (p && p.chat) p.chat.kill(); else if (p) send(p, { type: 'kill' }); break; }
         case 'theme': dark = !!m.dark; look = lookFrom(m.look || {}); applyLook(); break;
         case 'prs': PrPane.render(m.board); break;
         case 'prsFetched': PrPane.fetched(m.fetchedAt, m.error); break;

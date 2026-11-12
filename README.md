@@ -109,6 +109,16 @@ jump to its tab). Stacked PRs nest under the PR they build on; PRs with identica
 into one row. It is added once on first launch; remove it from its strip's menu, or add it back
 from any column's `+` menu. It needs the GitHub CLI signed in (`gh auth login`) and only reads.
 
+## Chat sessions
+A Claude session can open as a conversation instead of a terminal: right-click a column's `+` and
+pick **New Claude chat**, or tick **Chat view** in the New session dialog. Replies render as
+markdown, tool calls fold to one line each, and permission requests and questions appear as
+buttons. Enter sends, Shift+Enter adds a line, Esc or **Stop** interrupts. It is an ordinary Claude
+session underneath: it shows in the list with the same states, survives a deck restart, and comes
+back after a reboot with its conversation. Chat sessions are Claude only, need the native
+`claude.exe`, use the default login, and open on the desktop only (a phone lists them but cannot
+open them).
+
 ## Docking
 Right-click the tray icon → **Dock to** → an edge or corner, and the window **snaps there on the
 monitor it's currently on** (multi-monitor aware). Edges become a full-height sidebar (pair with the

@@ -34,6 +34,12 @@ internal sealed class HostSpec
 
     /// <summary>The Claude account profile the session runs as (see <see cref="ClaudeProfiles"/>); empty for the default login.</summary>
     public string Profile { get; set; } = "";
+
+    /// <summary>Empty for a terminal on a pseudoconsole; <see cref="ChatStream.Kind"/> for a CLI spoken to in stream-json over plain pipes.</summary>
+    public string Kind { get; set; } = "";
+
+    /// <summary>A chat session's transcript: where the conversation so far is read from when the session is resumed.</summary>
+    public string HistoryPath { get; set; } = "";
 }
 
 /// <summary>
@@ -77,6 +83,11 @@ internal sealed class HostRecord
     /// <summary>The current turn armed something that will wake the session by itself.</summary>
     public bool Pending { get; set; }
 
+    /// <summary>Empty for a terminal; <see cref="ChatStream.Kind"/> for a chat session, which has no terminal to attach to and must be restarted as one.</summary>
+    public string Kind { get; set; } = "";
+
+    [JsonIgnore] public bool IsChat => Kind == ChatStream.Kind;
+
     /// <summary>How this host derives status. 2: idle notifications no longer mean waiting; turns can end
     /// scheduled. 3: a background shell command no longer counts as scheduling a wake-up. 4: the pty size
     /// travels with the attach stream, which a phone needs.</summary>
@@ -119,6 +130,10 @@ internal static class HostProgram
     static readonly object SizeLock = new();
     static Ring _ring = null!;
     static ConPty _pty = null!;
+    static PipeChild? _pipe;
+    static readonly ChatStream _chat = new();
+    static readonly object ChatInputLock = new();
+    static readonly StringBuilder _chatErrors = new();
     static HostRecord _record = null!;
     static string _recordPath = "";
     static HostSpec _spec = new();
@@ -197,8 +212,13 @@ internal static class HostProgram
         }
 
         var ready = Console.Out;
-        DetachStdHandles();
-        _pty = new ConPty(commandLine, spec.Cwd, spec.Cols, spec.Rows);
+        bool chat = spec.Kind == ChatStream.Kind;
+        if (chat) _pipe = new PipeChild(commandLine, spec.Cwd);
+        else
+        {
+            DetachStdHandles();
+            _pty = new ConPty(commandLine, spec.Cwd, spec.Cols, spec.Rows);
+        }
         var self = Process.GetCurrentProcess();
         _record = new HostRecord
         {
@@ -212,7 +232,9 @@ internal static class HostProgram
             HostBin = Path.GetDirectoryName(Environment.ProcessPath ?? "") ?? "",
             Profile = spec.Profile,
             Protocol = HostRecord.CurrentProtocol,
-            ChildPid = _pty.Pid,
+            Kind = spec.Kind,
+            ChildPid = chat ? _pipe!.Pid : _pty.Pid,
+            TranscriptPath = chat ? spec.HistoryPath : "",
             Port = port,
             Token = token,
             StartedAt = DateTime.UtcNow,
@@ -224,16 +246,35 @@ internal static class HostProgram
             _record.AgentStatus = "idle";
             _record.StatusAt = _record.StartedAt;
         }
+        if (chat)
+        {
+            // The CLI reports nothing until it is spoken to: a chat session starts out waiting for the person.
+            _record.AgentStatus = "idle";
+            _record.StatusAt = _record.StartedAt;
+            foreach (var line in ChatStream.History(spec.HistoryPath, Math.Max(spec.RingBytes, 64 * 1024) / 2)) AppendChatLine(line);
+        }
         WriteRecord();
         ready.WriteLine("ready");
         ready.Flush();
 
-        var reader = new Thread(ReadLoop) { IsBackground = true, Name = "pty-read" };
+        var reader = new Thread(chat ? ChatReadLoop : ReadLoop) { IsBackground = true, Name = "pty-read" };
         reader.Start();
+        if (chat) new Thread(DrainChatErrors) { IsBackground = true, Name = "chat-stderr" }.Start();
         if (spec.InitialPrompt.Length > 0)
-            new Thread(() => TypeWhenQuiet(spec.InitialPrompt)) { IsBackground = true, Name = "initial-prompt" }.Start();
+        {
+            if (chat) WriteChatInput(ChatStream.UserLine(spec.InitialPrompt));
+            else new Thread(() => TypeWhenQuiet(spec.InitialPrompt)) { IsBackground = true, Name = "initial-prompt" }.Start();
+        }
         var waiter = new Thread(() =>
         {
+            if (chat)
+            {
+                _exitCode = _pipe!.WaitForExit();
+                _exited = true;
+                // Something the CLI started can hold the output pipe open past the CLI's own exit; nothing more will be said on it.
+                if (!reader.Join(TimeSpan.FromSeconds(3))) _pipe.KillTree();
+                return;
+            }
             _exitCode = _pty.WaitForExit();
             _exited = true;
             _pty.ClosePseudoConsole();
@@ -244,6 +285,12 @@ internal static class HostProgram
         reader.Join();
         waiter.Join();
 
+        if (chat)
+        {
+            string errors;
+            lock (_chatErrors) errors = _chatErrors.ToString().Trim();
+            if (errors.Length > 0) AppendChatLine(ChatStream.HostLine("stderr", errors));
+        }
         _record.ExitCode = _exitCode;
         _record.ExitedAt = DateTime.UtcNow;
         WriteRecord();
@@ -253,7 +300,7 @@ internal static class HostProgram
         lock (ClientsLock) foreach (var c in Clients) c.Out.Writer.TryComplete();
         listener.Stop();
         Thread.Sleep(300);
-        _pty.Dispose();
+        if (chat) _pipe!.Dispose(); else _pty.Dispose();
         return 0;
     }
 
@@ -310,7 +357,7 @@ internal static class HostProgram
             var chunk = buf.AsSpan(0, n);
             Interlocked.Add(ref _outputBytes, n);
             Interlocked.Exchange(ref _lastOutputTicks, DateTime.UtcNow.Ticks);
-            _ring.Append(chunk);
+            AppendAndSend(chunk.ToArray());
             ScanTitle(chunk);
             bool hostAnswers;
             lock (ClientsLock) hostAnswers = HostAnswersQueries(Clients.Select(c => c.Passive));
@@ -318,7 +365,112 @@ internal static class HostProgram
             {
                 try { _pty.Input.Write(DsrReply); _pty.Input.Flush(); } catch { }
             }
-            Broadcast(false, chunk.ToArray());
+        }
+    }
+
+    /// <summary>
+    /// Into the scrollback and out to every viewer as one step, under the lock an attach takes to read
+    /// the scrollback and join the viewers: a viewer gets each byte exactly once, from one or the other.
+    /// </summary>
+    static void AppendAndSend(byte[] data)
+    {
+        lock (ClientsLock)
+        {
+            _ring.Append(data);
+            foreach (var c in Clients) c.Out.Writer.TryWrite((false, data));
+        }
+    }
+
+    static void AppendChatLine(byte[] line)
+    {
+        var framed = new byte[line.Length + 1];
+        line.CopyTo(framed, 0);
+        framed[^1] = (byte)'\n';
+        AppendAndSend(framed);
+    }
+
+    static void ChatReadLoop()
+    {
+        var buf = new byte[65536];
+        var partial = new MemoryStream();
+        while (true)
+        {
+            int n;
+            try { n = _pipe!.Output.Read(buf, 0, buf.Length); }
+            catch { break; }
+            if (n <= 0) break;
+            int from = 0;
+            for (int i = 0; i < n; i++)
+            {
+                if (buf[i] != (byte)'\n') continue;
+                partial.Write(buf, from, i - from);
+                from = i + 1;
+                ChatLine(partial.ToArray());
+                partial.SetLength(0);
+            }
+            partial.Write(buf, from, n - from);
+        }
+        if (partial.Length > 0) ChatLine(partial.ToArray());
+    }
+
+    static void ChatLine(byte[] raw)
+    {
+        int length = raw.Length;
+        while (length > 0 && (raw[length - 1] == (byte)'\r' || raw[length - 1] == (byte)' ')) length--;
+        if (length == 0) return;
+        byte[] line = length == raw.Length ? raw : raw[..length];
+        bool durable, changed;
+        string? renamed, decline;
+        try
+        {
+            using var doc = JsonDocument.Parse(line);
+            var root = doc.RootElement;
+            lock (_record)
+            {
+                string title = _record.Title;
+                changed = _chat.Apply(root, _record, DateTime.UtcNow);
+                renamed = _record.Title != title ? _record.Title : null;
+            }
+            durable = ChatStream.Durable(root);
+            decline = ChatStream.Decline(root);
+        }
+        catch (JsonException)
+        {
+            AppendChatLine(ChatStream.HostLine("output", Encoding.UTF8.GetString(line)));
+            return;
+        }
+        if (changed) WriteRecord();
+        if (renamed != null) Broadcast(true, Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { type = "title", title = renamed })));
+        if (durable) AppendChatLine(line);
+        else Broadcast(true, ChatStream.LiveFrame(line));
+        if (decline != null) WriteChatInput(decline);
+    }
+
+    static void WriteChatInput(string line)
+    {
+        try
+        {
+            var bytes = Encoding.UTF8.GetBytes(line + "\n");
+            lock (ChatInputLock) { _pipe!.Input.Write(bytes); _pipe.Input.Flush(); }
+        }
+        catch (Exception ex) { Log($"chat input: {ex.Message}"); }
+    }
+
+    /// <summary>What the CLI says outside the protocol: kept to its last few kilobytes, shown when it ends.</summary>
+    static void DrainChatErrors()
+    {
+        var buf = new byte[4096];
+        while (true)
+        {
+            int n;
+            try { n = _pipe!.Error.Read(buf, 0, buf.Length); }
+            catch { break; }
+            if (n <= 0) break;
+            lock (_chatErrors)
+            {
+                _chatErrors.Append(Encoding.UTF8.GetString(buf, 0, n));
+                if (_chatErrors.Length > 8192) _chatErrors.Remove(0, _chatErrors.Length - 8192);
+            }
         }
     }
 
@@ -418,15 +570,21 @@ internal static class HostProgram
         using var ws = WebSocket.CreateFromStream(stream, new WebSocketCreationOptions { IsServer = true, KeepAliveInterval = TimeSpan.FromSeconds(30) });
         var client = new Client { Passive = query.TryGetValue("passive", out var passive) && passive == "1" };
 
-        (long start, byte[] data) = _ring.Since(after);
-        long end = start + data.Length;
         // Size and registration under one lock: a resize between them would be announced to every
         // viewer but this one, which would then hold the old size until the next resize.
         lock (SizeLock)
         {
-            client.Out.Writer.TryWrite((true, Encoding.UTF8.GetBytes(SnapshotJson(start, end, _record.Title, _pty.Cols, _pty.Rows))));
-            if (data.Length > 0) client.Out.Writer.TryWrite((false, data));
-            lock (ClientsLock) Clients.Add(client);
+            lock (ClientsLock)
+            {
+                (long start, byte[] data) = _ring.Since(after);
+                long end = start + data.Length;
+                string snapshot = _pipe != null
+                    ? SnapshotJson(start, end, _record.Title, 0, 0, ChatStream.Kind)
+                    : SnapshotJson(start, end, _record.Title, _pty.Cols, _pty.Rows);
+                client.Out.Writer.TryWrite((true, Encoding.UTF8.GetBytes(snapshot)));
+                if (data.Length > 0) client.Out.Writer.TryWrite((false, data));
+                Clients.Add(client);
+            }
         }
         if (_exited)
         {
@@ -478,11 +636,16 @@ internal static class HostProgram
             {
                 case "input":
                     if (_exited) return;
+                    if (_pipe != null)
+                    {
+                        foreach (var line in ChatStream.InputLines(root.GetProperty("data").GetString() ?? "")) WriteChatInput(line);
+                        break;
+                    }
                     var bytes = Encoding.UTF8.GetBytes(root.GetProperty("data").GetString() ?? "");
                     lock (_pty) { _pty.Input.Write(bytes); _pty.Input.Flush(); }
                     break;
                 case "resize":
-                    if (_exited) return;
+                    if (_exited || _pipe != null) return;
                     lock (SizeLock)
                     {
                         _pty.Resize((short)root.GetProperty("cols").GetInt32(), (short)root.GetProperty("rows").GetInt32());
@@ -490,7 +653,7 @@ internal static class HostProgram
                     }
                     break;
                 case "kill":
-                    _pty.KillTree();
+                    if (_pipe != null) _pipe.KillTree(); else _pty.KillTree();
                     break;
             }
         }
@@ -532,8 +695,8 @@ internal static class HostProgram
     }
 
     /// <summary>The first text frame of an attach: where the bytes that follow start in the ring, and the pty's size so a viewer that may not resize can render it.</summary>
-    internal static string SnapshotJson(long start, long end, string title, int cols, int rows) =>
-        JsonSerializer.Serialize(new { type = "snapshot", start, end, title, cols, rows });
+    internal static string SnapshotJson(long start, long end, string title, int cols, int rows, string kind = "") =>
+        JsonSerializer.Serialize(new { type = "snapshot", start, end, title, cols, rows, kind });
 
     internal static string SizeJson(int cols, int rows) =>
         JsonSerializer.Serialize(new { type = "size", cols, rows });

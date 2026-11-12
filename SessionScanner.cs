@@ -211,6 +211,14 @@ internal static class SessionScanner
         catch { return false; }
     }
 
+    /// <summary>Where the session's transcript is, or where Claude will write it once something has been said.</summary>
+    public static string TranscriptPathFor(string sessionId, string cwd)
+    {
+        if (sessionId.Length == 0) return "";
+        string found = TranscriptPath(new SessionInfo { SessionId = sessionId, Cwd = cwd });
+        return found.Length > 0 ? found : Path.Combine(ProjectsDir, Regex.Replace(cwd, "[^a-zA-Z0-9]", "-"), sessionId + ".jsonl");
+    }
+
     static string TranscriptPath(SessionInfo s)
     {
         // cwd -> slug: every non-alphanumeric char becomes '-'  (C:\Users\Jeremy -> C--Users-Jeremy)

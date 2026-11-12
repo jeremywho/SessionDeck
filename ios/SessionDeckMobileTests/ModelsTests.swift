@@ -82,6 +82,20 @@ final class ModelsTests: XCTestCase {
         XCTAssertFalse(frame.sessions[1].mobileReady)
     }
 
+    func testARowThatCannotBeOpenedSaysWhy() throws {
+        func entry(_ rest: String) throws -> CatalogEntry {
+            let json = """
+            {"hostId":"h","sessionId":"s","provider":"Claude","name":"n","modelChip":"","effort":"","state":"Idle","stateSinceMs":0,"subagents":0,"group":"","groupOrder":0,"sortPriority":0,"cwd":""\(rest)}
+            """
+            return try JSONDecoder().decode(CatalogEntry.self, from: Data(json.utf8))
+        }
+        XCTAssertNil(try entry(#","hostExited":false,"mobileReady":true"#).closedReason)
+        XCTAssertEqual(try entry(#","hostExited":true,"mobileReady":false,"kind":"chat""#).closedReason, "ended")
+        XCTAssertEqual(try entry(#","hostExited":false,"mobileReady":false,"kind":"chat""#).closedReason, "chat session, opens on the desktop")
+        XCTAssertEqual(try entry(#","hostExited":false,"mobileReady":false,"kind":"""#).closedReason, "restart from the desktop to open here")
+        XCTAssertEqual(try entry(#","hostExited":false,"mobileReady":false"#).closedReason, "restart from the desktop to open here")
+    }
+
     func testThePairingQRParses() {
         let parsed = Pairing.parseQR("sessiondeck://pair?host=192.0.2.10&port=7420&code=ABCD2345")
         XCTAssertEqual(parsed?.host, "192.0.2.10")

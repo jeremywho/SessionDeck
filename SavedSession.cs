@@ -17,6 +17,9 @@ internal sealed class SavedSession
     /// <summary>The Claude account profile to resume under (see <see cref="ClaudeProfiles"/>); empty for the default login.</summary>
     public string Profile { get; set; } = "";
 
+    /// <summary>Empty for a terminal session; <see cref="Host.ChatStream.Kind"/> for one that comes back as a chat.</summary>
+    public string Kind { get; set; } = "";
+
     [JsonExtensionData]
     public Dictionary<string, System.Text.Json.JsonElement>? Unknown { get; set; }
 

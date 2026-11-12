@@ -4,10 +4,10 @@ using SessionDeck.Host;
 namespace SessionDeck;
 
 /// <summary>A request to start a session, from the desktop dialog or from a phone.</summary>
-internal sealed record StartRequest(string Provider, string Cwd, string Name = "", string Prompt = "", string Model = "", string Effort = "");
+internal sealed record StartRequest(string Provider, string Cwd, string Name = "", string Prompt = "", string Model = "", string Effort = "", bool Chat = false);
 
 /// <summary>What gets launched for a start request: the one place both the deck and the gateway build it.</summary>
-internal sealed record StartPlan(string SessionId, string Provider, string Command, string Cwd, string? Title, string Prompt);
+internal sealed record StartPlan(string SessionId, string Provider, string Command, string Cwd, string? Title, string Prompt, string Kind = "");
 
 internal static class SessionStarter
 {
@@ -23,6 +23,8 @@ internal static class SessionStarter
             case "claude":
             {
                 string id = Guid.NewGuid().ToString();
+                if (r.Chat)
+                    return new StartPlan(id, "Claude", HostManager.NewClaudeChatCommand(id, name.Length > 0 ? name : null, settings.ResumeFlags, r.Model, r.Effort), cwd, name.Length > 0 ? name : null, r.Prompt, ChatStream.Kind);
                 return new StartPlan(id, "Claude", HostManager.NewClaudeCommand(id, name.Length > 0 ? name : null, settings.ResumeFlags, r.Model, r.Effort), cwd, name.Length > 0 ? name : null, r.Prompt);
             }
             case "codex":
@@ -38,7 +40,7 @@ internal static class SessionStarter
     }
 
     public static HostRecord Start(StartPlan plan) =>
-        HostManager.Spawn(plan.SessionId, plan.Provider, plan.Command, plan.Cwd, plan.Title, plan.Prompt);
+        HostManager.Spawn(plan.SessionId, plan.Provider, plan.Command, plan.Cwd, plan.Title, plan.Prompt, kind: plan.Kind);
 
     /// <summary>Folders a phone can pick from: the deck's recent list, home first.</summary>
     public static List<string> Folders(Settings settings)

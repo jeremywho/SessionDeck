@@ -199,6 +199,19 @@ public class GatewayServerTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task Attach_refuses_a_chat_session_which_has_no_terminal_to_show()
+    {
+        string token = await PairAsync();
+        _hosts["chat"] = new HostRecord { Id = "chat", Protocol = 4, Port = 1, Token = "x", Kind = ChatStream.Kind };
+        using var raw = new HttpClient { BaseAddress = new Uri(Base) };
+        var req = new HttpRequestMessage(HttpMethod.Get, $"/sessions/chat/attach?token={token}");
+        req.Headers.Add("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==");
+        var res = await raw.SendAsync(req);
+        Assert.Equal(HttpStatusCode.Conflict, res.StatusCode);
+        Assert.Contains("chat sessions open on the desktop only", await res.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
     public async Task Attach_relays_a_fake_host_to_the_phone()
     {
         await using var host = new FakeHost();

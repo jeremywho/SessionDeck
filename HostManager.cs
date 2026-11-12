@@ -33,6 +33,55 @@ internal static class HostManager
         return cmd + ClaudeHookArgs;
     }
 
+    /// <summary>
+    /// A chat session: the same CLI and conversation as <see cref="NewClaudeCommand"/>, spoken to in
+    /// stream-json over pipes instead of drawn in a terminal. No hook settings: the stream itself
+    /// says what the hooks would.
+    /// </summary>
+    public static string NewClaudeChatCommand(string sessionId, string? name, string extraFlags, string model = "", string effort = "")
+    {
+        string cmd = $"{ClaudeBinaryForChat()} {ChatStream.ProtocolFlags} --session-id {sessionId}";
+        if (!string.IsNullOrWhiteSpace(name)) cmd += $" --name \"{name.Replace("\"", "\\\"")}\"";
+        if (!string.IsNullOrWhiteSpace(model)) cmd += $" --model \"{model.Trim()}\"";
+        if (!string.IsNullOrWhiteSpace(effort)) cmd += $" --effort {effort.Trim()}";
+        if (!string.IsNullOrWhiteSpace(extraFlags)) cmd += " " + extraFlags.Trim();
+        return cmd;
+    }
+
+    public static string ResumeClaudeChatCommand(string sessionId, string extraFlags)
+    {
+        string cmd = $"{ClaudeBinaryForChat()} {ChatStream.ProtocolFlags} --resume {sessionId}";
+        if (!string.IsNullOrWhiteSpace(extraFlags)) cmd += " " + extraFlags.Trim();
+        return cmd;
+    }
+
+    /// <summary>
+    /// A chat host starts the CLI itself, with no shell in between to find it, so the binary is named
+    /// in full. Only a real executable can be started on pipes; an npm shim (<c>claude.cmd</c>) cannot.
+    /// </summary>
+    static string ClaudeBinaryForChat() =>
+        ClaudeExeLocator() is { } exe
+            ? $"\"{exe}\""
+            : throw new InvalidOperationException("chat sessions need claude.exe (the native install) on PATH");
+
+    /// <summary>Test seam: where claude.exe is, without depending on what the machine has installed.</summary>
+    internal static Func<string?> ClaudeExeLocator { get; set; } = () =>
+        FindClaudeExe(Environment.GetEnvironmentVariable("PATH") ?? "", Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), File.Exists);
+
+    internal static string? FindClaudeExe(string path, string home, Func<string, bool> exists)
+    {
+        var dirs = path.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(d => d.Trim('"'))
+            .Append(Path.Combine(home, ".local", "bin"));
+        foreach (var dir in dirs)
+        {
+            string candidate;
+            try { candidate = Path.Combine(dir, "claude.exe"); }
+            catch (ArgumentException) { continue; }
+            if (exists(candidate)) return candidate;
+        }
+        return null;
+    }
+
     /// <summary>Plain <c>claude</c>, or a profile's launcher standing in for it (see <see cref="ClaudeProfiles"/>).</summary>
     static string ClaudeExe(string launcher) => string.IsNullOrWhiteSpace(launcher) ? "claude" : launcher.Trim();
 
@@ -82,27 +131,31 @@ internal static class HostManager
             ? $"\"{SessionLauncher.ResolvePowerShell()}\" -NoLogo"
             : $"\"{SessionLauncher.ResolvePowerShell()}\" -NoLogo -NoExit -Command \"{cmd.Replace("\"", "\\\"")}\"";
 
-    public static HostRecord Spawn(string sessionId, SessionProvider provider, string command, string cwd, string? title, string initialPrompt = "", string profile = "") =>
-        Spawn(sessionId, provider.ToString(), command, cwd, title, initialPrompt, profile);
+    public static HostRecord Spawn(string sessionId, SessionProvider provider, string command, string cwd, string? title, string initialPrompt = "", string profile = "", string kind = "") =>
+        Spawn(sessionId, provider.ToString(), command, cwd, title, initialPrompt, profile, kind);
 
     /// <summary>A pane with just a shell in it: nothing launched, no hooks, no session id.</summary>
     public static HostRecord SpawnShell(string cwd) => Spawn("", "Shell", "", cwd, "Terminal");
 
-    public static HostRecord Spawn(string sessionId, string provider, string command, string cwd, string? title, string initialPrompt = "", string profile = "")
+    public static HostRecord Spawn(string sessionId, string provider, string command, string cwd, string? title, string initialPrompt = "", string profile = "", string kind = "")
     {
         Directory.CreateDirectory(HostsDir);
         string id = Guid.NewGuid().ToString("N")[..12];
+        bool chat = kind == ChatStream.Kind;
+        string folder = string.IsNullOrWhiteSpace(cwd) ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) : cwd;
         var spec = new HostSpec
         {
             Id = id,
             SessionId = sessionId,
             Provider = provider,
-            CommandLine = WrapInShell(command),
-            Cwd = string.IsNullOrWhiteSpace(cwd) ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) : cwd,
+            CommandLine = chat ? command : WrapInShell(command),
+            Cwd = folder,
             HostsDir = HostsDir,
             InitialPrompt = initialPrompt ?? "",
             Title = title ?? "",
             Profile = profile ?? "",
+            Kind = kind ?? "",
+            HistoryPath = chat ? SessionScanner.TranscriptPathFor(sessionId, folder) : "",
         };
 
         var psi = new ProcessStartInfo(HostExe())

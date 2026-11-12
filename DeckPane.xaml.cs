@@ -29,7 +29,7 @@ internal partial class DeckPane : UserControl
         public Brush GlyphBrush =>
             Application.Current.TryFindResource(View.Host.Provider == "Codex" ? "CodexMarkBrush" : "ClaudeMarkBrush") as Brush ?? Brushes.Gray;
         public Visibility ExitedVisibility => View.Exited ? Visibility.Visible : Visibility.Collapsed;
-        public string Tooltip => $"{StripMark(View.Title)}\n{View.Host.Cwd}\n{View.Host.Provider}{(View.Host.Profile.Length > 0 ? " as " + View.Host.Profile : "")} · session {View.Host.SessionId}\nhost pid {View.Host.HostPid} · child pid {View.Host.ChildPid}";
+        public string Tooltip => $"{StripMark(View.Title)}\n{View.Host.Cwd}\n{View.Host.Provider}{(View.Host.IsChat ? " chat" : "")}{(View.Host.Profile.Length > 0 ? " as " + View.Host.Profile : "")} · session {View.Host.SessionId}\nhost pid {View.Host.HostPid} · child pid {View.Host.ChildPid}";
 
         bool _active;
         /// <summary>The tab its group is showing.</summary>
@@ -103,6 +103,7 @@ internal partial class DeckPane : UserControl
         e.Handled = true;
     }
     void NewClaudeMenu_Click(object sender, RoutedEventArgs e) => RequestNew(sender, "claude");
+    void NewChatMenu_Click(object sender, RoutedEventArgs e) => RequestNew(sender, "chat");
     void NewCodexMenu_Click(object sender, RoutedEventArgs e) => RequestNew(sender, "codex");
     void NewShellMenu_Click(object sender, RoutedEventArgs e) => RequestNew(sender, "shell");
     void NewAgyMenu_Click(object sender, RoutedEventArgs e) => RequestNew(sender, "agy");

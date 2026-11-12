@@ -19,8 +19,17 @@ struct CatalogEntry: Codable, Identifiable, Hashable {
     let mobileReady: Bool
     /// When anyone last looked at the session, on the desktop or a phone (unix ms, the deck's clock); absent on older gateways.
     let readAtMs: Int64?
+    /// "chat" for a session that is a conversation pane on the desktop and has no terminal to show here; empty or absent otherwise.
+    let kind: String?
 
     var id: String { hostId }
+
+    /// Why the session cannot be opened on this device; nil when it can.
+    var closedReason: String? {
+        if mobileReady { return nil }
+        if hostExited { return "ended" }
+        return kind == "chat" ? "chat session, opens on the desktop" : "restart from the desktop to open here"
+    }
     var stateSince: Date { Date(timeIntervalSince1970: Double(stateSinceMs) / 1000) }
 
     var providerGlyph: String {

@@ -210,6 +210,24 @@ public class SessionRegistryTests
     }
 
     [Fact]
+    public void A_chat_session_is_saved_as_one_so_it_comes_back_as_one()
+    {
+        SessionRegistry.ResetForTests();
+        SessionRegistry.Frozen = false;
+        SessionRegistry.Snapshot(new[] { Session("term-1"), Session("chat-1") }, kindOf: s => s.SessionId == "chat-1" ? Host.ChatStream.Kind : "");
+        var saved = SessionRegistry.Load().ToDictionary(s => s.Id, s => s.Kind);
+        Assert.Equal(Host.ChatStream.Kind, saved["chat-1"]);
+        Assert.Equal("", saved["term-1"]);
+
+        // The same sessions with the kind flipped is a change worth writing.
+        SessionRegistry.Snapshot(new[] { Session("term-1"), Session("chat-1") }, kindOf: _ => "");
+        Assert.Equal("", SessionRegistry.Load().Single(s => s.Id == "chat-1").Kind);
+
+        var old = System.Text.Json.JsonSerializer.Deserialize<List<SavedSession>>("[{\"Id\":\"x\"}]")!;
+        Assert.Equal("", old[0].Kind);
+    }
+
+    [Fact]
     public void An_identical_set_within_the_checkpoint_window_is_not_rewritten()
     {
         SessionRegistry.ResetForTests();

@@ -33,6 +33,7 @@
         <StackPanel Grid.Row="0" Orientation="Horizontal">
           <RadioButton x:Name="ClaudeRadio" Content="✳ Claude" IsChecked="True" Margin="0,0,18,0" Checked="Provider_Changed"/>
           <RadioButton x:Name="CodexRadio" Content="◆ Codex" Checked="Provider_Changed"/>
+          <CheckBox x:Name="ChatBox" Content="Chat view" Margin="28,0,0,0" ToolTip="A conversation pane instead of a terminal"/>
         </StackPanel>
 
         <StackPanel Grid.Row="1" Margin="0,14,0,0">
