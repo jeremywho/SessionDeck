@@ -2,7 +2,7 @@
 // The lines here are shaped like the ones Claude Code 2.1.322 wrote in stream-json mode, cut down to the fields the pane reads.
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { ChatModel, LineReader, Wire, toolBrief, commandQuery, matchCommands, modelInForce, shortModel } = require('../../wwwroot/chat.js');
+const { ChatModel, LineReader, Wire, toolBrief, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText } = require('../../wwwroot/chat.js');
 
 const init = { type: 'system', subtype: 'init', session_id: 's1', model: 'claude-haiku-5-5' };
 const echo = text => ({ type: 'user', isReplay: true, message: { role: 'user', content: text }, parent_tool_use_id: null });
@@ -16,13 +16,15 @@ const stream = event => ({ type: 'stream_event', event, parent_tool_use_id: null
 const blockStart = (index, type) => stream({ type: 'content_block_start', index, content_block: { type } });
 const textDelta = (index, text) => stream({ type: 'content_block_delta', index, delta: { type: 'text_delta', text } });
 const kinds = m => m.items.map(i => i.kind);
+// Tool calls sit inside the run of calls they belong to; this is every call in the conversation, in order.
+const calls = m => m.items.flatMap(i => i.kind === 'tools' ? i.tools : i.kind === 'tool' ? [i] : []);
 
 test('a finished turn reads as the message, the tool with its result, and the reply', () => {
   const m = new ChatModel();
   for (const line of [echo('make the file'), used('t1', 'Write', { file_path: 'a.txt', content: 'x' }), returned('t1', 'File created'), said('Done.'), done()]) m.durable(line);
-  assert.deepEqual(kinds(m), ['user', 'tool', 'assistant']);
+  assert.deepEqual(kinds(m), ['user', 'tools', 'assistant']);
   assert.equal(m.items[0].text, 'make the file');
-  assert.deepEqual(m.items[1].result, { text: 'File created', error: false });
+  assert.deepEqual(calls(m)[0].result, { text: 'File created', error: false });
   assert.equal(m.items[2].text, 'Done.');
   assert.equal(m.state, 'idle');
 });
@@ -31,7 +33,7 @@ test('a tool result given as blocks is read as text, and a failed one is marked'
   const m = new ChatModel();
   m.durable(used('t1', 'Bash', { command: 'false' }));
   m.durable(returned('t1', [{ type: 'text', text: 'exit 1' }, { type: 'text', text: 'boom' }], true));
-  assert.deepEqual(m.items[0].result, { text: 'exit 1\nboom', error: true });
+  assert.deepEqual(calls(m)[0].result, { text: 'exit 1\nboom', error: true });
 });
 
 test('streamed text becomes the finished message in place, never a second copy', () => {
@@ -94,7 +96,7 @@ test('a permission request waits for an answer and the answer closes it', () => 
   m.durable(used('t1', 'Write', { file_path: 'a.txt' }));
   m.durable(asks('r1', 't1', 'Write', { file_path: 'a.txt' }));
   assert.equal(m.state, 'waiting');
-  const tool = m.items[1];
+  const tool = calls(m)[0];
   assert.equal(tool.request.open, true);
   assert.equal(tool.request.description, 'wants to Write');
   m.durable(JSON.parse(Wire.allow(tool.request)));
@@ -108,13 +110,13 @@ test('a declined request and a withdrawn one both stop waiting', () => {
   m.durable(echo('go'));
   m.durable(used('t1', 'Bash', { command: 'rm x' }));
   m.durable(asks('r1', 't1', 'Bash', { command: 'rm x' }));
-  m.durable(JSON.parse(Wire.deny(m.items[1].request)));
-  assert.equal(m.items[1].request.decision, 'deny');
+  m.durable(JSON.parse(Wire.deny(calls(m)[0].request)));
+  assert.equal(calls(m)[0].request.decision, 'deny');
   m.durable(used('t2', 'Bash', { command: 'ls' }));
   m.durable(asks('r2', 't2', 'Bash', { command: 'ls' }));
   assert.equal(m.state, 'waiting');
   m.durable({ type: 'control_cancel_request', request_id: 'r2' });
-  assert.equal(m.items[2].request.decision, 'cancelled');
+  assert.equal(calls(m)[1].request.decision, 'cancelled');
   assert.equal(m.state, 'busy');
 });
 
@@ -177,7 +179,7 @@ test('the session ending closes anything still open', () => {
   m.durable(asks('r1', 't1', 'Write', {}));
   m.exited(1);
   assert.equal(m.state, 'ended');
-  assert.equal(m.items[0].request.open, false);
+  assert.equal(calls(m)[0].request.open, false);
 });
 
 test('lines split anywhere in the byte stream, even inside a character, come out whole', () => {
@@ -266,8 +268,11 @@ test('what a local command printed is a note, and markup meant for the model is 
 test('the session says what it offers and what is in force, and a refused change is said once', () => {
   const m = new ChatModel();
   m.setCatalog({ type: 'catalog', models: [{ value: 'haiku', resolved: 'claude-haiku-5-5', name: 'Haiku', efforts: ['low'] }], commands: [{ name: 'compact', description: 'Summarize', hint: '' }] });
+  m.setSettings({ type: 'settings', mode: 'plan', model: 'claude-haiku-5-5', effort: 'low', resume: 'bypassPermissions' });
+  assert.deepEqual(m.settings, { mode: 'plan', model: 'claude-haiku-5-5', effort: 'low', resume: 'bypassPermissions' });
+  // A host from before plan approval says nothing of where the session was: that reads as unknown, not as an error.
   m.setSettings({ type: 'settings', mode: 'plan', model: 'claude-haiku-5-5', effort: 'low' });
-  assert.deepEqual(m.settings, { mode: 'plan', model: 'claude-haiku-5-5', effort: 'low' });
+  assert.equal(m.settings.resume, '');
   assert.equal(m.model, 'claude-haiku-5-5');
   m.reset();
   assert.equal(m.catalog.commands.length, 1);
@@ -314,4 +319,135 @@ test('a phone shows a model by the part of its name that tells it apart', () => 
   assert.equal(shortModel('Haiku'), 'Haiku');
   assert.equal(shortModel('Claude'), 'Claude');
   assert.equal(shortModel('claude-opus-5-5'), 'claude-opus-5-5');
+});
+
+test('calls made one after another are one run, and words, a question or a plan end it', () => {
+  const m = new ChatModel();
+  m.durable(echo('look around'));
+  m.durable(used('t1', 'Read', { file_path: 'a' }));
+  m.durable(used('t2', 'Read', { file_path: 'b' }));
+  m.durable(returned('t1', 'A'));
+  m.durable(used('t3', 'Grep', { pattern: 'x' }));
+  assert.deepEqual(kinds(m), ['user', 'tools']);
+  assert.deepEqual(m.items[1].tools.map(t => t.id), ['t1', 't2', 't3']);
+
+  // A result repaints the run the call is drawn in, since the call has no row of its own.
+  m.dirty.clear();
+  m.durable(returned('t3', 'hit'));
+  assert.deepEqual(Array.from(m.dirty).map(i => i.kind), ['tools']);
+
+  m.durable(said('Found it.'));
+  m.durable(used('t4', 'Edit', { file_path: 'a', old_string: 'x', new_string: 'y' }));
+  m.durable(used('q1', 'AskUserQuestion', { questions: [] }));
+  m.durable(used('t5', 'Bash', { command: 'ls' }));
+  m.durable(used('p1', 'ExitPlanMode', { plan: '# Plan' }));
+  m.durable(used('t6', 'Bash', { command: 'pwd' }));
+  assert.deepEqual(kinds(m), ['user', 'tools', 'assistant', 'tools', 'tool', 'tools', 'tool', 'tools']);
+  assert.deepEqual(m.items.filter(i => i.kind === 'tools').map(r => r.tools.length), [3, 1, 1, 1]);
+  assert.deepEqual(calls(m).map(t => t.id), ['t1', 't2', 't3', 't4', 'q1', 't5', 'p1', 't6']);
+});
+
+test('a run says how many calls it holds, of what, and how it stands', () => {
+  const tool = (name, extra) => Object.assign({ name, input: {}, result: null, request: null }, extra);
+  const done = { result: { text: '', error: false } };
+  assert.deepEqual(runOverview([tool('Read', done), tool('Read', done), tool('Grep', done)]),
+    { words: '3 tool calls', breakdown: 'Read 2, Grep', failed: 0, asking: false, running: false, state: 'done' });
+  assert.equal(runOverview([tool('Read', done), tool('Bash', { result: { text: 'no', error: true } })]).state, 'failed');
+  assert.equal(runOverview([tool('Read', done), tool('Bash')]).state, 'running');
+  assert.equal(runOverview([tool('Read', done), tool('Bash', { stopped: true })]).state, 'done');
+  assert.equal(runOverview([tool('Bash', { request: { open: false, decision: 'deny' } }), tool('Read', done)]).state, 'done');
+  // Waiting on the person outranks everything else that is true of the run.
+  assert.equal(runOverview([tool('Bash', { result: { text: 'no', error: true } }), tool('Write', { request: { open: true } })]).state, 'asking');
+});
+
+test('an edit reads as the lines that went and the lines that came, around the ones that stayed', () => {
+  const show = d => d.map(l => l.op + l.text);
+  assert.deepEqual(show(lineDiff('a\nb\nc', 'a\nB\nc')), [' a', '-b', '+B', ' c']);
+  assert.deepEqual(show(lineDiff('hello', 'goodbye')), ['-hello', '+goodbye']);
+  assert.deepEqual(show(lineDiff('a\nb', 'a\nb')), [' a', ' b']);
+  assert.deepEqual(show(lineDiff('a\nb\nc\nd', 'a\nd')), [' a', '-b', '-c', ' d']);
+  assert.deepEqual(show(lineDiff('a\nd', 'a\nb\nc\nd')), [' a', '+b', '+c', ' d']);
+  assert.deepEqual(show(lineDiff('one\ntwo\nthree\nfour', 'zero\ntwo\nthree\nfive')), ['-one', '+zero', ' two', ' three', '-four', '+five']);
+  assert.deepEqual(show(lineDiff('', 'new')), ['-', '+new']);
+
+  // Every line of both texts is accounted for, in order, however the two differ.
+  const before = Array.from({ length: 60 }, (_, i) => 'line ' + (i % 7)).join('\n');
+  const after = Array.from({ length: 55 }, (_, i) => 'line ' + (i % 5)).join('\n');
+  const d = lineDiff(before, after);
+  assert.equal(d.filter(l => l.op !== '+').map(l => l.text).join('\n'), before);
+  assert.equal(d.filter(l => l.op !== '-').map(l => l.text).join('\n'), after);
+
+  // Past the size where comparing every pair of lines would stall the page, it is still a true account.
+  const big = Array.from({ length: 700 }, (_, i) => 'x' + i).join('\n');
+  const other = Array.from({ length: 700 }, (_, i) => 'y' + i).join('\n');
+  const coarse = lineDiff(big, other);
+  assert.equal(coarse.filter(l => l.op === '-').length, 700);
+  assert.equal(coarse.filter(l => l.op === '+').length, 700);
+});
+
+test('a request keeps what the CLI offers to remember, and the offer is put in words or not made', () => {
+  const m = new ChatModel();
+  m.durable(used('t1', 'Write', { file_path: 'a.txt' }));
+  const edits = [{ type: 'setMode', mode: 'acceptEdits', destination: 'session' }];
+  m.durable({ type: 'control_request', request_id: 'r1', request: { subtype: 'can_use_tool', tool_name: 'Write', input: { file_path: 'a.txt' }, tool_use_id: 't1', permission_suggestions: edits } });
+  const req = calls(m)[0].request;
+  assert.deepEqual(req.suggestions, edits);
+  assert.deepEqual(alwaysOffer(req.suggestions), { label: 'Allow all edits this session', detail: '' });
+
+  const sent = JSON.parse(Wire.allow(req, null, req.suggestions));
+  assert.deepEqual(sent.response.response, { behavior: 'allow', updatedInput: { file_path: 'a.txt' }, updatedPermissions: edits });
+  assert.equal('updatedPermissions' in JSON.parse(Wire.allow(req)).response.response, false);
+  m.durable(sent);
+  assert.deepEqual(req.granted, edits);
+
+  const rule = [{ type: 'addRules', rules: [{ toolName: 'PowerShell', ruleContent: 'Get-Date' }, { toolName: 'Read' }], behavior: 'allow', destination: 'localSettings' }];
+  assert.deepEqual(alwaysOffer(rule), { label: 'Always allow in this folder', detail: 'PowerShell: Get-Date\nRead' });
+  assert.equal(alwaysOffer([Object.assign({}, rule[0], { destination: 'session' })]).label, 'Always allow this session');
+  assert.equal(alwaysOffer([Object.assign({}, rule[0], { destination: 'userSettings' })]).label, 'Always allow everywhere');
+  // Nothing offered, a rule that denies, a place it cannot name, or two places at once: no button.
+  assert.equal(alwaysOffer([]), null);
+  assert.equal(alwaysOffer(undefined), null);
+  assert.equal(alwaysOffer([Object.assign({}, rule[0], { behavior: 'deny' })]), null);
+  assert.equal(alwaysOffer([Object.assign({}, rule[0], { destination: 'somewhereNew' })]), null);
+  assert.equal(alwaysOffer([rule[0], Object.assign({}, rule[0], { destination: 'session' })]), null);
+  assert.equal(alwaysOffer([{ type: 'setMode', mode: 'bypassPermissions', destination: 'session' }]), null);
+});
+
+test('a plan is approved into the mode the session was in before it planned, or one any session may take', () => {
+  assert.deepEqual(planExits('bypassPermissions'), ['bypassPermissions', 'acceptEdits', 'default']);
+  assert.deepEqual(planExits('acceptEdits'), ['acceptEdits', 'default']);
+  assert.deepEqual(planExits('default'), ['default', 'acceptEdits']);
+  assert.deepEqual(planExits(''), ['acceptEdits', 'default']);
+  assert.deepEqual(planExits('plan'), ['acceptEdits', 'default']);
+
+  const m = new ChatModel();
+  m.durable(used('p1', 'ExitPlanMode', { plan: '# Plan' }));
+  m.durable(asks('r1', 'p1', 'ExitPlanMode', { plan: '# Plan' }));
+  const req = calls(m)[0].request;
+  const approved = JSON.parse(Wire.allow(req, null, [{ type: 'setMode', mode: 'acceptEdits', destination: 'session' }]));
+  assert.deepEqual(approved.response.response.updatedInput, { plan: '# Plan' });
+  assert.deepEqual(approved.response.response.updatedPermissions, [{ type: 'setMode', mode: 'acceptEdits', destination: 'session' }]);
+  const kept = JSON.parse(Wire.deny(req, 'keep planning'));
+  assert.deepEqual(kept.response.response, { behavior: 'deny', message: 'keep planning' });
+  assert.equal(JSON.parse(Wire.deny(req)).response.response.message, 'The user declined this.');
+});
+
+test('the plan is read from the request for approval, since the call itself can carry none', () => {
+  const m = new ChatModel();
+  // As Claude Code 2.1.322 sends it when plan mode was switched on mid-session: an empty call, the plan in the request.
+  m.durable(used('p1', 'ExitPlanMode', {}));
+  assert.equal(planText(calls(m)[0]), '');
+  m.durable(asks('r1', 'p1', 'ExitPlanMode', { plan: '# The plan', planFilePath: 'C:/x/plan.md' }));
+  assert.equal(planText(calls(m)[0]), '# The plan');
+
+  // Read back from the transcript there is no request: the approval's own words carry the plan.
+  const back = new ChatModel();
+  back.durable(Object.assign(used('p1', 'ExitPlanMode', {}), { history: true }));
+  const approval = ['User has approved your plan. You can now start coding.', '', '## Approved Plan:', '# The plan', '- one', ''].join('\n');
+  back.durable(Object.assign(returned('p1', approval), { history: true }));
+  assert.equal(planText(calls(back)[0]), ['# The plan', '- one'].join('\n'));
+
+  assert.equal(planText({ input: { plan: '# In the call' }, request: null, result: null }), '# In the call');
+  assert.equal(planText({ input: {}, request: null, result: { text: 'The user wants to keep planning.', error: true } }), '');
+  assert.equal(planText({ input: {}, request: null, result: { text: 'no marker here', error: false } }), '');
 });

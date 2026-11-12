@@ -28,6 +28,7 @@ internal sealed class ChatStream
     readonly HashSet<string> _openRequests = new(StringComparer.Ordinal);
     string _catalog = "";
     string _mode = "", _model = "", _effort = "";
+    string _modeOutsidePlan = "";
 
     /// <summary>What <see cref="Apply"/> changed: the host record, the lists the CLI offers, the settings in force; and whether to ask the CLI for its settings again.</summary>
     public readonly record struct Change(bool Record, bool Catalog, bool Settings, bool Refresh);
@@ -67,7 +68,7 @@ internal sealed class ChatStream
                 {
                     if (Text(line, "session_id") is { Length: > 0 } session) record.SessionId = session;
                     if (Text(line, "model") is { Length: > 0 } model) record.Model = _model = model;
-                    if (Text(line, "permissionMode") is { Length: > 0 } mode) _mode = mode;
+                    if (Text(line, "permissionMode") is { Length: > 0 } mode) Mode(mode);
                     Status(record, "busy", now);
                 }
                 else if (Text(line, "subtype") == "session_title_changed" && Text(line, "title") is { Length: > 0 } named) record.Title = named;
@@ -96,14 +97,20 @@ internal sealed class ChatStream
             case "control_response":
                 if (!line.TryGetProperty("response", out var response)) break;
                 string id = Text(response, "request_id");
-                if (_openRequests.Remove(id)) { if (_openRequests.Count == 0) Status(record, "busy", now); break; }
+                if (_openRequests.Remove(id))
+                {
+                    // An answer can carry a mode to go on in (a plan approved "and accept edits"): the CLI is in it from here.
+                    if (response.TryGetProperty("response", out var granted) && ModeIn(granted) is { Length: > 0 } next) Mode(next);
+                    if (_openRequests.Count == 0) Status(record, "busy", now);
+                    break;
+                }
                 if (Text(response, "subtype") != "success") break;
                 response.TryGetProperty("response", out var answer);
                 if (id == InitializeId) Introduced(answer);
                 else if (id == SettingsId) InForce(answer, record);
                 else if (id.StartsWith(SetPrefix, StringComparison.Ordinal))
                 {
-                    if (Text(answer, "mode") is { Length: > 0 } set) _mode = set;
+                    if (Text(answer, "mode") is { Length: > 0 } set) Mode(set);
                     refresh = true;
                 }
                 break;
@@ -125,7 +132,7 @@ internal sealed class ChatStream
     void Introduced(JsonElement answer)
     {
         if (answer.ValueKind != JsonValueKind.Object) return;
-        if (Text(answer, "current_permission_mode") is { Length: > 0 } mode) _mode = mode;
+        if (Text(answer, "current_permission_mode") is { Length: > 0 } mode) Mode(mode);
         var buffer = new ArrayBufferWriter<byte>();
         using (var w = new Utf8JsonWriter(buffer))
         {
@@ -180,7 +187,24 @@ internal sealed class ChatStream
     public string CatalogFrame() => _catalog;
 
     /// <summary>The frame that tells a viewer the permission mode, model and effort in force.</summary>
-    public string SettingsFrame() => JsonSerializer.Serialize(new { type = "settings", mode = _mode, model = _model, effort = _effort });
+    /// <summary><c>resume</c> is the mode the session was in before it went into plan mode: what approving a plan goes back to by default.</summary>
+    public string SettingsFrame() => JsonSerializer.Serialize(new { type = "settings", mode = _mode, model = _model, effort = _effort, resume = _modeOutsidePlan });
+
+    void Mode(string mode)
+    {
+        _mode = mode;
+        if (mode != "plan") _modeOutsidePlan = mode;
+    }
+
+    /// <summary>The mode an answer to a permission request switches the session to, if it names one.</summary>
+    static string ModeIn(JsonElement answer)
+    {
+        if (answer.ValueKind != JsonValueKind.Object || !answer.TryGetProperty("updatedPermissions", out var updates) || updates.ValueKind != JsonValueKind.Array) return "";
+        string mode = "";
+        foreach (var update in updates.EnumerateArray())
+            if (Text(update, "type") == "setMode" && Text(update, "mode") is { Length: > 0 } named) mode = named;
+        return mode;
+    }
 
     /// <summary>The CLI's answer to one of the host's own questions: tens of kilobytes no viewer reads; viewers get the frames made from it.</summary>
     public static bool AnswersTheHost(JsonElement line) =>

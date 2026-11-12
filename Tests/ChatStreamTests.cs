@@ -204,6 +204,42 @@ public class ChatStreamTests : IDisposable
     }
 
     [Fact]
+    public void A_plan_is_approved_back_into_the_mode_the_session_left_and_the_answer_itself_says_which()
+    {
+        var chat = new ChatStream();
+        var record = new HostRecord { AgentStatus = "idle" };
+        (string Mode, string Resume) Modes()
+        {
+            var f = Line(chat.SettingsFrame());
+            return (f.GetProperty("mode").GetString()!, f.GetProperty("resume").GetString()!);
+        }
+        Assert.Equal(("", ""), Modes());
+
+        chat.Apply(Line("""{"type":"control_response","response":{"subtype":"success","request_id":"sd-initialize","response":{"current_permission_mode":"bypassPermissions","models":[],"commands":[]}}}"""), record, T0);
+        Assert.Equal(("bypassPermissions", "bypassPermissions"), Modes());
+
+        // Into plan mode: the mode to come back to is still the one it left.
+        Assert.True(chat.Apply(Line("""{"type":"control_response","response":{"subtype":"success","request_id":"sd-set-1","response":{"mode":"plan"}}}"""), record, T0).Settings);
+        Assert.Equal(("plan", "bypassPermissions"), Modes());
+        chat.Apply(Line("""{"type":"system","subtype":"init","session_id":"s","model":"m","permissionMode":"plan"}"""), record, T0);
+        Assert.Equal(("plan", "bypassPermissions"), Modes());
+
+        // The plan is approved "and accept edits": the CLI is in that mode from the answer on, before any new turn says so.
+        chat.Apply(Line("""{"type":"control_request","request_id":"p1","request":{"subtype":"can_use_tool","tool_name":"ExitPlanMode","input":{"plan":"x"},"tool_use_id":"t1"}}"""), record, T0);
+        var approved = chat.Apply(Line("""{"type":"control_response","response":{"subtype":"success","request_id":"p1","response":{"behavior":"allow","updatedInput":{"plan":"x"},"updatedPermissions":[{"type":"setMode","mode":"acceptEdits","destination":"session"}]}}}"""), record, T0);
+        Assert.True(approved.Settings);
+        Assert.Equal(("acceptEdits", "acceptEdits"), Modes());
+
+        // An answer that names no mode, a rule that is not a mode, and the same answer seen again change nothing.
+        chat.Apply(Line(Ask("r2")), record, T0);
+        Assert.False(chat.Apply(Line(Answer("r2")), record, T0).Settings);
+        chat.Apply(Line(Ask("r3")), record, T0);
+        Assert.False(chat.Apply(Line("""{"type":"control_response","response":{"subtype":"success","request_id":"r3","response":{"behavior":"allow","updatedInput":{},"updatedPermissions":[{"type":"addRules","rules":[{"toolName":"Bash"}],"behavior":"allow","destination":"session"}]}}}"""), record, T0).Settings);
+        Assert.False(chat.Apply(Line("""{"type":"control_response","response":{"subtype":"success","request_id":"p1","response":{"behavior":"allow","updatedPermissions":[{"type":"setMode","mode":"default","destination":"session"}]}}}"""), record, T0).Settings);
+        Assert.Equal(("acceptEdits", "acceptEdits"), Modes());
+    }
+
+    [Fact]
     public void An_images_bytes_stay_out_of_the_scrollback_and_everything_else_is_left_as_it_was()
     {
         string data = new string('A', 5000);

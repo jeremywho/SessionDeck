@@ -130,3 +130,46 @@
 .pane.chat.touch button.slash-option { grid-template-columns: minmax(0, 1fr); row-gap: 2px; padding: 8px 10px; }
 .pane.chat.touch .slash-description { grid-column: 1; }
 .pane.chat.touch .slash-menu { max-height: 46vh; }
+
+/* A run of tool calls, and what a call shows when opened. */
+.chat details.tool-run { min-width: 0; }
+.chat details.tool-run > summary { display: list-item; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 0.9em; }
+.chat details.tool-run[data-state="failed"] > summary .tool-state { color: var(--pr-red); }
+.chat details.tool-run[data-state="asking"] > summary .tool-state { color: var(--pr-amber); }
+.chat .run-body { margin: 6px 0 4px 16px; display: flex; flex-direction: column; gap: 4px; }
+.chat .diff { border: 1px solid var(--pr-line); border-radius: 10px; padding: 8px 0; font: 0.82em/1.5 var(--chat-mono); max-height: 340px; overflow: auto; scrollbar-width: thin; }
+.chat .diff-line { padding: 0 12px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--fg2); }
+.chat .diff-line.del { color: var(--pr-red); }
+.chat .diff-line.add { color: var(--pr-green); }
+
+/* A plan waiting for approval, and the plan it was once answered. */
+.chat .plan { border: 1px solid var(--pr-line-strong); border-radius: 14px; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.chat .plan-head { display: flex; align-items: baseline; }
+.chat .plan-title { font-weight: 600; }
+.chat .plan[data-state="asking"] .tool-state { color: var(--pr-amber); }
+.chat .plan .ask { border: 0; border-top: 1px solid var(--pr-line); border-radius: 0; padding: 12px 0 0; }
+.chat .plan-mode { display: flex; flex-direction: column; gap: 4px; color: var(--fg2); font-size: 0.875em; }
+.chat select.plan-pick { align-self: flex-start; font: inherit; font-size: 1.143em; color: var(--fg); background: var(--bg-solid); border: 1px solid var(--pr-line-strong); border-radius: 8px; padding: 5px 10px; }
+.chat .ask-row.three { grid-template-columns: repeat(3, minmax(0, 1fr)); max-width: 720px; }
+.chat .ask-row button { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat .ask-rule { margin: 0; color: var(--fg2); font: 0.82em/1.5 var(--chat-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Three labels side by side need the room; in a narrow column or on a phone the choices stack, one full width each. */
+.chat-scroll { container-type: inline-size; }
+@container (max-width: 700px) {
+  .chat .ask-row.three { grid-template-columns: minmax(0, 1fr); max-width: none; }
+}
+.pane.chat.touch .ask-row, .pane.chat.touch .ask-row.three { grid-template-columns: minmax(0, 1fr); max-width: none; }
+
+/* Code colours, from the pane's own ink: four roles, and the two a diff needs. */
+.chat .hljs-comment, .chat .hljs-quote, .chat .hljs-meta { color: var(--fg3); }
+.chat .hljs-keyword, .chat .hljs-built_in, .chat .hljs-type, .chat .hljs-selector-tag, .chat .hljs-tag, .chat .hljs-name { color: var(--pr-blue); }
+.chat .hljs-string, .chat .hljs-regexp, .chat .hljs-attr, .chat .hljs-attribute, .chat .hljs-symbol { color: var(--pr-green); }
+.chat .hljs-number, .chat .hljs-literal, .chat .hljs-variable, .chat .hljs-template-variable { color: var(--pr-amber); }
+.chat .hljs-title, .chat .hljs-section { color: var(--fg); font-weight: 600; }
+.chat .hljs-deletion { color: var(--pr-red); }
+.chat .hljs-addition { color: var(--pr-green); }
+/* A phone has no room for the pickers and a status beside them: the status takes its own line above. */
+.pane.chat.touch .composer-row { flex-wrap: wrap; }
+.pane.chat.touch .composer-state { order: -1; flex: 0 0 100%; box-sizing: border-box; margin: 0; padding: 0 6px 6px; }
+.pane.chat.touch .composer-state:empty { display: none; }
+.pane.chat.touch button.chat-send { margin-left: auto; }

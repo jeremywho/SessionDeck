@@ -5,6 +5,7 @@
   'use strict';
 
   const INTERRUPTED = '[Request interrupted by user';
+  const SOLO_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode']);
   const SET_PREFIX = 'sd-set-';
 
   function textOf(content) {
@@ -26,7 +27,7 @@
   class ChatModel {
     constructor() {
       this.catalog = { models: [], commands: [] };
-      this.settings = { mode: '', model: '', effort: '' };
+      this.settings = { mode: '', model: '', effort: '', resume: '' };
       this.reset();
     }
 
@@ -50,7 +51,8 @@
       return item;
     }
 
-    touch(item) { this.dirty.add(item); }
+    // A tool call drawn inside a run is repainted by repainting its run.
+    touch(item) { this.dirty.add(item.run || item); }
 
     get waiting() {
       for (const r of this.requests.values()) if (r.open) return true;
@@ -73,7 +75,7 @@
     }
 
     setSettings(frame) {
-      this.settings = { mode: frame.mode || '', model: frame.model || '', effort: frame.effort || '' };
+      this.settings = { mode: frame.mode || '', model: frame.model || '', effort: frame.effort || '', resume: frame.resume || '' };
       if (this.settings.model) this.model = this.settings.model;
     }
 
@@ -182,8 +184,14 @@
             this.settle(draft);
           } else if (text) this.add({ kind, text });
         } else if (b.type === 'tool_use') {
-          const tool = this.add({ kind: 'tool', id: b.id, name: b.name || 'tool', input: b.input || {}, result: null, request: null });
+          const tool = { kind: 'tool', id: b.id, name: b.name || 'tool', input: b.input || {}, result: null, request: null };
           this.tools.set(b.id, tool);
+          // A question and a plan are things to answer and stand alone. Every other call joins the run of calls it
+          // is part of, so a turn that reads twenty files is one line to look past, not twenty.
+          const last = this.items[this.items.length - 1];
+          if (SOLO_TOOLS.has(tool.name)) this.add(tool);
+          else if (last && last.kind === 'tools') { last.tools.push(tool); tool.run = last; this.touch(last); }
+          else { tool.run = this.add({ kind: 'tools', tools: [tool] }); }
         }
       }
     }
@@ -216,7 +224,8 @@
         tool = this.add({ kind: 'tool', id: req.tool_use_id || line.request_id, name: req.tool_name || 'tool', input: req.input || {}, result: null, request: null });
         this.tools.set(tool.id, tool);
       }
-      tool.request = { id: line.request_id, input: req.input || {}, description: req.description || '', open: true, decision: '', answers: null };
+      tool.request = { id: line.request_id, input: req.input || {}, description: req.description || '', open: true, decision: '', answers: null,
+        suggestions: Array.isArray(req.permission_suggestions) ? req.permission_suggestions : [], granted: [] };
       this.requests.set(line.request_id, tool.request);
       tool.request.tool = tool;
       this.touch(tool);
@@ -230,6 +239,7 @@
       req.open = false;
       req.decision = r.subtype === 'error' ? 'deny' : inner.behavior || 'allow';
       req.answers = inner.updatedInput && inner.updatedInput.answers ? inner.updatedInput.answers : null;
+      req.granted = Array.isArray(inner.updatedPermissions) ? inner.updatedPermissions : [];
       this.touch(req.tool);
     }
 
@@ -288,13 +298,16 @@
     // A change to the running session: set_model {model}, set_permission_mode {mode}, apply_flag_settings {settings:{effortLevel}}.
     set: (subtype, fields) => JSON.stringify({ type: 'control_request', request_id: SET_PREFIX + Date.now().toString(36) + Math.random().toString(36).slice(2, 8), request: Object.assign({ subtype }, fields) }),
     interrupt: () => JSON.stringify({ type: 'control_request', request_id: 'interrupt-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8), request: { subtype: 'interrupt' } }),
-    allow: (request, answers) => JSON.stringify({
+    // `permissions` go with the answer: a mode to continue in, or the rule that makes this the last time it is asked.
+    allow: (request, answers, permissions) => JSON.stringify({
       type: 'control_response',
-      response: { subtype: 'success', request_id: request.id, response: { behavior: 'allow', updatedInput: answers ? Object.assign({}, request.input, { answers }) : request.input } },
+      response: { subtype: 'success', request_id: request.id, response: Object.assign(
+        { behavior: 'allow', updatedInput: answers ? Object.assign({}, request.input, { answers }) : request.input },
+        permissions && permissions.length ? { updatedPermissions: permissions } : {}) },
     }),
-    deny: request => JSON.stringify({
+    deny: (request, message) => JSON.stringify({
       type: 'control_response',
-      response: { subtype: 'success', request_id: request.id, response: { behavior: 'deny', message: 'The user declined this.' } },
+      response: { subtype: 'success', request_id: request.id, response: { behavior: 'deny', message: message || 'The user declined this.' } },
     }),
   };
 
@@ -363,7 +376,91 @@
   }
   const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 
-  const api = { ChatModel, LineReader, Wire, toolBrief, textOf, commandQuery, matchCommands, modelInForce, shortModel };
+  // What an edit took out and put in, line by line: [{ op: ' ' | '-' | '+', text }]. Lines the two share stay in
+  // place between the changes. Past a size where comparing every pair of lines would stall the page, the old text
+  // is shown going and the new coming, which is still true.
+  function lineDiff(before, after) {
+    const a = String(before).split('\n'), b = String(after).split('\n');
+    let head = 0;
+    while (head < a.length && head < b.length && a[head] === b[head]) head++;
+    let tail = 0;
+    while (tail < a.length - head && tail < b.length - head && a[a.length - 1 - tail] === b[b.length - 1 - tail]) tail++;
+    const x = a.slice(head, a.length - tail), y = b.slice(head, b.length - tail);
+    const middle = [];
+    if (x.length * y.length > 400000) {
+      for (const t of x) middle.push({ op: '-', text: t });
+      for (const t of y) middle.push({ op: '+', text: t });
+    } else {
+      // Longest common subsequence, filled from the end so the walk forward takes removals before additions.
+      const width = y.length + 1;
+      const table = new Uint32Array((x.length + 1) * width);
+      for (let i = x.length - 1; i >= 0; i--)
+        for (let j = y.length - 1; j >= 0; j--)
+          table[i * width + j] = x[i] === y[j] ? table[(i + 1) * width + j + 1] + 1 : Math.max(table[(i + 1) * width + j], table[i * width + j + 1]);
+      let i = 0, j = 0;
+      while (i < x.length && j < y.length) {
+        if (x[i] === y[j]) { middle.push({ op: ' ', text: x[i] }); i++; j++; }
+        else if (table[(i + 1) * width + j] >= table[i * width + j + 1]) middle.push({ op: '-', text: x[i++] });
+        else middle.push({ op: '+', text: y[j++] });
+      }
+      while (i < x.length) middle.push({ op: '-', text: x[i++] });
+      while (j < y.length) middle.push({ op: '+', text: y[j++] });
+    }
+    const same = t => ({ op: ' ', text: t });
+    return a.slice(0, head).map(same).concat(middle, a.slice(a.length - tail).map(same));
+  }
+
+  // A run of tool calls in a line: how many, of which tools, and how it stands.
+  function runOverview(tools) {
+    const counts = new Map();
+    for (const t of tools) counts.set(t.name, (counts.get(t.name) || 0) + 1);
+    const failed = tools.filter(t => t.result && t.result.error).length;
+    const asking = tools.some(t => t.request && t.request.open);
+    const running = tools.some(t => !t.result && !t.stopped && !(t.request && t.request.decision === 'deny'));
+    return {
+      words: `${tools.length} tool calls`,
+      breakdown: Array.from(counts, ([name, n]) => n > 1 ? `${name} ${n}` : name).join(', '),
+      failed, asking, running,
+      state: asking ? 'asking' : running ? 'running' : failed ? 'failed' : 'done',
+    };
+  }
+
+  // What the CLI offers to remember with an allow, in words: { label, detail }. Null when it offers nothing, or
+  // something this cannot describe: a button whose effect is not stated is not offered.
+  function alwaysOffer(suggestions) {
+    if (!Array.isArray(suggestions) || !suggestions.length) return null;
+    const where = { session: 'this session', localSettings: 'in this folder', projectSettings: 'in this project', userSettings: 'everywhere' };
+    if (suggestions.every(x => x && x.type === 'setMode' && x.mode === 'acceptEdits' && x.destination === 'session'))
+      return { label: 'Allow all edits this session', detail: '' };
+    if (suggestions.every(x => x && x.type === 'addRules' && x.behavior === 'allow' && where[x.destination] && Array.isArray(x.rules) && x.rules.length)) {
+      const places = Array.from(new Set(suggestions.map(x => where[x.destination])));
+      if (places.length !== 1) return null;
+      const rules = suggestions.flatMap(x => x.rules).map(r => r.ruleContent ? `${r.toolName}: ${r.ruleContent}` : String(r.toolName));
+      return { label: `Always allow ${places[0]}`, detail: rules.join('\n') };
+    }
+    return null;
+  }
+
+  // The text of a plan. The call itself can carry none: the plan then comes with the request for approval, and for
+  // a conversation read back from the transcript, where no request is kept, in what the approval said back.
+  function planText(tool) {
+    const asked = tool.request && tool.request.input && tool.request.input.plan;
+    if (typeof asked === 'string' && asked) return asked;
+    if (tool.input && typeof tool.input.plan === 'string' && tool.input.plan) return tool.input.plan;
+    const said = tool.result && !tool.result.error ? tool.result.text : '';
+    const at = said.indexOf('## Approved Plan:');
+    return at < 0 ? '' : said.slice(at + '## Approved Plan:'.length).trim();
+  }
+
+  // The modes a plan can be approved into: where the session was before it planned, then the two that any session
+  // may take. Bypass is offered only as the way back to it, since a session not started with it cannot enter it.
+  function planExits(resume) {
+    const modes = [];
+    for (const m of [resume, 'acceptEdits', 'default']) if (m && m !== 'plan' && !modes.includes(m)) modes.push(m);
+    return modes;
+  }
+
+  const api = { ChatModel, LineReader, Wire, toolBrief, textOf, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText };
   if (typeof module !== 'undefined' && module.exports) { module.exports = api; return; }
 
   // ================= the page side =================
@@ -633,7 +730,7 @@
           node = node || h('div', 'msg assistant md');
           node.classList.toggle('draft', !!item.draft);
           node.innerHTML = markdown(item.text);
-          decorate(node);
+          decorate(node, !item.draft);
           return node;
         }
         case 'thinking': {
@@ -650,12 +747,22 @@
           if (item.detail) node.title = clip(item.detail, 2000);
           return node;
         }
-        case 'tool': return renderTool(item, node);
+        case 'tools': return renderRun(item, node);
+        case 'tool': return renderTool(item, !!node && node.open);
       }
       return node || h('div');
     }
 
-    function decorate(node) {
+    // Links open outside, code blocks get a copy button, and a finished block in a named language is coloured.
+    // highlight.js escapes what it is given and returns only spans, so its output goes in after the scrub.
+    function decorate(node, colour) {
+      if (colour && root.hljs) {
+        for (const code of node.querySelectorAll('pre > code[class^="language-"]')) {
+          const language = code.className.slice('language-'.length);
+          if (!root.hljs.getLanguage(language)) continue;
+          try { code.innerHTML = root.hljs.highlight(code.textContent || '', { language, ignoreIllegals: true }).value; } catch { }
+        }
+      }
       for (const a of node.querySelectorAll('a[href]')) {
         a.addEventListener('click', ev => { ev.preventDefault(); post({ type: 'open', uri: a.getAttribute('href') }); });
       }
@@ -671,9 +778,35 @@
       }
     }
 
-    function renderTool(item, node) {
-      const wasOpen = node ? node.open : false;
+    // A run of calls is one line that opens to its calls; a run of one is just that call.
+    function renderRun(run, node) {
+      const open = new Set();
+      if (node) {
+        for (const d of node.querySelectorAll('details[data-tool]')) if (d.open) open.add(d.dataset.tool);
+        if (node.dataset.tool && node.open) open.add(node.dataset.tool);
+      }
+      if (run.tools.length === 1) return renderTool(run.tools[0], open.has(run.tools[0].id));
+      const overview = runOverview(run.tools);
+      const fresh = h('details', 'tool-run');
+      fresh.open = (!!node && node.classList.contains('tool-run') && node.open) || overview.asking;
+      fresh.dataset.state = overview.state;
+      const summary = h('summary');
+      const latest = run.tools[run.tools.length - 1];
+      summary.append(h('span', 'tool-name', overview.words),
+        h('span', 'tool-brief', overview.running ? `${latest.name} ${toolBrief(latest.name, latest.input)}` : overview.breakdown));
+      const word = overview.asking ? 'answer required' : overview.running ? 'running' : overview.failed ? `${overview.failed} failed` : '';
+      if (word) summary.appendChild(h('span', 'tool-state', word));
+      fresh.appendChild(summary);
+      const body = h('div', 'run-body');
+      for (const tool of run.tools) body.appendChild(renderTool(tool, open.has(tool.id)));
+      fresh.appendChild(body);
+      return fresh;
+    }
+
+    function renderTool(item, wasOpen) {
+      if (item.name === 'ExitPlanMode') return renderPlan(item);
       const fresh = h('details', 'tool');
+      fresh.dataset.tool = item.id;
       const req = item.request;
       const asking = req && req.open;
       fresh.open = wasOpen || !!asking;
@@ -687,7 +820,7 @@
       const body = h('div', 'tool-body');
       if (item.name === 'AskUserQuestion') body.appendChild(questionCard(item));
       else {
-        body.appendChild(h('pre', 'tool-input', clip(JSON.stringify(item.input, null, 2), 6000)));
+        body.appendChild(toolDetail(item));
         if (asking) body.appendChild(permissionCard(req));
       }
       if (item.result) body.appendChild(h('pre', 'tool-result' + (item.result.error ? ' error' : ''), clip(item.result.text, 12000)));
@@ -695,18 +828,95 @@
       return fresh;
     }
 
+    // What the call was asked to do, in the shape it is easiest to read: an edit as what went and what came,
+    // a new file as its text, a command as the command; anything else as the input it was given.
+    function toolDetail(item) {
+      const input = item.input || {};
+      if (typeof input.old_string === 'string' && typeof input.new_string === 'string') {
+        const box = h('div', 'diff');
+        const lines = lineDiff(input.old_string, input.new_string);
+        for (const line of lines.slice(0, 400)) box.appendChild(h('div', 'diff-line ' + (line.op === '-' ? 'del' : line.op === '+' ? 'add' : 'same'), line.op + ' ' + line.text));
+        if (lines.length > 400) box.appendChild(h('div', 'diff-line same', `… ${lines.length - 400} more lines`));
+        return box;
+      }
+      if (typeof input.content === 'string' && (input.file_path || input.path)) return h('pre', 'tool-input', clip(input.content, 6000));
+      if (typeof input.command === 'string') return h('pre', 'tool-input', clip(input.command, 6000));
+      return h('pre', 'tool-input', clip(JSON.stringify(input, null, 2), 6000));
+    }
+
+    // A plan is something to read and answer, so it is shown whole: the plan, then how to go on.
+    function renderPlan(item) {
+      const box = h('div', 'plan');
+      box.dataset.tool = item.id;
+      const req = item.request;
+      const open = req && req.open;
+      const head = h('div', 'plan-head');
+      head.appendChild(h('span', 'plan-title', 'Plan'));
+      // Read back from a transcript there is no request, only what came of it.
+      const verdict = open ? 'approval required'
+        : req ? (req.decision === 'allow' ? 'approved' : req.decision === 'deny' ? 'not approved' : 'not answered')
+        : item.result ? (item.result.error ? 'not approved' : 'approved') : '';
+      if (verdict) head.appendChild(h('span', 'tool-state', verdict));
+      box.dataset.state = open ? 'asking' : 'done';
+      box.appendChild(head);
+      const plan = h('div', 'md plan-body');
+      const text = planText(item);
+      if (text) {
+        plan.innerHTML = markdown(text);
+        decorate(plan, true);
+        box.appendChild(plan);
+      }
+      if (!open) return box;
+
+      const actions = h('div', 'ask');
+      const label = h('label', 'plan-mode', 'After approval');
+      const pick = document.createElement('select');
+      pick.className = 'plan-pick';
+      for (const mode of planExits(model.settings.resume)) {
+        const o = document.createElement('option');
+        o.value = mode;
+        o.textContent = (MODES.find(m => m[0] === mode) || [mode, mode])[1];
+        pick.appendChild(o);
+      }
+      label.appendChild(pick);
+      actions.appendChild(label);
+      const row = h('div', 'ask-row');
+      const approve = h('button', 'primary', 'Approve plan');
+      const keep = h('button', '', 'Keep planning');
+      approve.type = keep.type = 'button';
+      const sent = ok => { if (ok) approve.disabled = keep.disabled = pick.disabled = true; };
+      approve.addEventListener('click', () => sent(sendLine(Wire.allow(req, null, [{ type: 'setMode', mode: pick.value, destination: 'session' }]))));
+      keep.addEventListener('click', () => sent(sendLine(Wire.deny(req, 'The user wants to keep planning. Ask what to change, or revise the plan.'))));
+      row.append(approve, keep);
+      actions.appendChild(row);
+      box.appendChild(actions);
+      return box;
+    }
+
     function permissionCard(req) {
       const card = h('div', 'ask');
       card.appendChild(h('div', 'ask-title', 'Permission required'));
       if (req.description) card.appendChild(h('div', 'ask-text', req.description));
-      const row = h('div', 'ask-row');
+      const always = alwaysOffer(req.suggestions);
+      const row = h('div', 'ask-row' + (always ? ' three' : ''));
       const allow = h('button', 'primary', 'Allow');
       const deny = h('button', '', 'Deny');
+      const buttons = [allow, deny];
       allow.type = deny.type = 'button';
-      allow.addEventListener('click', () => { if (sendLine(Wire.allow(req))) { allow.disabled = deny.disabled = true; } });
-      deny.addEventListener('click', () => { if (sendLine(Wire.deny(req))) { allow.disabled = deny.disabled = true; } });
-      row.append(allow, deny);
+      const sent = ok => { if (ok) for (const b of buttons) b.disabled = true; };
+      allow.addEventListener('click', () => sent(sendLine(Wire.allow(req))));
+      deny.addEventListener('click', () => sent(sendLine(Wire.deny(req))));
+      row.appendChild(allow);
+      if (always) {
+        const remember = h('button', '', always.label);
+        remember.type = 'button';
+        buttons.push(remember);
+        remember.addEventListener('click', () => sent(sendLine(Wire.allow(req, null, req.suggestions))));
+        row.appendChild(remember);
+      }
+      row.appendChild(deny);
       card.appendChild(row);
+      if (always && always.detail) card.appendChild(h('pre', 'ask-rule', clip(always.detail, 600)));
       return card;
     }
 

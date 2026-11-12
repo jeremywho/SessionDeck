@@ -227,7 +227,7 @@ public class GatewayServerTests : IAsyncDisposable
     {
         using var c = new HttpClient { BaseAddress = new Uri(Base) };
         string page = await c.GetStringAsync("/mobile/mobile-chat.html");
-        foreach (var file in new[] { "chat.css", "marked.js", "chat.js" })
+        foreach (var file in new[] { "chat.css", "marked.js", "highlight.js", "chat.js" })
         {
             Assert.Contains($"\"{file}\"", page);
             var res = await c.GetAsync("/mobile/" + file);

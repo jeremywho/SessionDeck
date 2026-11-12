@@ -112,8 +112,9 @@ from any column's `+` menu. It needs the GitHub CLI signed in (`gh auth login`) 
 ## Chat sessions
 A Claude session can open as a conversation instead of a terminal: right-click a column's `+` and
 pick **New Claude chat**, or tick **Chat view** in the New session dialog. Replies render as
-markdown, tool calls fold to one line each, and permission requests and questions appear as
-buttons. Enter sends, Shift+Enter adds a line, Esc or **Stop** interrupts. Typing `/` lists the
+markdown with coloured code, a run of tool calls folds to one line, an edit shows as a diff, and
+permission requests, questions and plans appear as cards with buttons (a plan is approved into the
+mode you pick; a permission can be allowed for the rest of the session when Claude offers that). Enter sends, Shift+Enter adds a line, Esc or **Stop** interrupts. Typing `/` lists the
 session's commands (arrows to move, Tab to complete, Enter to run); the model, effort and permission
 mode under the message box change the running session; a pasted image is attached and sent with
 the message. It is an ordinary Claude

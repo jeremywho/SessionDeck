@@ -208,6 +208,21 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
   the user message; `ChatStream.WithoutImageData` empties `source.data` (leaving `omitted`) on the
   echoed line and on history read from the transcript. The pane shows its own preview for what it
   sent and "1 image attached" for anything else.
+- **A plan's text is in the request, not the call.** `ExitPlanMode` arrives as a `tool_use` whose
+  input can be `{}`; the plan (`plan`, `planFilePath`) is in the `can_use_tool` request, and for a
+  conversation read back from the transcript it is in the approval's `tool_result` after
+  `## Approved Plan:` (`planText` in `chat.js`). Approving sends `allow` with
+  `updatedPermissions: [{type:"setMode", mode, destination:"session"}]`; "keep planning" is a
+  `deny` with a message. `bypassPermissions` can be set this way only in a session launched with
+  it, so it is offered only as the mode the session left (`resume` in the settings frame).
+- **"Always allow" is the CLI's own suggestion sent back.** A `can_use_tool` request may carry
+  `permission_suggestions` (`setMode acceptEdits` for edits, `addRules` with a destination for
+  commands); the card offers it only when `alwaysOffer` can say in words what it does, and answers
+  with those suggestions as `updatedPermissions`. The host reads a `setMode` out of the echoed
+  answer so the mode picker is right at once.
+- **Tool calls are drawn inside runs.** In `ChatModel` a call is not a row: consecutive calls
+  share a `tools` item (`AskUserQuestion` and `ExitPlanMode` stand alone), and `touch` repaints
+  the run. Tests reach calls through their runs.
 - **Slash commands are just messages.** A local one (`/context`, `/effort`, `/rename`) is never
   echoed: the CLI answers with a synthetic assistant message and a `result`, so the pane settles
   its pending bubble at the end of the turn. `set_model` and friends replay a
@@ -220,7 +235,9 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
   from that name.
 - **Page side:** `ChatModel` in `chat.js` has no DOM and is tested under Node
   (`Tests/js/chat.test.js`, run by `ChatPageTests`). Markdown is `marked` with raw HTML escaped,
-  then scrubbed to a tag whitelist; never render model text any other way. The pane takes its ink
+  then scrubbed to a tag whitelist; never render model text any other way. Code colouring
+  (`highlight.js`, vendored) runs after the scrub, on a block's text only, and only for a named
+  language in a finished message. The pane takes its ink
   from the terminal scheme's background, not the app theme (`chatLook` in `deck.html`).
 - **A phone opens a chat as the same pane.** The gateway serves `/mobile/mobile-chat.html`, which
   hosts `chat.js` full screen (`touch: true`) and attaches through the gateway's relay
