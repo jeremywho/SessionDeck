@@ -486,6 +486,13 @@
 
     function nearBottom() { return scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 60; }
 
+    // A keyboard coming up (or a window made shorter) shrinks the conversation under a reader who was at the
+    // latest message: they stay there, rather than being left looking at whatever is now at the top.
+    let atLatest = true;
+    scroll.addEventListener('scroll', () => { atLatest = nearBottom(); });
+    const resized = new ResizeObserver(() => { if (atLatest) scroll.scrollTop = scroll.scrollHeight; });
+    resized.observe(scroll);
+
     function schedule() {
       if (frame) return;
       frame = requestAnimationFrame(() => { frame = 0; paint(); });
@@ -1042,6 +1049,7 @@
       dispose() {
         closed = true;
         if (frame) cancelAnimationFrame(frame);
+        resized.disconnect();
         try { if (ws) ws.close(); } catch { }
         for (const shot of shots) URL.revokeObjectURL(shot.url);
         for (const item of model.items) for (const url of item.images || []) URL.revokeObjectURL(url);
