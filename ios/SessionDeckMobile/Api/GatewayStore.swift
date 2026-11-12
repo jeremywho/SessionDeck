@@ -24,11 +24,14 @@ final class GatewayStore: ObservableObject {
     private static func lanBaseKey(for relay: Pairing?) -> String { "lanBase:\(relay?.host ?? "")" }
 
     init() {
-        let relay = Self.relay()
+        // A test run launched with `--pair` (debug builds only) is aimed at one gateway and must reach no other:
+        // the relay the build carries and any pairing left in the keychain are both set aside for that launch.
+        let aimed = LaunchOptions.pair != nil
+        let relay = aimed ? nil : Self.relay()
         relayPairing = relay
-        lanPairing = Self.lan(base: UserDefaults.standard.string(forKey: Self.lanBaseKey(for: relay)), key: RelaySecrets.key)
+        lanPairing = aimed ? nil : Self.lan(base: UserDefaults.standard.string(forKey: Self.lanBaseKey(for: relay)), key: RelaySecrets.key)
         // The remembered LAN address is only a candidate until it proves itself: the key never goes there first.
-        pairing = relayPairing ?? Keychain.loadPairing()
+        pairing = aimed ? nil : relayPairing ?? Keychain.loadPairing()
         viewed = ledger.all()
         if pairing != nil { startEvents() }
         if relayPairing != nil { Task { await choosePath(); await learnLan() } }
