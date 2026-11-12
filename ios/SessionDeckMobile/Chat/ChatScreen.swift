@@ -45,11 +45,31 @@ final class ChatBridge: NSObject, ObservableObject, WKScriptMessageHandler {
             if let text = body["text"] as? String, !text.isEmpty { UIPasteboard.general.string = text }
         case "open":
             if let url = Self.externalURL(body["uri"] as? String) { UIApplication.shared.open(url) }
-        case "connected": note = nil; LaunchOptions.log("chat connected")
+        case "connected":
+            note = nil
+            LaunchOptions.log("chat connected")
+            sendLaunchLines()
         case "disconnected": note = "Reconnecting…"
         case "exit": note = "The session ended."
         case "title": if let t = body["title"] as? String, !t.isEmpty { title = t }
         default: break
+        }
+    }
+
+    weak var webView: WKWebView?
+    private var launchLinesSent = false
+
+    /// A debug launch can carry `--send` lines: each is typed into the page and sent, once, so a chat can be exercised on a device nobody is touching.
+    private func sendLaunchLines() {
+        guard !launchLinesSent, !LaunchOptions.sends.isEmpty else { return }
+        launchLinesSent = true
+        Task {
+            for line in LaunchOptions.sends {
+                // The page's pickers and its socket settle a moment after it reports connected.
+                try? await Task.sleep(nanoseconds: 2_500_000_000)
+                let result = try? await webView?.evaluateJavaScript("window.sdChat ? (window.sdChat.send(\(Keys.jsLiteral(line))), 'sent') : 'no pane'")
+                LaunchOptions.log("chat send \(String(describing: result)): \(line.debugDescription)")
+            }
         }
     }
 
@@ -80,6 +100,7 @@ struct ChatWebView: UIViewRepresentable {
         view.scrollView.contentInsetAdjustmentBehavior = .never
         view.accessibilityIdentifier = "chat-page"
         bridge.pageBase = pairing.baseURL
+        bridge.webView = view
         view.load(URLRequest(url: Self.pageURL(pairing)))
         return view
     }

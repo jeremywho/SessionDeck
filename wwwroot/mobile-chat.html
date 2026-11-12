@@ -49,11 +49,15 @@
     el, id: SD.hostId, post, touch: true,
     socketUrl: seq => `${scheme}://${location.host}/sessions/${encodeURIComponent(SD.hostId)}/attach?token=${encodeURIComponent(SD.token)}&after=${seq}`,
   });
-  pane.applyLook({
+  // The native shell reaches the pane through this (a debug launch sends its --send lines with it).
+  window.sdChat = pane;
+  window.addEventListener('resize', () => pane.applyLook(look));
+  const look = {
     font: 'Menlo', size: 12, onDark: true,
     ink: { '--fg': '#e8e9eb', '--fg2': '#b8bbc2', '--fg3': '#8a8d93', '--pr-red': '#f2555a', '--pr-amber': '#e5b84f', '--pr-green': '#5bc46b', '--pr-blue': '#7fb3ff',
            '--pr-line': 'rgba(138, 141, 147, 0.22)', '--pr-line-strong': 'rgba(138, 141, 147, 0.5)', '--bg-solid': '#0c0c0c' },
-  });
+  };
+  pane.applyLook(look);
 })();
 </script>
 </body>

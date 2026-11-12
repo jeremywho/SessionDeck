@@ -580,13 +580,14 @@
       for (const p of [modelPick, effortPick, modePick]) p.disabled = state === 'offline';
       if (!live) return;
       // Three full labels do not fit across a phone: there the model drops its "Claude" and the mode is one word.
-      const modelPairs = models.map(m => [m.value, opts.touch ? shortModel(m.name || m.value) : m.name || m.value, m.description || '']);
+      const narrow = !!opts.touch && el.clientWidth < 600;
+      const modelPairs = models.map(m => [m.value, narrow ? shortModel(m.name || m.value) : m.name || m.value, m.description || '']);
       if (!inForce && s.model) modelPairs.push([s.model, s.model, '']);
       options(modelPick, modelPairs, inForce ? inForce.value : s.model);
       const levels = inForce && inForce.efforts && inForce.efforts.length ? inForce.efforts.slice() : EFFORTS.slice();
       if (s.effort && !levels.includes(s.effort)) levels.push(s.effort);
       options(effortPick, levels.map(l => [l, l, 'Effort']), s.effort);
-      const modePairs = MODES.map(m => [m[0], opts.touch ? m[2] : m[1]]);
+      const modePairs = MODES.map(m => [m[0], narrow ? m[2] : m[1]]);
       if (s.mode && !MODES.some(m => m[0] === s.mode)) modePairs.push([s.mode, s.mode]);
       options(modePick, modePairs, s.mode);
     }
@@ -1020,6 +1021,9 @@
     return {
       model,
       focus() { input.focus(); },
+      // Type and send in one step, for a shell around the page that has its own way of taking words.
+      send(text) { input.value = String(text || ''); grow(); return submit(); },
+      get state() { return el.dataset.state; },
       paste(text) {
         if (!text) return;
         const at = input.selectionStart ?? input.value.length;
@@ -1033,6 +1037,7 @@
         el.style.setProperty('--chat-size', Math.round(look.size * 96 / 72) + 'px');
         for (const [name, value] of Object.entries(look.ink || {})) el.style.setProperty(name, value);
         el.style.colorScheme = look.onDark ? 'dark' : 'light';
+        schedule();
       },
       dispose() {
         closed = true;
