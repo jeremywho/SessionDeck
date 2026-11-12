@@ -133,6 +133,33 @@ public class ChatTranscriptTests : IDisposable
     }
 
     [Fact]
+    public void A_place_counts_only_in_the_file_where_that_message_is_at_it()
+    {
+        // The conversation moved to a new file under the host; the viewer's oldest message is from the first one.
+        string first = Write("first.jsonl", Enumerable.Range(1, 6).Select(i => User(i, "")).ToList());
+        string second = Write("second.jsonl", Enumerable.Range(101, 6).Select(i => User(i, "")).ToList());
+        long at4 = ChatTranscript.Find(first, "msg-4");
+        Assert.True(ChatTranscript.Holds(first, at4, "msg-4"));
+        Assert.False(ChatTranscript.Holds(second, at4, "msg-4"));
+        Assert.False(ChatTranscript.Holds(first, at4 + 1, "msg-4"));
+        Assert.False(ChatTranscript.Holds(first, at4, "msg-5"));
+        Assert.False(ChatTranscript.Holds(first, 1L << 40, "msg-4"));
+        Assert.False(ChatTranscript.Holds(Path.Combine(_dir, "nowhere.jsonl"), at4, "msg-4"));
+
+        // The file in use now is listed first, and the place is still read in the file it belongs to.
+        var files = new[] { second, first };
+        Assert.Equal(new[] { "message 1", "message 2", "message 3" }, ChatTranscript.BeforeMessage(files, at4, "msg-4", 1 << 20, 100).Lines.Select(Said));
+        // A place that is that message's nowhere: the message is looked for by its uuid.
+        Assert.Equal(new[] { "message 101", "message 102" }, ChatTranscript.BeforeMessage(files, at4 + 7, "msg-103", 1 << 20, 100).Lines.Select(Said));
+        // By uuid alone, as for a message that arrived live; one found nowhere gets nothing.
+        Assert.Equal(new[] { "message 1" }, ChatTranscript.BeforeMessage(files, -1, "msg-2", 1 << 20, 100).Lines.Select(Said));
+        Assert.Empty(ChatTranscript.BeforeMessage(files, at4, "msg-999", 1 << 20, 100).Lines);
+        // By place alone (a line with no uuid), in the file in use.
+        Assert.Equal(3, ChatTranscript.BeforeMessage(new[] { "", first, second }, at4, "", 1 << 20, 100).Lines.Count);
+        Assert.Empty(ChatTranscript.BeforeMessage(new[] { "" }, at4, "", 1 << 20, 100).Lines);
+    }
+
+    [Fact]
     public void The_scrollback_is_spared_what_no_viewer_reads()
     {
         string whole = new string('w', 60_000);

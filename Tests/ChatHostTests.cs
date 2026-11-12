@@ -123,7 +123,7 @@ public class ChatHostTests : IDisposable
 
         // Earlier conversation is paged from the transcript: before a place in the file, or before a message known only by its uuid.
         long second = first[1].GetProperty("at").GetInt64();
-        await viewer.SendFrame("{\"type\":\"history\",\"request\":\"q1\",\"before\":" + second + "}");
+        await viewer.SendFrame("{\"type\":\"history\",\"request\":\"q1\",\"before\":" + second + ",\"uuid\":\"u-1\"}");
         var page = await viewer.NextHistory();
         Assert.Equal("q1", page.GetProperty("request").GetString());
         Assert.Equal(new[] { "said long before" }, page.GetProperty("lines").EnumerateArray().Select(l => l.GetProperty("message").GetProperty("content").GetString()));

@@ -115,6 +115,49 @@ internal static class ChatTranscript
         catch (UnauthorizedAccessException) { return -1; }
     }
 
+    /// <summary>Whether the line that starts at <paramref name="at"/> is the message with this uuid: a place in one file means nothing in another.</summary>
+    public static bool Holds(string path, long at, string uuid)
+    {
+        if (path.Length == 0 || uuid.Length == 0 || at < 0) return false;
+        try
+        {
+            if (!File.Exists(path)) return false;
+            using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            if (at >= file.Length) return false;
+            if (at > 0)
+            {
+                file.Position = at - 1;
+                if (file.ReadByte() != '\n') return false;
+            }
+            return IsLineOf(file, at, uuid);
+        }
+        catch (IOException) { return false; }
+        catch (UnauthorizedAccessException) { return false; }
+    }
+
+    /// <summary>
+    /// The page before the message a viewer names as its oldest: by place and uuid (a line read from
+    /// a transcript carries both), by uuid alone (a line that arrived live), or by place alone. The
+    /// conversation can have moved to another file since (the CLI took a new session id under the
+    /// host), so a place counts only in the file where that message is at it; failing that the
+    /// message is looked for by its uuid, in each file in turn.
+    /// </summary>
+    public static Page BeforeMessage(IEnumerable<string> paths, long before, string uuid, int maxBytes, int maxLines)
+    {
+        var files = paths.Where(p => p.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (files.Count == 0) return Nothing;
+        if (uuid.Length == 0) return Before(files[0], before < 0 ? long.MaxValue : before, maxBytes, maxLines);
+        if (before >= 0)
+            foreach (string file in files)
+                if (Holds(file, before, uuid)) return Before(file, before, maxBytes, maxLines);
+        foreach (string file in files)
+        {
+            long at = Find(file, uuid);
+            if (at >= 0) return Before(file, at, maxBytes, maxLines);
+        }
+        return Nothing;
+    }
+
     static long LineStart(FileStream file, long within)
     {
         var buf = new byte[4096];

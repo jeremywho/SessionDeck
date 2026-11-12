@@ -69,10 +69,13 @@
     }
 
     // What to ask the host for to get the conversation before the oldest message shown; null when nothing is shown.
+    // The place is sent with the uuid when both are known: the host checks one against the other, since a place
+    // names a message only in the file it was read from.
     historyAsk() {
       if (!this.oldest) return null;
-      if (this.oldest.at !== null) return { before: this.oldest.at };
-      return this.oldest.uuid ? { uuid: this.oldest.uuid } : null;
+      const { at, uuid } = this.oldest;
+      if (at !== null) return uuid ? { before: at, uuid } : { before: at };
+      return uuid ? { uuid } : null;
     }
 
     // A page of earlier conversation, put ahead of what is shown. `next` is where the page before it ends, or null

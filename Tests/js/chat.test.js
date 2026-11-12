@@ -566,7 +566,10 @@ test('the oldest message shown says what to ask the host for: its place in the t
   assert.equal(m.historyAsk(), null);
   m.durable(old(4200, echo('from the transcript')));
   m.durable(old(4800, said('answer')));
-  assert.deepEqual(m.historyAsk(), { before: 4200 });
+  assert.deepEqual(m.historyAsk(), { before: 4200, uuid: 'u4200' });
+  const placed = new ChatModel();
+  placed.durable(Object.assign(echo('a place and no uuid'), { history: true, at: 77 }));
+  assert.deepEqual(placed.historyAsk(), { before: 77 });
 
   // A scrollback that begins with a line that arrived live knows that line only by its uuid.
   const live = new ChatModel();
@@ -596,19 +599,19 @@ test('a page of earlier conversation goes in ahead of what is shown, and a call 
   assert.deepEqual(m.items.slice(2), shown);
   assert.deepEqual(Array.from(m.dirty), m.items.slice(0, 2));
   assert.deepEqual(calls(m).map(t => [t.id, t.result && t.result.text, !t.result && !!t.stopped]), [['t1', null, true], ['t2', 'the file', false]]);
-  assert.deepEqual(m.historyAsk(), { before: 500 });
+  assert.deepEqual(m.historyAsk(), { before: 500, uuid: 'u500' });
   assert.equal(m.earlier, true);
 
   // The first page there is: nothing before it, and a result of its own with no call is kept for no one.
   assert.equal(m.prepend([old(100, echo('the very first'))], null), 1);
   assert.deepEqual(m.items.slice(0, 2).map(i => i.text), ['the very first', 'read both']);
-  assert.deepEqual(m.historyAsk(), { before: 100 });
+  assert.deepEqual(m.historyAsk(), { before: 100, uuid: 'u100' });
   assert.equal(m.earlier, false);
 
   // A page with nothing in it changes nothing but that.
   m.earlier = true;
   assert.equal(m.prepend([], null), 0);
-  assert.deepEqual(m.historyAsk(), { before: 100 });
+  assert.deepEqual(m.historyAsk(), { before: 100, uuid: 'u100' });
   assert.equal(m.earlier, false);
   // A call loaded from an earlier page is still the call a late line is about.
   m.durable(returned('t1', 'found after all'));

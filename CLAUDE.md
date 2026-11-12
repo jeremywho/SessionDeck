@@ -236,10 +236,13 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
 - **Earlier conversation is paged from the transcript, on request.** The ring starts with the
   newest of the transcript that fits half of it (`ChatTranscript.Before`); the snapshot says
   `earlier` when there is more (or the ring has since dropped its oldest lines). A viewer asks
-  `{"type":"history","request":id,"before":N}`, `N` being the `at` (byte offset) of its oldest
-  history line, or `"uuid":…` when its oldest line arrived live: stream lines and transcript
-  lines carry the same `uuid`. The host answers that viewer alone with `{type:"history", request,
-  lines, next}`. `ChatModel.prepend` puts a page ahead of what is shown, gives a call the result
+  `{"type":"history","request":id,"before":N,"uuid":…}`: `N` is the `at` (byte offset) of its
+  oldest history line, and a line that arrived live has only its `uuid` (stream lines and
+  transcript lines carry the same one). A place names a message only in the file it was read
+  from, and the CLI can take a new session id under the host, so the host checks the uuid at that
+  place, in the file in use and then the one it started with, and falls back to finding the uuid
+  (`ChatTranscript.BeforeMessage`). The host answers that viewer alone with `{type:"history",
+  request, lines, next}`. `ChatModel.prepend` puts a page ahead of what is shown, gives a call the result
   that was already on the page (`orphans`), and joins a run the page boundary cut in two. A call
   read from the transcript with no result is `stopped`, never running: its process is gone.
 - **A chat host can be behind without the protocol changing.** `ChatStream.Revision` goes in the

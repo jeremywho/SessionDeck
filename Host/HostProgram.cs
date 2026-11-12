@@ -750,22 +750,23 @@ internal static class HostProgram
     }
 
     /// <summary>
-    /// <c>{"type":"history","request":"…","before":N}</c> or <c>"uuid":"…"</c>: a page of the
-    /// conversation older than that place, answered to the asking viewer alone. The uuid form is for
-    /// a viewer whose oldest message arrived live and so has no place in the file to name.
+    /// <c>{"type":"history","request":"…","before":N,"uuid":"…"}</c>: a page of the conversation
+    /// older than the viewer's oldest message, answered to the asking viewer alone. A message read
+    /// from the transcript is named by its place and its uuid, one that arrived live by its uuid
+    /// alone. The file the session writes now is looked in first, then the one it started with
+    /// (see <see cref="ChatTranscript.BeforeMessage"/>).
     /// </summary>
     static void SendHistory(Client client, JsonElement ask)
     {
         string request = Text(ask, "request");
         long before = ask.TryGetProperty("before", out var b) && b.ValueKind == JsonValueKind.Number && b.TryGetInt64(out var at) ? at : -1;
         string uuid = Text(ask, "uuid");
-        string path = ChatTranscriptPath();
+        string[] paths = { ChatTranscriptPath(), _spec.HistoryPath };
         _ = Task.Run(() =>
         {
             try
             {
-                if (before < 0) before = uuid.Length > 0 ? ChatTranscript.Find(path, uuid) : long.MaxValue;
-                var page = before < 0 ? new ChatTranscript.Page(new List<byte[]>(), -1) : ChatTranscript.Before(path, before, 256 * 1024, 400);
+                var page = ChatTranscript.BeforeMessage(paths, before, uuid, 256 * 1024, 400);
                 client.Out.Writer.TryWrite((true, ChatStream.HistoryFrame(page, request)));
             }
             catch (Exception ex)
