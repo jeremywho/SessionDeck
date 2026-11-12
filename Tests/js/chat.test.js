@@ -2,7 +2,7 @@
 // The lines here are shaped like the ones Claude Code 2.1.322 wrote in stream-json mode, cut down to the fields the pane reads.
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { ChatModel, LineReader, Wire, toolBrief, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText } = require('../../wwwroot/chat.js');
+const { ChatModel, LineReader, Wire, toolBrief, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText, liveStep, taskRunning, asks: asksPerson } = require('../../wwwroot/chat.js');
 
 const init = { type: 'system', subtype: 'init', session_id: 's1', model: 'claude-haiku-5-5' };
 const echo = text => ({ type: 'user', isReplay: true, message: { role: 'user', content: text }, parent_tool_use_id: null });
@@ -350,8 +350,13 @@ test('calls made one after another are one run, and words, a question or a plan 
 test('a run says how many calls it holds, of what, and how it stands', () => {
   const tool = (name, extra) => Object.assign({ name, input: {}, result: null, request: null }, extra);
   const done = { result: { text: '', error: false } };
-  assert.deepEqual(runOverview([tool('Read', done), tool('Read', done), tool('Grep', done)]),
-    { words: '3 tool calls', breakdown: 'Read 2, Grep', failed: 0, asking: false, running: false, state: 'done' });
+  const three = [tool('Read', done), tool('Read', done), tool('Grep', done)];
+  const { going, ...overview } = runOverview(three);
+  assert.deepEqual(overview, { words: '3 tool calls', breakdown: 'Read 2, Grep', failed: 0, asking: false, running: false, state: 'done' });
+  assert.equal(going, three[2]);
+  // While a run is at work the call it names is the latest still going, not the latest made.
+  const slow = tool('Agent'), quick = tool('Read', done);
+  assert.equal(runOverview([tool('Read', done), slow, quick]).going, slow);
   assert.equal(runOverview([tool('Read', done), tool('Bash', { result: { text: 'no', error: true } })]).state, 'failed');
   assert.equal(runOverview([tool('Read', done), tool('Bash')]).state, 'running');
   assert.equal(runOverview([tool('Read', done), tool('Bash', { stopped: true })]).state, 'done');
@@ -450,4 +455,197 @@ test('the plan is read from the request for approval, since the call itself can 
   assert.equal(planText({ input: { plan: '# In the call' }, request: null, result: null }), '# In the call');
   assert.equal(planText({ input: {}, request: null, result: { text: 'The user wants to keep planning.', error: true } }), '');
   assert.equal(planText({ input: {}, request: null, result: { text: 'no marker here', error: false } }), '');
+});
+
+// The lines a subagent's work arrives as, in the order Claude Code 2.1.322 wrote them: the call, the task it
+// became, the subagent's own calls and their results under the call's id, progress, the end, the hand-back.
+const under = (parent, line) => Object.assign({}, line, { parent_tool_use_id: parent });
+const task = (subtype, toolUseId, extra) => Object.assign({ type: 'system', subtype, tool_use_id: toolUseId, task_id: 'k1' }, extra);
+
+test('what a subagent does is kept under the call that started it, and the call says where it has got to', () => {
+  const m = new ChatModel();
+  m.durable(echo('count the files'));
+  m.durable(used('a1', 'Agent', { description: 'Count files', prompt: 'Count the files in src.' }));
+  m.durable(task('task_started', 'a1', { description: 'Count files', is_backgrounded: false }));
+  m.durable(under('a1', { type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'Count the files in src.' }] } }));
+  const agent = calls(m)[0];
+  assert.equal(liveStep(agent), '');
+  assert.equal(taskRunning(agent), true);
+
+  m.dirty.clear();
+  m.durable(under('a1', used('c1', 'Glob', { pattern: 'src/**' })));
+  m.durable(task('task_progress', 'a1', { description: 'Finding src/**', last_tool_name: 'Glob', usage: { tool_uses: 1 } }));
+  // The job it was handed is not a message, and nothing of the subagent's is an item of the conversation.
+  assert.deepEqual(kinds(m), ['user', 'tool']);
+  assert.deepEqual(calls(m).map(t => t.id), ['a1']);
+  assert.deepEqual(agent.children.map(c => [c.kind, c.id, c.name]), [['tool', 'c1', 'Glob']]);
+  assert.equal(agent.children[0].parent, agent);
+  // What is drawn again is the row holding the call, however deep the change was.
+  assert.deepEqual(Array.from(m.dirty), [m.items[1]]);
+  assert.equal(liveStep(agent), 'Finding src/**');
+
+  m.dirty.clear();
+  m.durable(under('a1', returned('c1', 'a.js b.js')));
+  assert.deepEqual(agent.children[0].result, { text: 'a.js b.js', error: false });
+  assert.deepEqual(Array.from(m.dirty), [m.items[1]]);
+  m.durable(under('a1', { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Two files.' }, { type: 'tool_use', id: 'c2', name: 'Read', input: { file_path: 'a.js' } }] } }));
+  m.durable(task('task_progress', 'a1', { description: 'Reading a.js', usage: { tool_uses: 2 } }));
+  assert.deepEqual(agent.children.map(c => c.kind === 'tool' ? c.id : c.text), ['c1', 'Two files.', 'c2']);
+  assert.equal(liveStep(agent), 'Reading a.js (2 tool uses)');
+  assert.equal(runOverview([agent]).running, true);
+
+  m.durable(task('task_notification', 'a1', { status: 'completed', summary: 'done' }));
+  assert.equal(taskRunning(agent), false);
+  m.durable(returned('a1', 'There are 2 files.'));
+  assert.equal(liveStep(agent), '');
+  assert.deepEqual(agent.result, { text: 'There are 2 files.', error: false });
+  // Lines about a call this never saw (the scrollback began after it) are let go.
+  m.durable(under('gone', used('c9', 'Read', {})));
+  m.durable(task('task_progress', 'gone', { description: 'x' }));
+  assert.deepEqual(kinds(m), ['user', 'tool']);
+  // Each subagent is a line of its own, so two at work at once each say where they are; other calls still gather.
+  m.durable(used('a2', 'Agent', { description: 'Another', prompt: 'p' }));
+  m.durable(used('r1', 'Read', { file_path: 'a' }));
+  m.durable(used('r2', 'Read', { file_path: 'b' }));
+  assert.deepEqual(kinds(m), ['user', 'tool', 'tool', 'tools']);
+});
+
+test('a question from inside a subagent is a question of the call and of its run', () => {
+  const m = new ChatModel();
+  m.durable(used('r1', 'Read', { file_path: 'a' }));
+  m.durable(used('a1', 'Agent', { description: 'Tidy up', prompt: 'p' }));
+  m.durable(task('task_started', 'a1', { description: 'Tidy up' }));
+  m.durable(under('a1', used('c1', 'Bash', { command: 'del x' })));
+  const agent = calls(m)[1];
+  assert.equal(asksPerson(agent), false);
+  m.dirty.clear();
+  m.durable(asks('q1', 'c1', 'Bash', { command: 'del x' }));
+  assert.equal(m.state, 'waiting');
+  assert.equal(agent.children[0].request.open, true);
+  assert.equal(asksPerson(agent), true);
+  assert.equal(runOverview([calls(m)[0], agent]).state, 'asking');
+  assert.deepEqual(Array.from(m.dirty), [m.items[1]]);
+  m.durable({ type: 'control_response', response: { subtype: 'success', request_id: 'q1', response: { behavior: 'allow', updatedInput: {} } } });
+  assert.equal(asksPerson(agent), false);
+});
+
+test('a subagent sent to the background is at work after its call returned and after the turn ended', () => {
+  const m = new ChatModel();
+  m.durable(used('a1', 'Agent', { description: 'Long job', prompt: 'p' }));
+  m.durable(task('task_started', 'a1', { description: 'Long job', is_backgrounded: true }));
+  m.durable(returned('a1', 'Started in the background.'));
+  m.durable(under('a1', used('c1', 'Bash', { command: 'sleep 60' })));
+  m.durable(task('task_progress', 'a1', { description: 'Running sleep 60', usage: { tool_uses: 1 } }));
+  m.durable(done());
+  const agent = calls(m)[0];
+  assert.equal(taskRunning(agent), true);
+  assert.equal(agent.children[0].stopped, undefined);
+  assert.equal(liveStep(agent), 'Running sleep 60');
+  assert.equal(runOverview([agent]).running, true);
+  m.durable(task('task_notification', 'a1', { status: 'completed' }));
+  assert.equal(taskRunning(agent), false);
+  assert.equal(runOverview([agent]).running, false);
+
+  // One in the foreground ends with the turn, its unfinished calls with it.
+  const f = new ChatModel();
+  f.durable(used('a2', 'Agent', { description: 'Short job', prompt: 'p' }));
+  f.durable(task('task_started', 'a2', { description: 'Short job', is_backgrounded: false }));
+  f.durable(under('a2', used('c2', 'Bash', { command: 'x' })));
+  f.durable(done());
+  assert.equal(taskRunning(calls(f)[0]), false);
+  assert.equal(calls(f)[0].children[0].stopped, true);
+});
+
+// Lines as the host reads them back from a transcript: marked as history, each with its place in the file.
+const old = (at, line) => Object.assign({}, line, { history: true, at, uuid: 'u' + at });
+
+test('the oldest message shown says what to ask the host for: its place in the transcript, else its uuid', () => {
+  const m = new ChatModel();
+  assert.equal(m.historyAsk(), null);
+  m.durable({ type: 'host', subtype: 'note', text: 'not a message' });
+  assert.equal(m.historyAsk(), null);
+  m.durable(old(4200, echo('from the transcript')));
+  m.durable(old(4800, said('answer')));
+  assert.deepEqual(m.historyAsk(), { before: 4200 });
+
+  // A scrollback that begins with a line that arrived live knows that line only by its uuid.
+  const live = new ChatModel();
+  live.durable(under('a1', Object.assign(used('c1', 'Read', {}), { uuid: 'sub' })));
+  live.durable(Object.assign(said('live answer'), { uuid: 'abc-1' }));
+  assert.deepEqual(live.historyAsk(), { uuid: 'abc-1' });
+  const bare = new ChatModel();
+  bare.durable(said('no uuid at all'));
+  assert.equal(bare.historyAsk(), null);
+  m.reset();
+  assert.equal(m.historyAsk(), null);
+});
+
+test('a page of earlier conversation goes in ahead of what is shown, and a call meets the result that came before it', () => {
+  const m = new ChatModel();
+  // The scrollback starts with the result of a call made before it.
+  m.durable(old(900, returned('t2', 'the file')));
+  m.durable(old(950, said('It says hello.')));
+  m.durable(done());
+  m.earlier = true;
+  m.dirty.clear();
+  const shown = m.items.slice();
+
+  const added = m.prepend([old(500, echo('read both')), old(600, used('t1', 'Read', { file_path: 'gone' })), old(700, used('t2', 'Read', { file_path: 'a' }))], 480);
+  assert.equal(added, 2);
+  assert.deepEqual(kinds(m), ['user', 'tools', 'assistant']);
+  assert.deepEqual(m.items.slice(2), shown);
+  assert.deepEqual(Array.from(m.dirty), m.items.slice(0, 2));
+  assert.deepEqual(calls(m).map(t => [t.id, t.result && t.result.text, !t.result && !!t.stopped]), [['t1', null, true], ['t2', 'the file', false]]);
+  assert.deepEqual(m.historyAsk(), { before: 500 });
+  assert.equal(m.earlier, true);
+
+  // The first page there is: nothing before it, and a result of its own with no call is kept for no one.
+  assert.equal(m.prepend([old(100, echo('the very first'))], null), 1);
+  assert.deepEqual(m.items.slice(0, 2).map(i => i.text), ['the very first', 'read both']);
+  assert.deepEqual(m.historyAsk(), { before: 100 });
+  assert.equal(m.earlier, false);
+
+  // A page with nothing in it changes nothing but that.
+  m.earlier = true;
+  assert.equal(m.prepend([], null), 0);
+  assert.deepEqual(m.historyAsk(), { before: 100 });
+  assert.equal(m.earlier, false);
+  // A call loaded from an earlier page is still the call a late line is about.
+  m.durable(returned('t1', 'found after all'));
+  assert.equal(calls(m)[0].result.text, 'found after all');
+});
+
+test('a call read back from the transcript without its result was cut off, not left running', () => {
+  const m = new ChatModel();
+  m.durable(old(100, echo('read it')));
+  m.durable(old(200, used('t1', 'Read', { file_path: 'a' })));
+  m.durable(old(300, returned('t1', 'text')));
+  m.durable(old(400, used('t2', 'Bash', { command: 'sleep 600' })));
+  assert.deepEqual(calls(m).map(t => [t.id, !!t.result, !!t.stopped]), [['t1', true, true], ['t2', false, true]]);
+  const overview = runOverview(m.items[1].tools);
+  assert.deepEqual([overview.running, overview.state], [false, 'done']);
+  assert.equal(m.state, 'idle');
+  // The same call made now is at work until its result comes.
+  m.durable(used('t3', 'Bash', { command: 'sleep 1' }));
+  assert.equal(runOverview(m.items[1].tools).running, true);
+});
+
+test('a run of calls split by where a page ends is one run once the page is in', () => {
+  const m = new ChatModel();
+  m.durable(old(500, used('t3', 'Read', { file_path: 'c' })));
+  m.durable(old(600, returned('t3', 'c')));
+  m.durable(old(700, said('All read.')));
+  const run = m.items[0];
+  m.dirty.clear();
+  assert.equal(m.prepend([old(100, echo('read three')), old(200, used('t1', 'Read', { file_path: 'a' })), old(300, returned('t1', 'a')), old(400, used('t2', 'Read', { file_path: 'b' }))], null), 1);
+  assert.deepEqual(kinds(m), ['user', 'tools', 'assistant']);
+  // The run already on the page is the one kept, so it is drawn again where it stands.
+  assert.equal(m.items[1], run);
+  assert.deepEqual(run.tools.map(t => [t.id, t.run === run]), [['t1', true], ['t2', true], ['t3', true]]);
+  assert.deepEqual(Array.from(m.dirty), [run, m.items[0]]);
+  // Words between them keep two runs two.
+  const apart = new ChatModel();
+  apart.durable(old(500, used('t3', 'Read', {})));
+  apart.prepend([old(200, used('t1', 'Read', {})), old(300, said('Now the next.'))], null);
+  assert.deepEqual(kinds(apart), ['tools', 'assistant', 'tools']);
 });

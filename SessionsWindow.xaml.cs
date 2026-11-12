@@ -782,10 +782,10 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     /// The launch that brings a Claude conversation back: resumed when it has a transcript, started
     /// fresh under its own id when nothing was ever said, and as a chat when that is what it was.
     /// </summary>
-    string ClaudeCommandFor(string sessionId, string? name, bool hasTranscript, string launcher, bool chat)
+    string ClaudeCommandFor(string sessionId, string? name, bool hasTranscript, string launcher, bool chat, string model = "")
     {
         string flags = _app.Settings.ResumeFlags;
-        if (chat) return hasTranscript ? HostManager.ResumeClaudeChatCommand(sessionId, flags) : HostManager.NewClaudeChatCommand(sessionId, name, flags);
+        if (chat) return hasTranscript ? HostManager.ResumeClaudeChatCommand(sessionId, flags, model) : HostManager.NewClaudeChatCommand(sessionId, name, flags, model);
         return hasTranscript ? HostManager.ResumeClaudeCommand(sessionId, flags, launcher) : HostManager.NewClaudeCommand(sessionId, name, flags, launcher: launcher);
     }
 
@@ -1642,9 +1642,10 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         {
             if (!row.CanRestart || _restarting.Contains(row.Host.Id)) continue;
             string cliTarget = InstalledVersions.For(row.Provider);
-            string hostTarget = $"host-protocol-{SessionDeck.Host.HostRecord.CurrentProtocol}";
+            // A terminal host is behind by protocol and a chat host by its own revision: two targets, so one never counts as the other.
+            var (hostKind, hostTarget) = row.HostUpkeepTarget;
             bool forCli = row.UpdatePending && !_autoRestarted.Done(row.LiveSessionId, cliTarget, AutoRestartLedger.Cli);
-            bool forHost = row.HostBehind && !_autoRestarted.Done(row.LiveSessionId, hostTarget, AutoRestartLedger.HostProtocol);
+            bool forHost = row.HostBehind && !_autoRestarted.Done(row.LiveSessionId, hostTarget, hostKind);
             if (!forCli && !forHost) continue;
             // Only a session whose live conversation is provably resumable is touched on its own;
             // anything else waits for a restart you ask for.
@@ -1658,7 +1659,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             if (tab != null && tab == Deck.Active && IsActive) continue;
             PerformanceLog.Write($"auto-restart host={row.Host.Id} provider={row.Provider} from=v{row.Version} cli={(forCli ? cliTarget : "-")} host={(forHost ? hostTarget : "-")} hostProtocol={row.Host.Protocol}");
             if (forCli) _autoRestarted.Record(row.LiveSessionId, cliTarget, AutoRestartLedger.Cli);
-            if (forHost) _autoRestarted.Record(row.LiveSessionId, hostTarget, AutoRestartLedger.HostProtocol);
+            if (forHost) _autoRestarted.Record(row.LiveSessionId, hostTarget, hostKind);
             _autoRestart = RestartSession(row);
             return;
         }
@@ -1690,7 +1691,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             {
                 SessionProvider.Codex => HostManager.ResumeCodexCommand(sessionId, _app.Settings.CodexFlags),
                 SessionProvider.Agy => HostManager.ResumeAgyCommand(sessionId, HostManager.AgyDefaultFlags),
-                _ => ClaudeCommandFor(sessionId, null, hasTranscript, launcher, host.IsChat),
+                _ => ClaudeCommandFor(sessionId, null, hasTranscript, launcher, host.IsChat, host.IsChat ? host.Model : ""),
             };
 
             if (!host.HasExited)
@@ -1705,7 +1706,8 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
                 }
             }
 
-            var next = HostManager.Spawn(sessionId, provider, cmd, host.Cwd, host.Title, profile: host.Profile, kind: host.Kind);
+            // A chat comes back in the mode and at the effort it was left in: restarting must not turn plan mode into bypass.
+            var next = HostManager.Spawn(sessionId, provider, cmd, host.Cwd, host.Title, profile: host.Profile, kind: host.Kind, restore: HostManager.ChatRestore.Of(host));
             _successors[next.Id] = inherit;
             Deck.ReplaceHost(host.Id, next);
             HostManager.Forget(host);

@@ -17,6 +17,9 @@ public class ChatStreamTests : IDisposable
 
     static JsonElement Line(string json) => JsonDocument.Parse(json).RootElement.Clone();
 
+    /// <summary>What a resumed session's scrollback is started with: the newest of the transcript that fits.</summary>
+    static List<byte[]> History(string path, int budget) => ChatTranscript.Before(path, long.MaxValue, budget, int.MaxValue).Lines;
+
     const string Init = """{"type":"system","subtype":"init","session_id":"live-1","model":"claude-haiku-5-5","permissionMode":"default"}""";
     const string Echo = """{"type":"user","isReplay":true,"message":{"role":"user","content":"  fix the\tflaky   test in the gateway and then tell me what was wrong with it  \nsecond line"}}""";
     const string ToolUse = """{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Write","input":{}}]}}""";
@@ -103,6 +106,10 @@ public class ChatStreamTests : IDisposable
     [InlineData(Result, true)]
     [InlineData("""{"type":"control_request","request_id":"r1","request":{"subtype":"can_use_tool"}}""", true)]
     [InlineData("""{"type":"something_new"}""", true)]
+    // What a subagent is doing is drawn from these by a viewer that attaches later as well.
+    [InlineData("""{"type":"system","subtype":"task_started","tool_use_id":"t1","description":"Count files"}""", true)]
+    [InlineData("""{"type":"system","subtype":"task_progress","tool_use_id":"t1","description":"Reading a.js"}""", true)]
+    [InlineData("""{"type":"system","subtype":"task_notification","tool_use_id":"t1","status":"completed"}""", true)]
     [InlineData("""{"type":"control_response","response":{"subtype":"success","request_id":"sd-set-1","response":{"mode":"plan"}}}""", false)]
     public void Only_the_conversation_itself_is_kept_for_a_later_viewer(string json, bool kept) =>
         Assert.Equal(kept, new ChatStream().Durable(Line(json)));
@@ -142,7 +149,9 @@ public class ChatStreamTests : IDisposable
         Assert.True(ChatStream.AnswersTheHost(introduction));
         Assert.False(chat.Durable(introduction));
         var change = chat.Apply(introduction, record, T0);
-        Assert.Equal((false, true, true, false), (change.Record, change.Catalog, change.Settings, change.Refresh));
+        // The record changes too: it now carries the mode, which a restart has to put back.
+        Assert.Equal((true, true, true, false), (change.Record, change.Catalog, change.Settings, change.Refresh));
+        Assert.Equal("bypassPermissions", record.PermissionMode);
 
         var catalog = Line(chat.CatalogFrame());
         Assert.Equal("catalog", catalog.GetProperty("type").GetString());
@@ -264,7 +273,7 @@ public class ChatStreamTests : IDisposable
 
         string path = Path.Combine(_dir, "with-image.jsonl");
         File.WriteAllText(path, Encoding.UTF8.GetString(typed).Replace("\"isReplay\":true,", "") + "\n");
-        var history = ChatStream.History(path, 1 << 20).Single();
+        var history = History(path, 1 << 20).Single();
         Assert.True(history.Length < 400);
         Assert.Equal(5000, Line(Encoding.UTF8.GetString(history)).GetProperty("message").GetProperty("content")[1].GetProperty("source").GetProperty("omitted").GetInt32());
     }
@@ -326,15 +335,19 @@ public class ChatStreamTests : IDisposable
             "",
         });
 
-        var lines = ChatStream.History(path, 1 << 20).Select(b => Line(Encoding.UTF8.GetString(b))).ToList();
+        var lines = History(path, 1 << 20).Select(b => Line(Encoding.UTF8.GetString(b))).ToList();
         Assert.Equal(new[] { "user", "assistant", "user", "user", "assistant" }, lines.Select(l => l.GetProperty("type").GetString()));
         Assert.All(lines, l => Assert.True(l.GetProperty("history").GetBoolean()));
         Assert.Equal("first question", lines[0].GetProperty("message").GetProperty("content").GetString());
         Assert.Equal("2026-11-12T12:00:00Z", lines[0].GetProperty("timestamp").GetString());
         Assert.Equal("t1", lines[2].GetProperty("message").GetProperty("content")[0].GetProperty("tool_use_id").GetString());
         Assert.True(lines[3].GetProperty("compactSummary").GetBoolean());
-        Assert.False(lines[0].TryGetProperty("uuid", out _));
-        Assert.All(ChatStream.History(path, 1 << 20), b => Assert.DoesNotContain((byte)'\n', b));
+        // Each line keeps its uuid and its place in the file: a viewer pages back from either.
+        Assert.Equal("u1", lines[0].GetProperty("uuid").GetString());
+        Assert.True(lines[0].GetProperty("at").GetInt64() > 0);
+        Assert.Equal(lines.Select(l => l.GetProperty("at").GetInt64()).OrderBy(a => a), lines.Select(l => l.GetProperty("at").GetInt64()));
+        Assert.False(lines[0].TryGetProperty("parentUuid", out _));
+        Assert.All(History(path, 1 << 20), b => Assert.DoesNotContain((byte)'\n', b));
     }
 
     [Fact]
@@ -342,14 +355,14 @@ public class ChatStreamTests : IDisposable
     {
         string path = Path.Combine(_dir, "big.jsonl");
         File.WriteAllLines(path, Enumerable.Range(1, 50).Select(i => """{"type":"user","message":{"role":"user","content":"message number NN padded out to a fixed width"}}""".Replace("NN", i.ToString("D2"))));
-        var kept = ChatStream.History(path, 600).Select(b => Line(Encoding.UTF8.GetString(b)).GetProperty("message").GetProperty("content").GetString()!).ToList();
+        var kept = History(path, 600).Select(b => Line(Encoding.UTF8.GetString(b)).GetProperty("message").GetProperty("content").GetString()!).ToList();
         Assert.InRange(kept.Count, 2, 10);
         Assert.EndsWith("50 padded out to a fixed width", kept[^1]);
         Assert.Equal(kept.OrderBy(k => k, StringComparer.Ordinal), kept);
-        Assert.True(ChatStream.History(path, 600).Sum(b => b.Length + 1) <= 600);
+        Assert.True(History(path, 600).Sum(b => b.Length + 1) <= 600);
 
-        Assert.Empty(ChatStream.History(Path.Combine(_dir, "nowhere.jsonl"), 1 << 20));
-        Assert.Empty(ChatStream.History("", 1 << 20));
+        Assert.Empty(History(Path.Combine(_dir, "nowhere.jsonl"), 1 << 20));
+        Assert.Empty(History("", 1 << 20));
     }
 
     [Fact]

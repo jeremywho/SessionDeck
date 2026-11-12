@@ -5,8 +5,11 @@
   'use strict';
 
   const INTERRUPTED = '[Request interrupted by user';
-  const SOLO_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode']);
+  const SOLO_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode', 'Agent', 'Task']);
   const SET_PREFIX = 'sd-set-';
+  const DRAFT_PREFIX = 'sd.chat.draft:';
+  // A subagent can make hundreds of calls; the latest of them are drawn.
+  const SUB_SHOWN = 200;
 
   function textOf(content) {
     if (typeof content === 'string') return content;
@@ -43,6 +46,12 @@
       this.model = '';
       this.ended = null;
       this.cleared = true;
+      // The oldest message shown, by its place in the transcript or (for one that arrived live) its uuid; and
+      // whether the host has said there is conversation before it.
+      this.oldest = null;
+      this.earlier = false;
+      // Results whose call is not shown: it is in conversation not loaded yet, and gets its result when that is.
+      this.orphans = new Map();
     }
 
     add(item) {
@@ -51,8 +60,48 @@
       return item;
     }
 
-    // A tool call drawn inside a run is repainted by repainting its run.
-    touch(item) { this.dirty.add(item.run || item); }
+    // A tool call is drawn inside its run, and a subagent's call inside the call that started the subagent:
+    // what gets repainted is the row that holds it.
+    touch(item) {
+      let root = item;
+      while (root.parent) root = root.parent;
+      this.dirty.add(root.run || root);
+    }
+
+    // What to ask the host for to get the conversation before the oldest message shown; null when nothing is shown.
+    historyAsk() {
+      if (!this.oldest) return null;
+      if (this.oldest.at !== null) return { before: this.oldest.at };
+      return this.oldest.uuid ? { uuid: this.oldest.uuid } : null;
+    }
+
+    // A page of earlier conversation, put ahead of what is shown. `next` is where the page before it ends, or null
+    // when this is the start. A call left without its result at the page's edge is shown as not having finished.
+    prepend(lines, next) {
+      const older = new ChatModel();
+      for (const line of lines) older.durable(line);
+      for (const [id, tool] of older.tools) {
+        if (!tool.result) {
+          const late = this.orphans.get(id);
+          if (late) { tool.result = late; this.orphans.delete(id); } else tool.stopped = true;
+        }
+        if (!this.tools.has(id)) this.tools.set(id, tool);
+      }
+      for (const [id, result] of older.orphans) this.orphans.set(id, result);
+      // A run of calls cut in two by where the page ends is one run again.
+      const seam = older.items[older.items.length - 1], first = this.items[0];
+      if (seam && first && seam.kind === 'tools' && first.kind === 'tools') {
+        for (const tool of seam.tools) tool.run = first;
+        first.tools = seam.tools.concat(first.tools);
+        older.items.pop();
+        this.dirty.add(first);
+      }
+      this.items = older.items.concat(this.items);
+      for (const item of older.items) this.dirty.add(item);
+      if (older.oldest) this.oldest = older.oldest;
+      this.earlier = typeof next === 'number';
+      return older.items.length;
+    }
 
     get waiting() {
       for (const r of this.requests.values()) if (r.open) return true;
@@ -82,6 +131,8 @@
     // A line kept in the host's scrollback: the conversation itself.
     durable(line) {
       if (!line || typeof line !== 'object') return;
+      if (this.oldest === null && (line.type === 'user' || line.type === 'assistant') && !line.parent_tool_use_id)
+        this.oldest = { at: typeof line.at === 'number' ? line.at : null, uuid: typeof line.uuid === 'string' ? line.uuid : '' };
       switch (line.type) {
         case 'user': this.user(line); break;
         case 'assistant': this.assistant(line); break;
@@ -126,7 +177,6 @@
     }
 
     user(line) {
-      if (line.parent_tool_use_id) return;
       const content = line.message ? line.message.content : '';
       if (Array.isArray(content)) {
         let handled = false;
@@ -134,12 +184,17 @@
           if (!b || b.type !== 'tool_result') continue;
           handled = true;
           const tool = this.tools.get(b.tool_use_id);
-          if (!tool) continue;
+          if (!tool) {
+            if (!line.parent_tool_use_id) this.orphans.set(b.tool_use_id, { text: resultText(b.content), error: !!b.is_error });
+            continue;
+          }
           tool.result = { text: resultText(b.content), error: !!b.is_error };
           this.touch(tool);
         }
         if (handled) return;
       }
+      // What is left of a subagent's side is the job it was handed, which its call already shows.
+      if (line.parent_tool_use_id) return;
       const text = textOf(content);
       const imageCount = Array.isArray(content) ? content.filter(b => b && b.type === 'image').length : 0;
       if (!text && !imageCount) return;
@@ -167,8 +222,25 @@
       this.add({ kind: 'user', text, imageCount, history: !!line.history });
     }
 
+    // What a subagent does while it runs, kept under the call that started it.
+    sub(line) {
+      const parent = this.tools.get(line.parent_tool_use_id);
+      if (!parent) return;
+      const content = line.message && Array.isArray(line.message.content) ? line.message.content : [];
+      const children = parent.children || (parent.children = []);
+      for (const b of content) {
+        if (!b) continue;
+        if (b.type === 'tool_use') {
+          const child = { kind: 'tool', id: b.id, name: b.name || 'tool', input: b.input || {}, result: null, request: null, parent };
+          children.push(child);
+          this.tools.set(b.id, child);
+        } else if (b.type === 'text' && b.text) children.push({ kind: 'said', text: b.text, parent });
+      }
+      this.touch(parent);
+    }
+
     assistant(line) {
-      if (line.parent_tool_use_id) return;
+      if (line.parent_tool_use_id) { this.sub(line); return; }
       if (!line.history) this.busy = true;
       const content = line.message && Array.isArray(line.message.content) ? line.message.content : [];
       for (const b of content) {
@@ -185,9 +257,12 @@
           } else if (text) this.add({ kind, text });
         } else if (b.type === 'tool_use') {
           const tool = { kind: 'tool', id: b.id, name: b.name || 'tool', input: b.input || {}, result: null, request: null };
+          // A call read back from the transcript was made by a process that is gone: with no result there, it never finished.
+          if (line.history) tool.stopped = true;
           this.tools.set(b.id, tool);
-          // A question and a plan are things to answer and stand alone. Every other call joins the run of calls it
-          // is part of, so a turn that reads twenty files is one line to look past, not twenty.
+          // A question and a plan are things to answer and stand alone, and so does a subagent, whose line says
+          // what it is doing now. Every other call joins the run of calls it is part of, so a turn that reads
+          // twenty files is one line to look past, not twenty.
           const last = this.items[this.items.length - 1];
           if (SOLO_TOOLS.has(tool.name)) this.add(tool);
           else if (last && last.kind === 'tools') { last.tools.push(tool); tool.run = last; this.touch(last); }
@@ -259,7 +334,12 @@
       this.pending = this.pending.filter(p => !p.settled);
       for (const p of this.pending) { p.pending = false; p.settled = true; this.touch(p); }
       for (const [id, req] of this.requests) if (req.open) this.close(id, 'cancelled');
-      for (const tool of this.tools.values()) if (!tool.result && !tool.stopped) { tool.stopped = true; this.touch(tool); }
+      for (const tool of this.tools.values()) {
+        // A subagent left running in the background outlives the turn, and so do its calls.
+        if (tool.result || tool.stopped || (tool.parent && taskRunning(tool.parent))) continue;
+        tool.stopped = true;
+        this.touch(tool);
+      }
       if (line.is_error && line.subtype !== 'error_during_execution') {
         const text = typeof line.result === 'string' && line.result ? line.result : String(line.subtype || 'error').replace(/_/g, ' ');
         this.add({ kind: 'note', tone: 'error', text });
@@ -267,6 +347,19 @@
     }
 
     system(line) {
+      if (line.subtype === 'task_started' || line.subtype === 'task_progress' || line.subtype === 'task_notification') {
+        // A subagent (or a command left running) reports as a task of the call that started it.
+        const tool = this.tools.get(line.tool_use_id);
+        if (!tool) return;
+        const task = tool.task || (tool.task = { description: '', last: '', uses: 0, status: 'running', background: false });
+        if (line.subtype === 'task_started') { task.description = String(line.description || ''); task.background = !!line.is_backgrounded; }
+        else if (line.subtype === 'task_progress') {
+          if (line.description) task.last = String(line.description);
+          if (line.usage && typeof line.usage.tool_uses === 'number') task.uses = line.usage.tool_uses;
+        } else task.status = String(line.status || 'completed');
+        this.touch(tool);
+        return;
+      }
       if (line.subtype === 'compact_boundary') this.add({ kind: 'note', tone: 'plain', text: 'Conversation compacted' });
       else if (line.subtype === 'api_error' || line.subtype === 'api_retry') {
         const why = (line.error && (line.error.message || line.error.type)) || line.message || 'API error';
@@ -415,9 +508,12 @@
     const counts = new Map();
     for (const t of tools) counts.set(t.name, (counts.get(t.name) || 0) + 1);
     const failed = tools.filter(t => t.result && t.result.error).length;
-    const asking = tools.some(t => t.request && t.request.open);
-    const running = tools.some(t => !t.result && !t.stopped && !(t.request && t.request.decision === 'deny'));
+    const asking = tools.some(asks);
+    const running = tools.some(t => taskRunning(t) || (!t.result && !t.stopped && !(t.request && t.request.decision === 'deny')));
+    // The call to name while the run is at work: the latest one still going.
+    const going = tools.filter(t => taskRunning(t) || (!t.result && !t.stopped)).pop() || tools[tools.length - 1];
     return {
+      going,
       words: `${tools.length} tool calls`,
       breakdown: Array.from(counts, ([name, n]) => n > 1 ? `${name} ${n}` : name).join(', '),
       failed, asking, running,
@@ -441,6 +537,27 @@
     return null;
   }
 
+  // What the subagent a call started is doing now and how far along it is; '' when it is not at work or has
+  // not said. It is its own line under the call, so a narrow screen that cuts the call's line short still shows it.
+  function liveStep(tool) {
+    const task = tool.task;
+    if (!taskRunning(tool) || !task.last) return '';
+    return task.last + (task.uses > 1 ? ` (${task.uses} tool uses)` : '');
+  }
+
+  // Whether the task a call started is still at work. One that runs in the foreground is over when its call has
+  // its result or was stopped; one sent to the background has its result at once and goes on until it reports.
+  function taskRunning(tool) {
+    const task = tool.task;
+    if (!task || task.status !== 'running' || tool.stopped) return false;
+    return task.background || !tool.result;
+  }
+
+  // Whether the call, or one a subagent of it made, waits on the person.
+  function asks(tool) {
+    return !!(tool.request && tool.request.open) || (tool.children || []).some(c => c.kind === 'tool' && asks(c));
+  }
+
   // The text of a plan. The call itself can carry none: the plan then comes with the request for approval, and for
   // a conversation read back from the transcript, where no request is kept, in what the approval said back.
   function planText(tool) {
@@ -460,7 +577,7 @@
     return modes;
   }
 
-  const api = { ChatModel, LineReader, Wire, toolBrief, textOf, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText };
+  const api = { ChatModel, LineReader, Wire, toolBrief, textOf, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText, liveStep, taskRunning, asks };
   if (typeof module !== 'undefined' && module.exports) { module.exports = api; return; }
 
   // ================= the page side =================
@@ -529,6 +646,8 @@
     const model = new ChatModel();
     const nodes = new Map();
     let ws = null, seq = 0, reader = new LineReader(false), closed = false, retries = 0, connected = false, frame = 0;
+    // Earlier conversation: whether this host pages it, whether a page was already put in, and the request out now.
+    let hostPages = false, paged = false, asked = '', nextAsk = 1, draftKey = '';
 
     el.classList.add('chat');
     const scroll = h('div', 'chat-scroll');
@@ -536,7 +655,10 @@
     const empty = h('div', 'chat-empty', 'Type a message to start.');
     const working = h('div', 'working', 'Working…');
     working.hidden = true;
-    column.append(empty, working);
+    const earlier = h('button', 'load-earlier', 'Load earlier messages');
+    earlier.type = 'button';
+    earlier.hidden = true;
+    column.append(earlier, empty, working);
     scroll.appendChild(column);
 
     // The composer is one card: what is attached, the message, and under it the session's settings and the send button.
@@ -608,9 +730,13 @@
         const fresh = render(item, node);
         if (!node) {
           nodes.set(item, fresh);
-          const next = model.items[model.items.indexOf(item) + 1];
-          const before = next ? nodes.get(next) : null;
-          column.insertBefore(fresh, before && before.parentNode === column ? before : working);
+          // Ahead of the next item that is on the page: a page of earlier conversation arrives as many at once.
+          let before = working;
+          for (let i = model.items.indexOf(item) + 1; i < model.items.length; i++) {
+            const n = nodes.get(model.items[i]);
+            if (n && n.parentNode === column) { before = n; break; }
+          }
+          column.insertBefore(fresh, before);
         } else if (fresh !== node) {
           node.replaceWith(fresh);
           nodes.set(item, fresh);
@@ -618,6 +744,9 @@
       }
       model.dirty.clear();
       empty.style.display = model.items.length ? 'none' : '';
+      earlier.hidden = !(hostPages && model.earlier && model.historyAsk());
+      earlier.disabled = !!asked || !connected;
+      earlier.textContent = asked ? 'Loading…' : 'Load earlier messages';
       paintStatus();
       if (stick) scroll.scrollTop = scroll.scrollHeight;
     }
@@ -748,7 +877,7 @@
           return node;
         }
         case 'tools': return renderRun(item, node);
-        case 'tool': return renderTool(item, !!node && node.open);
+        case 'tool': return renderTool(item, openIn(node));
       }
       return node || h('div');
     }
@@ -779,43 +908,56 @@
     }
 
     // A run of calls is one line that opens to its calls; a run of one is just that call.
-    function renderRun(run, node) {
+    // The calls a reader has opened in what is drawn now, so that drawing it again leaves them open.
+    function openIn(node) {
       const open = new Set();
-      if (node) {
-        for (const d of node.querySelectorAll('details[data-tool]')) if (d.open) open.add(d.dataset.tool);
-        if (node.dataset.tool && node.open) open.add(node.dataset.tool);
-      }
-      if (run.tools.length === 1) return renderTool(run.tools[0], open.has(run.tools[0].id));
+      if (!node) return open;
+      for (const d of node.querySelectorAll('details[data-tool]')) if (d.open) open.add(d.dataset.tool);
+      if (node.dataset.tool && node.open) open.add(node.dataset.tool);
+      return open;
+    }
+
+    function renderRun(run, node) {
+      const open = openIn(node);
+      if (run.tools.length === 1) return renderTool(run.tools[0], open);
       const overview = runOverview(run.tools);
       const fresh = h('details', 'tool-run');
       fresh.open = (!!node && node.classList.contains('tool-run') && node.open) || overview.asking;
       fresh.dataset.state = overview.state;
       const summary = h('summary');
-      const latest = run.tools[run.tools.length - 1];
+      const latest = overview.going;
       summary.append(h('span', 'tool-name', overview.words),
         h('span', 'tool-brief', overview.running ? `${latest.name} ${toolBrief(latest.name, latest.input)}` : overview.breakdown));
       const word = overview.asking ? 'answer required' : overview.running ? 'running' : overview.failed ? `${overview.failed} failed` : '';
       if (word) summary.appendChild(h('span', 'tool-state', word));
       fresh.appendChild(summary);
       const body = h('div', 'run-body');
-      for (const tool of run.tools) body.appendChild(renderTool(tool, open.has(tool.id)));
+      for (const tool of run.tools) body.appendChild(renderTool(tool, open));
       fresh.appendChild(body);
       return fresh;
     }
 
-    function renderTool(item, wasOpen) {
+    // `open` names the calls that were open before this drawing.
+    function renderTool(item, open) {
       if (item.name === 'ExitPlanMode') return renderPlan(item);
       const fresh = h('details', 'tool');
       fresh.dataset.tool = item.id;
       const req = item.request;
       const asking = req && req.open;
-      fresh.open = wasOpen || !!asking;
-      const state = asking ? 'asking' : item.result ? (item.result.error ? 'failed' : 'done') : req && req.decision === 'deny' ? 'failed' : item.stopped ? 'stopped' : 'running';
+      // A question from inside a subagent is under the subagent's call, which opens to show it.
+      const within = !asking && asks(item);
+      fresh.open = open.has(item.id) || !!asking || within;
+      // A subagent's call that never got its result is over once the subagent is.
+      const over = item.stopped || (item.parent && item.parent.task && !taskRunning(item.parent));
+      const state = asking || within ? 'asking' : taskRunning(item) ? 'running'
+        : item.result ? (item.result.error ? 'failed' : 'done') : req && req.decision === 'deny' ? 'failed' : over ? 'stopped' : 'running';
       fresh.dataset.state = state;
       const summary = h('summary');
       const word = { asking: 'answer required', failed: req && req.decision === 'deny' ? 'declined' : 'failed', stopped: 'stopped', running: 'running' }[state];
       summary.append(h('span', 'tool-name', item.name), h('span', 'tool-brief', toolBrief(item.name, item.input)));
       if (word) summary.appendChild(h('span', 'tool-state', word));
+      const step = liveStep(item);
+      if (step) summary.appendChild(h('span', 'tool-live', step));
       fresh.appendChild(summary);
       const body = h('div', 'tool-body');
       if (item.name === 'AskUserQuestion') body.appendChild(questionCard(item));
@@ -823,9 +965,22 @@
         body.appendChild(toolDetail(item));
         if (asking) body.appendChild(permissionCard(req));
       }
+      if (item.children && item.children.length) body.appendChild(subActivity(item.children, open));
       if (item.result) body.appendChild(h('pre', 'tool-result' + (item.result.error ? ' error' : ''), clip(item.result.text, 12000)));
       fresh.appendChild(body);
       return fresh;
+    }
+
+    // What a subagent did, in order: its calls, each opening like any other, and what it said between them.
+    function subActivity(children, open) {
+      const box = h('div', 'sub');
+      const shown = children.slice(-SUB_SHOWN);
+      if (shown.length < children.length) box.appendChild(h('div', 'sub-said', `… ${children.length - shown.length} earlier steps`));
+      for (const child of shown) {
+        if (child.kind === 'tool') box.appendChild(renderTool(child, open));
+        else box.appendChild(h('div', 'sub-said', clip(child.text, 600)));
+      }
+      return box;
     }
 
     // What the call was asked to do, in the shape it is easiest to read: an edit as what went and what came,
@@ -841,6 +996,8 @@
       }
       if (typeof input.content === 'string' && (input.file_path || input.path)) return h('pre', 'tool-input', clip(input.content, 6000));
       if (typeof input.command === 'string') return h('pre', 'tool-input', clip(input.command, 6000));
+      // A subagent's job is prose written for it.
+      if (typeof input.prompt === 'string' && input.prompt) return h('pre', 'tool-input', clip(input.prompt, 6000));
       return h('pre', 'tool-input', clip(JSON.stringify(input, null, 2), 6000));
     }
 
@@ -1010,6 +1167,45 @@
       input.style.height = Math.min(input.scrollHeight, Math.max(120, el.clientHeight * 0.4)) + 'px';
     }
 
+    // What is typed and not sent is kept by conversation, so a session restarted under it (an update does that
+    // to one left alone) comes back with the words still in the box.
+    function keepDraft() {
+      if (!draftKey) return;
+      try { if (input.value) localStorage.setItem(draftKey, input.value); else localStorage.removeItem(draftKey); } catch { }
+    }
+
+    function takeDraft(session) {
+      if (draftKey || !session) return;
+      draftKey = DRAFT_PREFIX + session;
+      let kept = '';
+      try { kept = localStorage.getItem(draftKey) || ''; } catch { }
+      if (kept && !input.value) { input.value = kept; grow(); paintStatus(); }
+      else if (input.value) keepDraft();
+    }
+
+    // ---- earlier conversation ----
+
+    function askEarlier() {
+      const ask = model.historyAsk();
+      if (asked || !ask || !ws || ws.readyState !== WebSocket.OPEN) return;
+      asked = 'h' + nextAsk++;
+      ws.send(JSON.stringify(Object.assign({ type: 'history', request: asked }, ask)));
+      schedule();
+    }
+
+    // The page goes in above what is being read, which stays where it is on the screen.
+    function gotEarlier(msg) {
+      if (!asked || msg.request !== asked) return;
+      asked = '';
+      paged = true;
+      const height = scroll.scrollHeight, top = scroll.scrollTop;
+      model.prepend(Array.isArray(msg.lines) ? msg.lines : [], msg.next);
+      paint();
+      scroll.scrollTop = top + (scroll.scrollHeight - height);
+    }
+
+    earlier.addEventListener('click', askEarlier);
+
     async function submit() {
       const text = input.value.trim();
       const taken = shots.filter(s => !s.error);
@@ -1026,6 +1222,7 @@
       model.sent(text, taken.map(s => s.url));
       shots = [];
       input.value = '';
+      keepDraft();
       paintShelf();
       paintMenu();
       grow();
@@ -1167,7 +1364,7 @@
       return true;
     }
 
-    input.addEventListener('input', () => { menuActive = 0; grow(); paintMenu(); paintStatus(); });
+    input.addEventListener('input', () => { menuActive = 0; grow(); paintMenu(); paintStatus(); keepDraft(); });
     input.addEventListener('keydown', ev => {
       if (menuKey(ev)) return;
       // On a touch keyboard Return is a new line, as in any message box there; the button sends.
@@ -1201,10 +1398,16 @@
           let msg;
           try { msg = JSON.parse(ev.data); } catch { return; }
           if (msg.type === 'snapshot') {
-            if (msg.start !== seq) { model.reset(); reader = new LineReader(msg.start > 0); }
+            if (msg.start !== seq) { model.reset(); reader = new LineReader(msg.start > 0); paged = false; }
             seq = msg.start;
+            // `start` says nothing about what came before: a viewer that reattaches asks for what follows the
+            // last byte it has, and is answered from there. The host says whether its transcript goes back further.
+            hostPages = msg.chat >= 3;
+            if (!paged) model.earlier = !!msg.earlier;
+            takeDraft(msg.session);
             if (msg.title) post({ type: 'title', id, title: msg.title });
           } else if (msg.type === 'live') model.live(msg.line);
+          else if (msg.type === 'history') { gotEarlier(msg); return; }
           else if (msg.type === 'catalog') { model.setCatalog(msg); paintMenu(); }
           else if (msg.type === 'settings') { hostTakesImages = true; model.setSettings(msg); }
           else if (msg.type === 'title') post({ type: 'title', id, title: msg.title });
@@ -1221,6 +1424,7 @@
         if (ws !== sock) return;
         ws = null;
         connected = false;
+        asked = '';
         schedule();
         if (closed) return;
         if (openedAt && Date.now() - openedAt > 15000) retries = 0;
@@ -1232,6 +1436,9 @@
     }
 
     if (opts.exited) { model.exited(''); closed = true; }
+    // The deck names the conversation as it opens the pane; a host too old to name it in its snapshot is then
+    // one whose restart still finds the draft.
+    takeDraft(opts.session);
     paintStatus();
     if (!closed) connect();
 
@@ -1247,6 +1454,7 @@
         input.setRangeText(text, at, input.selectionEnd ?? at, 'end');
         grow();
         paintStatus();
+        keepDraft();
       },
       kill() { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'kill' })); },
       applyLook(look) {

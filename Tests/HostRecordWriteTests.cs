@@ -98,6 +98,9 @@ public class HostRecordWriteTests : IDisposable
         Assert.Equal(20, snap.RootElement.GetProperty("end").GetInt64());
         Assert.Equal(132, snap.RootElement.GetProperty("cols").GetInt32());
         Assert.Equal(40, snap.RootElement.GetProperty("rows").GetInt32());
+        Assert.False(snap.RootElement.GetProperty("earlier").GetBoolean());
+        using var chat = System.Text.Json.JsonDocument.Parse(HostProgram.SnapshotJson(0, 0, "t", 0, 0, "chat", 3, "s1", earlier: true));
+        Assert.Equal(("chat", 3, "s1", true), (chat.RootElement.GetProperty("kind").GetString(), chat.RootElement.GetProperty("chat").GetInt32(), chat.RootElement.GetProperty("session").GetString(), chat.RootElement.GetProperty("earlier").GetBoolean()));
         Assert.Equal("{\"type\":\"size\",\"cols\":80,\"rows\":24}", HostProgram.SizeJson(80, 24));
     }
 }

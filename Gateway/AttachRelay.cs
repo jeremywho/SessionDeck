@@ -6,9 +6,10 @@ using SessionDeck.Host;
 namespace SessionDeck.Gateway;
 
 /// <summary>
-/// A phone's view of one host: the host's attach stream relayed both ways. The phone may type and
-/// nothing else; a <c>resize</c> would redraw the desktop pane and a <c>kill</c> would end the session,
-/// so only <c>input</c> is forwarded and every other message is dropped where it arrives.
+/// A phone's view of one host: the host's attach stream relayed both ways. The phone may type, and
+/// ask a chat host for earlier conversation; a <c>resize</c> would redraw the desktop pane and a
+/// <c>kill</c> would end the session, so only <c>input</c> and <c>history</c> are forwarded and
+/// every other message is dropped where it arrives.
 /// </summary>
 internal static class AttachRelay
 {
@@ -37,9 +38,10 @@ internal static class AttachRelay
         try
         {
             using var doc = JsonDocument.Parse(message.ToArray());
-            return doc.RootElement.ValueKind == JsonValueKind.Object
-                && doc.RootElement.TryGetProperty("type", out var t) && t.ValueKind == JsonValueKind.String && t.GetString() == "input"
-                && doc.RootElement.TryGetProperty("data", out var d) && d.ValueKind == JsonValueKind.String;
+            if (doc.RootElement.ValueKind != JsonValueKind.Object || !doc.RootElement.TryGetProperty("type", out var t) || t.ValueKind != JsonValueKind.String) return false;
+            // Asking a chat host for earlier conversation changes nothing on the desktop: it only reads.
+            if (t.GetString() == "history") return true;
+            return t.GetString() == "input" && doc.RootElement.TryGetProperty("data", out var d) && d.ValueKind == JsonValueKind.String;
         }
         catch (JsonException) { return false; }
     }

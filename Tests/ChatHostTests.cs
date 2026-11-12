@@ -35,13 +35,14 @@ public class ChatHostTests : IDisposable
         $out = [Console]::Out
         $out.WriteLine('a line that is not part of the protocol')
         $effort = 'high'
+        $mode = 'default'
         while ($null -ne ($line = [Console]::In.ReadLine())) {
             $m = $line | ConvertFrom-Json
             if ($m.type -eq 'user') {
                 $text = $m.message.content
                 $content = $text
                 if ($text -isnot [string]) { $text = 'an image' }
-                $out.WriteLine('{"type":"system","subtype":"init","session_id":"live-session","model":"fake-model","permissionMode":"default"}')
+                $out.WriteLine('{"type":"system","subtype":"init","session_id":"live-session","model":"fake-model","permissionMode":"' + $mode + '"}')
                 if ($text -like 'h*') { $out.WriteLine('{"type":"system","subtype":"session_title_changed","title":"named by the cli"}') }
                 $out.WriteLine((@{ type = 'user'; isReplay = $true; message = @{ role = 'user'; content = $content } } | ConvertTo-Json -Compress -Depth 8))
                 if ($text -eq 'quit') { [Console]::Error.WriteLine('fake cli: told to quit'); exit 3 }
@@ -55,6 +56,7 @@ public class ChatHostTests : IDisposable
                 $id = $m.request_id
                 if ($m.request.subtype -eq 'initialize') { $out.WriteLine('{"type":"control_response","response":{"subtype":"success","request_id":"' + $id + '","response":{"current_permission_mode":"default","models":[{"value":"fake","resolvedModel":"fake-model","displayName":"Fake","description":"","supportedEffortLevels":["low","high"]}],"commands":[{"name":"compact","description":"Summarize","argumentHint":""}]}}}') }
                 elseif ($m.request.subtype -eq 'get_settings') { $out.WriteLine('{"type":"control_response","response":{"subtype":"success","request_id":"' + $id + '","response":{"applied":{"model":"fake-model","effort":"' + $effort + '"}}}}') }
+                elseif ($m.request.subtype -eq 'set_permission_mode') { $mode = $m.request.mode; $out.WriteLine('{"type":"control_response","response":{"subtype":"success","request_id":"' + $id + '","response":{"mode":"' + $mode + '"}}}') }
                 elseif ($m.request.subtype -eq 'apply_flag_settings') { $effort = $m.request.settings.effortLevel; $out.WriteLine('{"type":"control_response","response":{"subtype":"success","request_id":"' + $id + '"}}') }
             }
             elseif ($m.type -eq 'control_response') {
@@ -73,14 +75,19 @@ public class ChatHostTests : IDisposable
         string transcript = Path.Combine(_dir, "transcript.jsonl");
         File.WriteAllLines(transcript, new[]
         {
-            """{"type":"user","message":{"role":"user","content":"said before the restart"}}""",
-            """{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"answered before the restart"}]}}""",
+            // More than the scrollback is started with, and more than one page of earlier conversation holds.
+            """{"type":"user","uuid":"u-old","message":{"role":"user","content":"OLD"}}""".Replace("OLD", new string('o', 300 * 1024)),
+            """{"type":"user","uuid":"u-0","message":{"role":"user","content":"said long before"}}""",
+            """{"type":"user","uuid":"u-1","message":{"role":"user","content":"said before the restart"}}""",
+            """{"type":"assistant","uuid":"u-2","message":{"role":"assistant","content":[{"type":"text","text":"answered before the restart"}]}}""",
         });
         var spec = new HostSpec
         {
             Id = "chattest0001", SessionId = "planned-session", Provider = "Claude", Kind = ChatStream.Kind, HistoryPath = transcript,
             CommandLine = $"\"{SessionLauncher.ResolvePowerShell()}\" -NoLogo -NoProfile -File \"{script}\"",
             Cwd = _dir, HostsDir = Path.Combine(_dir, "hosts"), RingBytes = 256 * 1024,
+            // As a restart hands a session on: it was planning, at medium effort.
+            RestoreMode = "plan", RestoreEffort = "medium",
         };
         var psi = new ProcessStartInfo(HostExe) { UseShellExecute = false, RedirectStandardInput = true, RedirectStandardOutput = true, CreateNoWindow = true };
         psi.ArgumentList.Add("--host");
@@ -95,17 +102,39 @@ public class ChatHostTests : IDisposable
 
         using var viewer = await Viewer.Attach(record, after: 0);
         Assert.Equal(ChatStream.Kind, viewer.Snapshot.GetProperty("kind").GetString());
+        Assert.Equal((ChatStream.Revision, "planned-session"), (viewer.Snapshot.GetProperty("chat").GetInt32(), viewer.Snapshot.GetProperty("session").GetString()));
+        Assert.Equal(ChatStream.Revision, record.ChatRevision);
+        Assert.True(viewer.Snapshot.GetProperty("earlier").GetBoolean());
         var first = await viewer.Until(l => Type(l) == "host");
-        Assert.Equal(new[] { "user", "assistant", "host" }, first.Select(Type));
-        Assert.True(first[0].GetProperty("history").GetBoolean());
-        Assert.Equal("said before the restart", first[0].GetProperty("message").GetProperty("content").GetString());
-        Assert.Equal("a line that is not part of the protocol", first[2].GetProperty("text").GetString());
+        Assert.Equal(new[] { "user", "user", "assistant", "host" }, first.Select(Type));
+        Assert.True(first[1].GetProperty("history").GetBoolean());
+        Assert.Equal("said before the restart", first[1].GetProperty("message").GetProperty("content").GetString());
+        Assert.Equal("a line that is not part of the protocol", first[3].GetProperty("text").GetString());
 
-        await viewer.Pump(() => viewer.Catalog.HasValue && viewer.Settings.Any(f => f.GetProperty("effort").GetString() == "high"));
+        // The session comes back planning at medium effort: the host put both back before any viewer asked.
+        await viewer.Pump(() => viewer.Catalog.HasValue && viewer.Settings.Any(f => f.GetProperty("effort").GetString() == "medium" && f.GetProperty("mode").GetString() == "plan"));
         Assert.Equal("fake", viewer.Catalog!.Value.GetProperty("models")[0].GetProperty("value").GetString());
         Assert.Equal("compact", viewer.Catalog.Value.GetProperty("commands")[0].GetProperty("name").GetString());
-        Assert.Equal(("default", "fake-model", "high"), SettingsOf(viewer));
-        Assert.Empty(viewer.Live);
+        Assert.Equal(("plan", "fake-model", "medium"), SettingsOf(viewer));
+        Assert.DoesNotContain(viewer.Live, l => Type(l) != "control_response");
+        viewer.Live.Clear();
+        record = await RecordWhen(r => r.Effort == "medium");
+        Assert.Equal(("plan", "medium"), (record.PermissionMode, record.Effort));
+
+        // Earlier conversation is paged from the transcript: before a place in the file, or before a message known only by its uuid.
+        long second = first[1].GetProperty("at").GetInt64();
+        await viewer.SendFrame("{\"type\":\"history\",\"request\":\"q1\",\"before\":" + second + "}");
+        var page = await viewer.NextHistory();
+        Assert.Equal("q1", page.GetProperty("request").GetString());
+        Assert.Equal(new[] { "said long before" }, page.GetProperty("lines").EnumerateArray().Select(l => l.GetProperty("message").GetProperty("content").GetString()));
+        // The page stops short of the long message before it, and says where to go on from.
+        Assert.Equal(first[0].GetProperty("at").GetInt64(), page.GetProperty("next").GetInt64());
+        await viewer.SendFrame("""{"type":"history","request":"q2","uuid":"u-2"}""");
+        page = await viewer.NextHistory();
+        Assert.Equal(new[] { "u-0", "u-1" }, page.GetProperty("lines").EnumerateArray().Select(l => l.GetProperty("uuid").GetString()));
+        await viewer.SendFrame("""{"type":"history","request":"q3","uuid":"no-such-message"}""");
+        page = await viewer.NextHistory();
+        Assert.Equal(("q3", 0), (page.GetProperty("request").GetString(), page.GetProperty("lines").GetArrayLength()));
 
         await viewer.Send(ChatStream.UserLine("héllo wörld"));
         var turn = await viewer.Until(l => Type(l) == "result");
@@ -142,14 +171,15 @@ public class ChatHostTests : IDisposable
             // What the CLI offers and what is in force reach a viewer that was not there when the CLI said so.
             await late.Pump(() => late.Catalog.HasValue && late.Settings.Count > 0);
             Assert.Equal("fake", late.Catalog!.Value.GetProperty("models")[0].GetProperty("value").GetString());
-            Assert.Equal(("default", "fake-model", "high"), SettingsOf(late));
+            Assert.Equal(("plan", "fake-model", "medium"), SettingsOf(late));
             Assert.Empty(late.Live);
         }
 
         // A viewer changes the effort: the CLI's bare "done" is followed by the host asking what is in force and telling every viewer.
         await viewer.Send("""{"type":"control_request","request_id":"sd-set-1","request":{"subtype":"apply_flag_settings","settings":{"effortLevel":"low"}}}""");
         await viewer.Pump(() => viewer.Settings.Any(f => f.GetProperty("effort").GetString() == "low"));
-        Assert.Equal(("default", "fake-model", "low"), SettingsOf(viewer));
+        Assert.Equal(("plan", "fake-model", "low"), SettingsOf(viewer));
+        Assert.Equal("low", (await RecordWhen(r => r.Effort == "low")).Effort);
         Assert.Equal("sd-set-1", viewer.Live[^1].GetProperty("response").GetProperty("request_id").GetString());
 
         // A pasted image goes to the CLI whole and into the scrollback without its bytes.
@@ -202,6 +232,16 @@ public class ChatHostTests : IDisposable
         public List<string> Titles { get; } = new();
         public JsonElement? Catalog { get; private set; }
         public List<JsonElement> Settings { get; } = new();
+        readonly Queue<JsonElement> _history = new();
+
+        /// <summary>A frame of the viewer's own, not typed input: a request the host answers.</summary>
+        public Task SendFrame(string json) => _ws.SendAsync(Encoding.UTF8.GetBytes(json), WebSocketMessageType.Text, true, CancellationToken.None);
+
+        public async Task<JsonElement> NextHistory()
+        {
+            while (_history.Count == 0) await Read();
+            return _history.Dequeue();
+        }
 
         /// <summary>Read frames until <paramref name="done"/> holds.</summary>
         public async Task Pump(Func<bool> done)
@@ -258,6 +298,7 @@ public class ChatHostTests : IDisposable
                     case "title": Titles.Add(frame.GetProperty("title").GetString() ?? ""); break;
                     case "catalog": Catalog = frame; break;
                     case "settings": Settings.Add(frame); break;
+                    case "history": _history.Enqueue(frame); break;
                     case "exit": _exit.TrySetResult(frame.GetProperty("code").GetInt32()); break;
                 }
                 return;

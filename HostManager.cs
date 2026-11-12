@@ -48,11 +48,24 @@ internal static class HostManager
         return cmd;
     }
 
-    public static string ResumeClaudeChatCommand(string sessionId, string extraFlags)
+    /// <summary>
+    /// <paramref name="model"/> is the one the session was on: a restart is the same conversation, so it
+    /// goes on with the same model. It goes last because the CLI takes the last <c>--model</c> it is
+    /// given, and the deck's own flags may name a default one.
+    /// </summary>
+    public static string ResumeClaudeChatCommand(string sessionId, string extraFlags, string model = "")
     {
         string cmd = $"{ClaudeBinaryForChat()} {ChatStream.ProtocolFlags} --resume {sessionId}";
         if (!string.IsNullOrWhiteSpace(extraFlags)) cmd += " " + extraFlags.Trim();
+        if (!string.IsNullOrWhiteSpace(model)) cmd += $" --model \"{model.Trim()}\"";
         return cmd;
+    }
+
+    /// <summary>The permission mode and effort a restarted chat session comes back with (see <see cref="HostSpec.RestoreMode"/>).</summary>
+    internal sealed record ChatRestore(string Mode, string Effort)
+    {
+        /// <summary>What the host being replaced last recorded; null for a terminal, which has neither.</summary>
+        public static ChatRestore? Of(HostRecord host) => host.IsChat ? new ChatRestore(host.PermissionMode, host.Effort) : null;
     }
 
     /// <summary>
@@ -131,13 +144,13 @@ internal static class HostManager
             ? $"\"{SessionLauncher.ResolvePowerShell()}\" -NoLogo"
             : $"\"{SessionLauncher.ResolvePowerShell()}\" -NoLogo -NoExit -Command \"{cmd.Replace("\"", "\\\"")}\"";
 
-    public static HostRecord Spawn(string sessionId, SessionProvider provider, string command, string cwd, string? title, string initialPrompt = "", string profile = "", string kind = "") =>
-        Spawn(sessionId, provider.ToString(), command, cwd, title, initialPrompt, profile, kind);
+    public static HostRecord Spawn(string sessionId, SessionProvider provider, string command, string cwd, string? title, string initialPrompt = "", string profile = "", string kind = "", ChatRestore? restore = null) =>
+        Spawn(sessionId, provider.ToString(), command, cwd, title, initialPrompt, profile, kind, restore);
 
     /// <summary>A pane with just a shell in it: nothing launched, no hooks, no session id.</summary>
     public static HostRecord SpawnShell(string cwd) => Spawn("", "Shell", "", cwd, "Terminal");
 
-    public static HostRecord Spawn(string sessionId, string provider, string command, string cwd, string? title, string initialPrompt = "", string profile = "", string kind = "")
+    public static HostRecord Spawn(string sessionId, string provider, string command, string cwd, string? title, string initialPrompt = "", string profile = "", string kind = "", ChatRestore? restore = null)
     {
         Directory.CreateDirectory(HostsDir);
         string id = Guid.NewGuid().ToString("N")[..12];
@@ -156,6 +169,8 @@ internal static class HostManager
             Profile = profile ?? "",
             Kind = kind ?? "",
             HistoryPath = chat ? SessionScanner.TranscriptPathFor(sessionId, folder) : "",
+            RestoreMode = chat ? restore?.Mode ?? "" : "",
+            RestoreEffort = chat ? restore?.Effort ?? "" : "",
         };
 
         var psi = new ProcessStartInfo(HostExe())

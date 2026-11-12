@@ -6,13 +6,14 @@ namespace SessionDeck;
 /// <summary>
 /// What each session was last auto-restarted for, kept on disk so a CLI that still reports its old
 /// version after the restart is restarted once per version, not once per launch of the app. Two
-/// kinds of target are tracked apart, a CLI version and a host protocol, so one kind's restart never
-/// counts as the other's; within a kind only the current target's entries are kept.
+/// kinds of target are tracked apart (a CLI version, a host protocol, a chat host's revision), so one
+/// kind's restart never counts as another's; within a kind only the current target's entries are kept.
 /// </summary>
 internal sealed class AutoRestartLedger
 {
     public const string Cli = "cli";
     public const string HostProtocol = "host";
+    public const string ChatHost = "chat";
 
     readonly string _path;
     readonly Dictionary<string, string> _restartedFor;

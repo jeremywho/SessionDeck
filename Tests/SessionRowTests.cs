@@ -49,6 +49,31 @@ public class SessionRowTests
     }
 
     [Fact]
+    public void A_chat_host_is_also_behind_by_what_its_chat_side_can_do_and_is_caught_up_once_per_revision()
+    {
+        var info = new SessionInfo { SessionId = "s1", Kind = "interactive" };
+        int protocol = SessionDeck.Host.HostRecord.CurrentProtocol, revision = SessionDeck.Host.ChatStream.Revision;
+        SessionDeck.Host.HostRecord Chat(int chatRevision, int p) => new() { Id = "h", SessionId = "s1", Protocol = p, Kind = SessionDeck.Host.ChatStream.Kind, ChatRevision = chatRevision };
+
+        // A chat started before revisions were written says 0, like any record that lacks the field.
+        Assert.True(new SessionRow(Chat(0, protocol), info).HostBehind);
+        Assert.True(new SessionRow(Chat(revision - 1, protocol), info).HostBehind);
+        Assert.False(new SessionRow(Chat(revision, protocol), info).HostBehind);
+        var ended = Chat(0, protocol);
+        ended.ExitCode = 0;
+        Assert.False(new SessionRow(ended, info).HostBehind);
+        // A terminal has no chat side to be behind on.
+        Assert.False(new SessionRow(new SessionDeck.Host.HostRecord { Id = "h", SessionId = "s1", Protocol = protocol }, info).HostBehind);
+
+        // The restart is recorded against the chat revision, apart from the terminals' protocol, so neither spends the other's one restart.
+        Assert.Equal((AutoRestartLedger.ChatHost, $"chat-host-{revision}"), new SessionRow(Chat(0, protocol), info).HostUpkeepTarget);
+        Assert.Equal((AutoRestartLedger.HostProtocol, $"host-protocol-{protocol}"), new SessionRow(new SessionDeck.Host.HostRecord { Id = "h", SessionId = "s1", Protocol = 3 }, info).HostUpkeepTarget);
+        Assert.Equal((AutoRestartLedger.HostProtocol, $"host-protocol-{protocol}"), new SessionRow(Chat(0, protocol - 1), info).HostUpkeepTarget);
+        Assert.NotEqual(AutoRestartLedger.ChatHost, AutoRestartLedger.HostProtocol);
+        Assert.NotEqual(AutoRestartLedger.ChatHost, AutoRestartLedger.Cli);
+    }
+
+    [Fact]
     public void An_unrecognised_model_id_is_shown_as_is_rather_than_blanked()
         => Assert.Equal("some-new-model", WithModel("some-new-model").ModelChip);
 

@@ -125,8 +125,11 @@ public class AttachRelayTests
     [InlineData("{\"type\":\"input\"}", false)]
     [InlineData("{\"type\":\"resize\",\"cols\":1,\"rows\":1}", false)]
     [InlineData("{\"type\":\"kill\"}", false)]
+    [InlineData("{\"type\":\"history\",\"request\":\"q1\",\"before\":120}", true)]
+    [InlineData("{\"type\":\"history\",\"request\":\"q2\",\"uuid\":\"abc-1\"}", true)]
+    [InlineData("{\"type\":7}", false)]
     [InlineData("[]", false)]
     [InlineData("nope", false)]
-    public void The_input_filter_lets_only_well_formed_input_through(string message, bool allowed) =>
+    public void The_filter_lets_through_only_what_is_typed_and_a_request_to_read_earlier_conversation(string message, bool allowed) =>
         Assert.Equal(allowed, AttachRelay.AllowedTowardHost(Encoding.UTF8.GetBytes(message), WebSocketMessageType.Text));
 }

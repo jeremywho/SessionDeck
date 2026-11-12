@@ -376,7 +376,9 @@ internal sealed class SessionRow : INotifyPropertyChanged
                 $"{ProviderName} · PID {_s.Pid} · {ShortId} · v{_s.Version}",
             });
             if (UpdatePending) lines.Add($"Update installed: v{InstalledVersions.For(_s.Provider)} · restarts when idle, or right-click to restart now");
-            if (HostBehind) lines.Add("Deck updated: this pane cannot open on the phone until it restarts · restarts when idle, or right-click to restart now");
+            if (HostBehind) lines.Add(Host.IsChat && Host.Protocol >= SessionDeck.Host.HostRecord.CurrentProtocol
+                ? "Deck updated: this chat is missing newer features until it restarts · restarts when idle, or right-click to restart now"
+                : "Deck updated: this pane cannot open on the phone until it restarts · restarts when idle, or right-click to restart now");
             if (OnOtherDesktop) lines.Add($"On {DesktopLabel}");
             if (_s.SubagentsActive > 0) lines.Add($"Subagents: {_s.SubagentsActive} working / {_s.SubagentsTotal} this session");
             if (_s.ApiError && _s.ErrorText.Length > 0) lines.Add(_s.ErrorText);
@@ -433,7 +435,19 @@ internal sealed class SessionRow : INotifyPropertyChanged
     public bool UpdatePending => !Host.HasExited && InstalledVersions.IsBehind(_s.Provider, _s.Version);
 
     /// <summary>The host runs from a copy older than this deck and lacks something the deck now relies on (the phone cannot open it); a restart moves the session onto the current host.</summary>
-    public bool HostBehind => !Host.HasExited && Host.Protocol < SessionDeck.Host.HostRecord.CurrentProtocol;
+    public bool HostBehind => !Host.HasExited && IsBehind(Host);
+
+    /// <summary>A host an update left behind: a terminal by its protocol, a chat also by what its chat side can do.</summary>
+    internal static bool IsBehind(Host.HostRecord host) =>
+        host.Protocol < SessionDeck.Host.HostRecord.CurrentProtocol || host.IsChat && host.ChatRevision < SessionDeck.Host.ChatStream.Revision;
+
+    /// <summary>What an automatic restart of this host is recorded against, so it happens once per thing to catch up to.</summary>
+    public (string Kind, string Target) HostUpkeepTarget => UpkeepTarget(Host);
+
+    internal static (string Kind, string Target) UpkeepTarget(Host.HostRecord host) =>
+        host.IsChat && host.Protocol >= SessionDeck.Host.HostRecord.CurrentProtocol
+            ? (AutoRestartLedger.ChatHost, $"chat-host-{SessionDeck.Host.ChatStream.Revision}")
+            : (AutoRestartLedger.HostProtocol, $"host-protocol-{SessionDeck.Host.HostRecord.CurrentProtocol}");
 
     /// <summary>Restart means end the child and start the same session again; both CLIs need the id for that.</summary>
     public bool CanRestart => LiveSessionId.Length > 0;

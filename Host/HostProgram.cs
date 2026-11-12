@@ -40,6 +40,10 @@ internal sealed class HostSpec
 
     /// <summary>A chat session's transcript: where the conversation so far is read from when the session is resumed.</summary>
     public string HistoryPath { get; set; } = "";
+
+    /// <summary>The permission mode and effort a restarted chat session had, put back once the CLI is up; empty to leave them as the CLI starts.</summary>
+    public string RestoreMode { get; set; } = "";
+    public string RestoreEffort { get; set; } = "";
 }
 
 /// <summary>
@@ -88,6 +92,13 @@ internal sealed class HostRecord
 
     [JsonIgnore] public bool IsChat => Kind == ChatStream.Kind;
 
+    /// <summary>What this chat host can do (<see cref="ChatStream.Revision"/>); 0 for a terminal, and for a chat host from before revisions were written.</summary>
+    public int ChatRevision { get; set; }
+
+    /// <summary>A chat session's permission mode and effort as last reported: what a restart puts back.</summary>
+    public string PermissionMode { get; set; } = "";
+    public string Effort { get; set; } = "";
+
     /// <summary>How this host derives status. 2: idle notifications no longer mean waiting; turns can end
     /// scheduled. 3: a background shell command no longer counts as scheduling a wake-up. 4: the pty size
     /// travels with the attach stream, which a phone needs.</summary>
@@ -131,6 +142,8 @@ internal static class HostProgram
     static Ring _ring = null!;
     static ConPty _pty = null!;
     static PipeChild? _pipe;
+    /// <summary>Whether the transcript held more conversation than the scrollback was started with. (A scrollback that has since dropped its oldest lines has more behind it too.)</summary>
+    static bool _chatEarlier;
     static readonly ChatStream _chat = new();
     static readonly object ChatInputLock = new();
     static readonly StringBuilder _chatErrors = new();
@@ -233,6 +246,7 @@ internal static class HostProgram
             Profile = spec.Profile,
             Protocol = HostRecord.CurrentProtocol,
             Kind = spec.Kind,
+            ChatRevision = chat ? ChatStream.Revision : 0,
             ChildPid = chat ? _pipe!.Pid : _pty.Pid,
             TranscriptPath = chat ? spec.HistoryPath : "",
             Port = port,
@@ -251,7 +265,9 @@ internal static class HostProgram
             // The CLI reports nothing until it is spoken to: a chat session starts out waiting for the person.
             _record.AgentStatus = "idle";
             _record.StatusAt = _record.StartedAt;
-            foreach (var line in ChatStream.History(spec.HistoryPath, Math.Max(spec.RingBytes, 64 * 1024) / 2)) AppendChatLine(line);
+            var seed = ChatTranscript.Before(spec.HistoryPath, long.MaxValue, Math.Max(spec.RingBytes, 64 * 1024) / 2, int.MaxValue);
+            _chatEarlier = seed.Next >= 0;
+            foreach (var line in seed.Lines) AppendChatLine(line);
         }
         WriteRecord();
         ready.WriteLine("ready");
@@ -264,6 +280,7 @@ internal static class HostProgram
             new Thread(DrainChatErrors) { IsBackground = true, Name = "chat-stderr" }.Start();
             // What the CLI offers and what is in force, asked once so every viewer can be told without asking itself.
             WriteChatInput(ChatStream.InitializeLine());
+            foreach (var line in ChatStream.RestoreLines(spec.RestoreMode, spec.RestoreEffort)) WriteChatInput(line);
             WriteChatInput(ChatStream.SettingsLine());
         }
         if (spec.InitialPrompt.Length > 0)
@@ -453,7 +470,7 @@ internal static class HostProgram
         if (renamed != null) Broadcast(true, Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { type = "title", title = renamed })));
         if (catalog != null) Broadcast(true, Encoding.UTF8.GetBytes(catalog));
         if (settings != null) Broadcast(true, Encoding.UTF8.GetBytes(settings));
-        if (durable) AppendChatLine(ChatStream.WithoutImageData(line));
+        if (durable) AppendChatLine(ChatStream.ForRing(line));
         else if (!ownAnswer) Broadcast(true, ChatStream.LiveFrame(line));
         if (decline != null) WriteChatInput(decline);
         if (change.Refresh) WriteChatInput(ChatStream.SettingsLine());
@@ -592,7 +609,7 @@ internal static class HostProgram
                 (long start, byte[] data) = _ring.Since(after);
                 long end = start + data.Length;
                 string snapshot = _pipe != null
-                    ? SnapshotJson(start, end, _record.Title, 0, 0, ChatStream.Kind)
+                    ? SnapshotJson(start, end, _record.Title, 0, 0, ChatStream.Kind, ChatStream.Revision, _record.SessionId, _chatEarlier || _ring.Start > 0)
                     : SnapshotJson(start, end, _record.Title, _pty.Cols, _pty.Rows);
                 client.Out.Writer.TryWrite((true, Encoding.UTF8.GetBytes(snapshot)));
                 if (data.Length > 0) client.Out.Writer.TryWrite((false, data));
@@ -633,7 +650,7 @@ internal static class HostProgram
                 if (r.MessageType == WebSocketMessageType.Close) break;
                 msg.Write(inbuf, 0, r.Count);
                 if (!r.EndOfMessage) continue;
-                HandleMessage(msg.ToArray());
+                HandleMessage(msg.ToArray(), client);
                 msg.SetLength(0);
             }
         }
@@ -646,7 +663,7 @@ internal static class HostProgram
         }
     }
 
-    static void HandleMessage(byte[] payload)
+    static void HandleMessage(byte[] payload, Client client)
     {
         try
         {
@@ -654,6 +671,10 @@ internal static class HostProgram
             var root = doc.RootElement;
             switch (root.GetProperty("type").GetString())
             {
+                case "history":
+                    if (_pipe == null) return;
+                    SendHistory(client, root);
+                    break;
                 case "input":
                     if (_exited) return;
                     if (_pipe != null)
@@ -715,8 +736,46 @@ internal static class HostProgram
     }
 
     /// <summary>The first text frame of an attach: where the bytes that follow start in the ring, and the pty's size so a viewer that may not resize can render it.</summary>
-    internal static string SnapshotJson(long start, long end, string title, int cols, int rows, string kind = "") =>
-        JsonSerializer.Serialize(new { type = "snapshot", start, end, title, cols, rows, kind });
+    /// <summary>For a chat host, <paramref name="chat"/> says what it can do, <paramref name="session"/> names the conversation, which a viewer keys an unsent draft by, and <paramref name="earlier"/> says the transcript goes back further than the scrollback did at its start.</summary>
+    internal static string SnapshotJson(long start, long end, string title, int cols, int rows, string kind = "", int chat = 0, string session = "", bool earlier = false) =>
+        JsonSerializer.Serialize(new { type = "snapshot", start, end, title, cols, rows, kind, chat, session, earlier });
+
+    /// <summary>The transcript of the conversation this host runs now: beside the one it started with, under the id the CLI last reported.</summary>
+    static string ChatTranscriptPath()
+    {
+        string dir = Path.GetDirectoryName(_spec.HistoryPath) ?? "";
+        string session;
+        lock (_record) session = _record.SessionId;
+        return dir.Length == 0 || session.Length == 0 || session == _spec.SessionId ? _spec.HistoryPath : Path.Combine(dir, session + ".jsonl");
+    }
+
+    /// <summary>
+    /// <c>{"type":"history","request":"…","before":N}</c> or <c>"uuid":"…"</c>: a page of the
+    /// conversation older than that place, answered to the asking viewer alone. The uuid form is for
+    /// a viewer whose oldest message arrived live and so has no place in the file to name.
+    /// </summary>
+    static void SendHistory(Client client, JsonElement ask)
+    {
+        string request = Text(ask, "request");
+        long before = ask.TryGetProperty("before", out var b) && b.ValueKind == JsonValueKind.Number && b.TryGetInt64(out var at) ? at : -1;
+        string uuid = Text(ask, "uuid");
+        string path = ChatTranscriptPath();
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                if (before < 0) before = uuid.Length > 0 ? ChatTranscript.Find(path, uuid) : long.MaxValue;
+                var page = before < 0 ? new ChatTranscript.Page(new List<byte[]>(), -1) : ChatTranscript.Before(path, before, 256 * 1024, 400);
+                client.Out.Writer.TryWrite((true, ChatStream.HistoryFrame(page, request)));
+            }
+            catch (Exception ex)
+            {
+                // The viewer is waiting on an answer: it gets one that holds nothing rather than none.
+                Log($"history: {ex.Message}");
+                client.Out.Writer.TryWrite((true, ChatStream.HistoryFrame(new ChatTranscript.Page(new List<byte[]>(), -1), request)));
+            }
+        });
+    }
 
     internal static string SizeJson(int cols, int rows) =>
         JsonSerializer.Serialize(new { type = "size", cols, rows });

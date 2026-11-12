@@ -337,12 +337,12 @@
   }
 
   // A chat session has no terminal: its pane is a conversation, wrapped so the column code can treat it like any other.
-  function openChat(id, port, token, exited) {
+  function openChat(id, port, token, exited, session) {
     const el = document.createElement('div');
     el.className = 'pane';
     document.body.appendChild(el);
     const chat = ChatPane.create({
-      el, id, port, token, post, exited,
+      el, id, port, token, post, exited, session,
       onFocus: () => {
         const gi = groups.findIndex(g => g.id === id);
         if (gi >= 0 && gi !== focused) { focused = gi; layout(); }
@@ -358,9 +358,9 @@
     });
   }
 
-  function open(id, port, token, kind, exited) {
+  function open(id, port, token, kind, exited, session) {
     if (panes.has(id)) return;
-    if (kind === 'chat') { openChat(id, port, token, !!exited); return; }
+    if (kind === 'chat') { openChat(id, port, token, !!exited, session || ''); return; }
     const el = document.createElement('div');
     el.className = 'pane';
     document.body.appendChild(el);
@@ -710,7 +710,7 @@
       const m = ev.data;
       if (!m || !m.type) return;
       switch (m.type) {
-        case 'open': open(m.id, m.port, m.token, m.kind, m.exited); break;
+        case 'open': open(m.id, m.port, m.token, m.kind, m.exited, m.session); break;
         case 'layout':
           groups = m.groups.map(g => ({ id: g.id || null, frac: Number(g.frac) || 1, kind: g.kind || 'tabs' }));
           focused = Math.min(m.focused ?? focused, Math.max(0, groups.length - 1));

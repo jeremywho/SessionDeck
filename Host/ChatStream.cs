@@ -15,6 +15,14 @@ internal sealed class ChatStream
 {
     public const string Kind = "chat";
 
+    /// <summary>
+    /// What a chat host can do, written to its record and told to its viewers. A host below this is
+    /// one an update left behind: it still works, and it restarts when idle to catch up.
+    /// 3: earlier conversation paged from the transcript, settings carried through a restart, and
+    /// scrollback kept free of what no viewer reads. Before 3 the record carries no revision.
+    /// </summary>
+    public const int Revision = 3;
+
     /// <summary>Flags every chat launch carries; the session flags and the hook settings follow them.</summary>
     public const string ProtocolFlags = "-p --input-format stream-json --output-format stream-json --verbose --include-partial-messages --replay-user-messages --permission-prompt-tool stdio";
 
@@ -125,6 +133,9 @@ internal sealed class ChatStream
                 refresh = true;
                 break;
         }
+        // The record carries what a restart has to put back: a session the person set to plan mode comes back planning.
+        record.PermissionMode = _mode;
+        record.Effort = _effort;
         return new Change(Signature(record) != before, _catalog != catalog, SettingsFrame() != settings, refresh);
     }
 
@@ -218,6 +229,21 @@ internal sealed class ChatStream
     static string ControlLine(string id, string subtype) =>
         JsonSerializer.Serialize(new { type = "control_request", request_id = id, request = new { subtype } });
 
+    /// <summary>
+    /// What puts a restarted session back in the mode and effort it had. Asked as a viewer's change
+    /// would be, so the answers are read the same way. The model goes on the command line instead:
+    /// set this way the CLI writes "Set model to" into the conversation at every restart.
+    /// </summary>
+    public static List<string> RestoreLines(string mode, string effort)
+    {
+        var lines = new List<string>();
+        if (mode.Length > 0)
+            lines.Add(JsonSerializer.Serialize(new { type = "control_request", request_id = SetPrefix + "restore-mode", request = new { subtype = "set_permission_mode", mode } }));
+        if (effort.Length > 0)
+            lines.Add(JsonSerializer.Serialize(new { type = "control_request", request_id = SetPrefix + "restore-effort", request = new { subtype = "apply_flag_settings", settings = new { effortLevel = effort } } }));
+        return lines;
+    }
+
     static bool IsLocalCommandOutput(JsonElement userLine) =>
         userLine.TryGetProperty("message", out var message) && message.TryGetProperty("content", out var content)
         && content.ValueKind == JsonValueKind.String && (content.GetString() ?? "").TrimStart().StartsWith("<local-command-", StringComparison.Ordinal);
@@ -234,6 +260,55 @@ internal sealed class ChatStream
         catch (JsonException) { return line; }
         if (root == null || !Strip(root)) return line;
         return Encoding.UTF8.GetBytes(root.ToJsonString());
+    }
+
+    /// <summary>Longer than this, a subagent's tool input or result is cut in the scrollback: a viewer shows a line of it.</summary>
+    const int SubagentTextKept = 1500;
+
+    /// <summary>
+    /// The line as the scrollback keeps it. Three things are megabytes a viewer never reads: an
+    /// image's bytes, the structured copy of a tool result the CLI adds beside the readable one
+    /// (for an edit, the whole file as it was), and what a subagent read and wrote along the way.
+    /// The first two go; the third is cut to its beginning, since it is shown as progress.
+    /// </summary>
+    public static byte[] ForRing(byte[] line)
+    {
+        var span = line.AsSpan();
+        bool sub = span.IndexOf("\"parent_tool_use_id\":\""u8) >= 0;
+        if (!sub && span.IndexOf("\"base64\""u8) < 0 && span.IndexOf("\"tool_use_result\""u8) < 0 && span.IndexOf("\"tool_result_meta\""u8) < 0) return line;
+        System.Text.Json.Nodes.JsonNode? root;
+        try { root = System.Text.Json.Nodes.JsonNode.Parse(line); }
+        catch (JsonException) { return line; }
+        if (root is not System.Text.Json.Nodes.JsonObject top) return line;
+        bool changed = top.Remove("tool_use_result") | top.Remove("tool_result_meta");
+        changed |= Strip(top);
+        if (top["parent_tool_use_id"] is System.Text.Json.Nodes.JsonValue parent && parent.TryGetValue<string>(out var of) && of.Length > 0
+            && top["message"] is System.Text.Json.Nodes.JsonObject message && message["content"] is System.Text.Json.Nodes.JsonArray blocks)
+            foreach (var block in blocks.OfType<System.Text.Json.Nodes.JsonObject>())
+            {
+                if (block["content"] is { } result && Cut(result) is { } shorter) { block["content"] = shorter; changed = true; }
+                if (block["input"] is System.Text.Json.Nodes.JsonObject input)
+                    foreach (var field in input.ToList())
+                        if (field.Value is System.Text.Json.Nodes.JsonValue value && value.TryGetValue<string>(out var text) && text.Length > SubagentTextKept)
+                        {
+                            input[field.Key] = text[..SubagentTextKept] + "…";
+                            changed = true;
+                        }
+            }
+        return changed ? Encoding.UTF8.GetBytes(top.ToJsonString()) : line;
+    }
+
+    /// <summary>A tool result as its first stretch of text, or null when it is already short.</summary>
+    static string? Cut(System.Text.Json.Nodes.JsonNode result)
+    {
+        string text;
+        if (result is System.Text.Json.Nodes.JsonValue value && value.TryGetValue<string>(out var plain)) text = plain;
+        else if (result is System.Text.Json.Nodes.JsonArray parts)
+            text = string.Join("\n", parts.OfType<System.Text.Json.Nodes.JsonObject>()
+                .Select(part => part["text"] is System.Text.Json.Nodes.JsonValue t && t.TryGetValue<string>(out var words) ? words : ""));
+        else return null;
+        if (result is System.Text.Json.Nodes.JsonValue && text.Length <= SubagentTextKept) return null;
+        return text.Length <= SubagentTextKept ? text : text[..SubagentTextKept] + "…";
     }
 
     static bool Strip(System.Text.Json.Nodes.JsonNode node)
@@ -267,7 +342,7 @@ internal sealed class ChatStream
         record.StatusAt = now;
     }
 
-    static string Signature(HostRecord r) => $"{r.AgentStatus}|{r.StatusAt?.Ticks}|{r.SessionId}|{r.Model}|{r.Title}|{r.LastTool}|{r.LastEvent}";
+    static string Signature(HostRecord r) => $"{r.AgentStatus}|{r.StatusAt?.Ticks}|{r.SessionId}|{r.Model}|{r.Title}|{r.LastTool}|{r.LastEvent}|{r.PermissionMode}|{r.Effort}";
 
     /// <summary>
     /// The CLI asks its controller things over the same pipe. A viewer answers permission requests;
@@ -334,65 +409,27 @@ internal sealed class ChatStream
         return buffer.WrittenSpan.ToArray();
     }
 
+    internal static byte[]? HistoryLine(string transcriptLine) => ChatTranscript.Line(Encoding.UTF8.GetBytes(transcriptLine), -1);
+
     /// <summary>
-    /// The conversation so far, read from the CLI's own transcript, in the shape the live stream uses.
-    /// A resumed session starts a new process that says nothing about what came before; this is what
-    /// a viewer shows above the first new message. Newest lines win when the transcript is larger
-    /// than <paramref name="budget"/> bytes.
+    /// A page of earlier conversation as the frame a viewer asked for: the lines, and where to ask
+    /// before for the page ahead of it (null when the conversation starts here).
     /// </summary>
-    public static List<byte[]> History(string transcriptPath, int budget)
+    public static byte[] HistoryFrame(ChatTranscript.Page page, string request)
     {
-        var kept = new List<byte[]>();
-        if (transcriptPath.Length == 0 || !File.Exists(transcriptPath)) return kept;
-        string[] lines;
-        try
+        var buffer = new ArrayBufferWriter<byte>();
+        using (var w = new Utf8JsonWriter(buffer))
         {
-            using var file = new FileStream(transcriptPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            using var reader = new StreamReader(file, Encoding.UTF8);
-            lines = reader.ReadToEnd().Split('\n');
+            w.WriteStartObject();
+            w.WriteString("type", "history");
+            w.WriteString("request", request);
+            if (page.Next >= 0) w.WriteNumber("next", page.Next); else w.WriteNull("next");
+            w.WriteStartArray("lines");
+            foreach (var line in page.Lines) w.WriteRawValue(line, skipInputValidation: true);
+            w.WriteEndArray();
+            w.WriteEndObject();
         }
-        catch (IOException) { return kept; }
-        catch (UnauthorizedAccessException) { return kept; }
-
-        int used = 0;
-        for (int i = lines.Length - 1; i >= 0; i--)
-        {
-            if (HistoryLine(lines[i]) is not { } line) continue;
-            if (used + line.Length + 1 > budget) break;
-            used += line.Length + 1;
-            kept.Add(line);
-        }
-        kept.Reverse();
-        return kept;
-    }
-
-    internal static byte[]? HistoryLine(string transcriptLine)
-    {
-        if (transcriptLine.Length < 2) return null;
-        try
-        {
-            using var doc = JsonDocument.Parse(transcriptLine);
-            var root = doc.RootElement;
-            if (root.ValueKind != JsonValueKind.Object) return null;
-            string type = Text(root, "type");
-            if (type is not ("user" or "assistant")) return null;
-            if (True(root, "isSidechain") || True(root, "isMeta")) return null;
-            if (!root.TryGetProperty("message", out var message) || message.ValueKind != JsonValueKind.Object) return null;
-            var buffer = new ArrayBufferWriter<byte>();
-            using (var w = new Utf8JsonWriter(buffer))
-            {
-                w.WriteStartObject();
-                w.WriteString("type", type);
-                w.WriteBoolean("history", true);
-                if (True(root, "isCompactSummary")) w.WriteBoolean("compactSummary", true);
-                if (Text(root, "timestamp") is { Length: > 0 } at) w.WriteString("timestamp", at);
-                w.WritePropertyName("message");
-                message.WriteTo(w);
-                w.WriteEndObject();
-            }
-            return WithoutImageData(buffer.WrittenSpan.ToArray());
-        }
-        catch (JsonException) { return null; }
+        return buffer.WrittenSpan.ToArray();
     }
 
     static string? ToolName(JsonElement assistantLine)

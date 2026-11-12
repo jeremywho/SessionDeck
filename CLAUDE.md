@@ -221,15 +221,46 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
   with those suggestions as `updatedPermissions`. The host reads a `setMode` out of the echoed
   answer so the mode picker is right at once.
 - **Tool calls are drawn inside runs.** In `ChatModel` a call is not a row: consecutive calls
-  share a `tools` item (`AskUserQuestion` and `ExitPlanMode` stand alone), and `touch` repaints
-  the run. Tests reach calls through their runs.
+  share a `tools` item (`AskUserQuestion`, `ExitPlanMode` and `Agent` stand alone), and `touch`
+  repaints the row that holds the call. Tests reach calls through their runs.
+- **A subagent's work arrives under its call's id.** Its own calls and their results are
+  `assistant`/`user` lines whose `parent_tool_use_id` is the `Agent` call; `system`
+  `task_started`/`task_progress`/`task_notification` lines name the call in `tool_use_id` and say
+  what it is doing (`description`, `usage.tool_uses`). All of them are durable, so a viewer that
+  attaches later draws the same thing. `ChatStream.ForRing` cuts what a subagent read and wrote to
+  its first 1500 characters and drops the structured copy of every tool result
+  (`tool_use_result`), which is megabytes nobody reads. The pane keeps them as `children` of the
+  call. A subagent sent to the background has its call's result at once and goes on until its
+  `task_notification`, across the end of the turn (`taskRunning`). There are no token deltas for
+  a subagent.
+- **Earlier conversation is paged from the transcript, on request.** The ring starts with the
+  newest of the transcript that fits half of it (`ChatTranscript.Before`); the snapshot says
+  `earlier` when there is more (or the ring has since dropped its oldest lines). A viewer asks
+  `{"type":"history","request":id,"before":N}`, `N` being the `at` (byte offset) of its oldest
+  history line, or `"uuid":…` when its oldest line arrived live: stream lines and transcript
+  lines carry the same `uuid`. The host answers that viewer alone with `{type:"history", request,
+  lines, next}`. `ChatModel.prepend` puts a page ahead of what is shown, gives a call the result
+  that was already on the page (`orphans`), and joins a run the page boundary cut in two. A call
+  read from the transcript with no result is `stopped`, never running: its process is gone.
+- **A chat host can be behind without the protocol changing.** `ChatStream.Revision` goes in the
+  record (`ChatRevision`) and the snapshot (`chat`); bump it when the pane starts to rely on
+  something new from the host. `SessionRow.HostBehind` is true for a lower one, and the deck's
+  idle auto-restart moves the session to a current host, once per revision
+  (`AutoRestartLedger.ChatHost`). The restart hands on what the old record says: the model on
+  the command line, last, because the CLI takes the last `--model` (measured), and the mode and
+  effort as `HostSpec.RestoreMode`/`RestoreEffort`, which the host sets right after `initialize`.
+  A record written before revision 3 has no mode or effort to hand on.
+- **An unsent message is kept by conversation.** The pane stores the box under
+  `sd.chat.draft:<session id>` in `localStorage` (the deck names the session in its `open`
+  message, a revision 3 host in its snapshot), so a restart under a half-typed message gives it
+  back.
 - **Slash commands are just messages.** A local one (`/context`, `/effort`, `/rename`) is never
   echoed: the CLI answers with a synthetic assistant message and a `result`, so the pane settles
   its pending bubble at the end of the turn. `set_model` and friends replay a
   `<local-command-stdout>` user line, which is no turn (the host must not go busy on it) and
   shows as a note.
 - **A resumed process says nothing about earlier turns.** The host seeds the ring from the
-  transcript at start (`ChatStream.History`, lines marked `history`), so a viewer has one source.
+  transcript at start (`ChatTranscript.Before`, lines marked `history`), so a viewer has one source.
 - **The CLI registers itself** in `~/.claude/sessions` (`kind: interactive`, `entrypoint:
   sdk-cli`), so the row gets name, model and context like any Claude session; the tab is renamed
   from that name.
@@ -244,8 +275,8 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
   (`socketUrl`), exactly as `mobile.html` does for a terminal; the app's `ChatScreen` is a web
   view around it. A chat pane change therefore reaches phones with the deck update, not an app
   build. `CatalogEntry.MobileReady` stays false for a chat (an older app must not open it as a
-  terminal) and `ChatReady` says this gateway relays it. `AttachRelay` still forwards only
-  `input`, which is everything a chat sends.
+  terminal) and `ChatReady` says this gateway relays it. `AttachRelay` forwards `input` and
+  `history` (a request to read, which changes nothing), which is everything a chat sends.
 - **Phone differences live behind `opts.touch`:** Return is a new line and the button sends, an
   attach button stands in for paste, and under 600 px the pickers use one-word labels because
   three full ones do not fit.
