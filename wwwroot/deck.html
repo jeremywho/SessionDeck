@@ -144,13 +144,13 @@
       ? { '--fg': '#e8e9eb', '--fg2': '#b8bbc2', '--fg3': '#8a8d93', '--pr-red': '#f2555a', '--pr-amber': '#e5b84f', '--pr-green': '#5bc46b', '--pr-blue': '#7fb3ff', '--pr-line': 'rgba(138, 141, 147, 0.22)', '--pr-line-strong': 'rgba(138, 141, 147, 0.5)' }
       : { '--fg': '#1a1c1f', '--fg2': '#3c4043', '--fg3': '#6b6f78', '--pr-red': '#c62828', '--pr-amber': '#9a6b00', '--pr-green': '#2e7d32', '--pr-blue': '#1e5bc6', '--pr-line': 'rgba(0, 0, 0, 0.12)', '--pr-line-strong': 'rgba(0, 0, 0, 0.35)' };
   }
-  // A chat pane sits on the terminal surface, whose colour comes from the terminal scheme and not from
-  // the app theme: its text takes the ink that reads on that surface, as a terminal's own text does.
+  // A chat pane has colours of its own (chat.css): a terminal's black and white are for a grid of cells, not
+  // for prose. It is dark or light as the terminal scheme is, and as see-through as the terminals beside it.
   function chatLook() {
     const hex = baseOf().background.replace('#', '');
     const n = parseInt(hex.length === 3 ? hex.split('').map(c => c + c).join('') : hex.slice(0, 6), 16);
     const onDark = 0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255) < 128;
-    return { font: look.font, size: look.size, onDark, ink: inkFor(onDark) };
+    return { font: look.font, size: look.size, onDark, alpha: look.opacity / 100 };
   }
   setSurface();
 

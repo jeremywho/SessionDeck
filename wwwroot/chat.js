@@ -599,7 +599,7 @@
   function liveStep(tool) {
     const task = tool.task;
     if (!taskRunning(tool) || !task.last) return '';
-    return task.last + (task.uses > 1 ? ` (${task.uses} tool uses)` : '');
+    return task.last + (task.uses > 1 ? `, ${task.uses} tool uses` : '');
   }
 
   // Whether the task a call started is still at work. One that runs in the foreground is over when its call has
@@ -1081,11 +1081,18 @@
       const body = h('div', 'tool-body');
       if (item.name === 'AskUserQuestion') body.appendChild(questionCard(item));
       else {
-        body.appendChild(toolDetail(item));
+        const detail = toolDetail(item);
+        if (detail) body.appendChild(detail);
         if (asking) body.appendChild(permissionCard(req));
       }
       if (item.children && item.children.length) body.appendChild(subActivity(item.children, open));
-      if (item.result) body.appendChild(h('pre', 'tool-result' + (item.result.error ? ' error' : ''), clip(item.result.text, 12000)));
+      if (item.result) {
+        // A line that only says it worked is a line, not a block of output.
+        const text = item.result.text.trim();
+        if (!item.result.error && text.length <= 160 && !text.includes('\n')) { if (text) body.appendChild(h('div', 'tool-verdict', text)); }
+        else body.appendChild(h('pre', 'tool-result' + (item.result.error ? ' error' : ''), clip(item.result.text, 12000)));
+      }
+      if (!body.firstChild) fresh.classList.add('bare');
       fresh.appendChild(body);
       return fresh;
     }
@@ -1114,9 +1121,10 @@
         return box;
       }
       if (typeof input.content === 'string' && (input.file_path || input.path)) return h('pre', 'tool-input', clip(input.content, 6000));
-      if (typeof input.command === 'string') return h('pre', 'tool-input', clip(input.command, 6000));
+      // A command the line above already shows whole is not shown again under it.
+      if (typeof input.command === 'string') return toolBrief(item.name, input) === input.command.trim() ? null : h('pre', 'tool-input', clip(input.command, 6000));
       // A subagent's job is prose written for it.
-      if (typeof input.prompt === 'string' && input.prompt) return h('pre', 'tool-input', clip(input.prompt, 6000));
+      if (typeof input.prompt === 'string' && input.prompt) return h('div', 'tool-prose', clip(input.prompt, 6000));
       return h('pre', 'tool-input', clip(JSON.stringify(input, null, 2), 6000));
     }
 
@@ -1191,8 +1199,12 @@
         row.appendChild(remember);
       }
       row.appendChild(deny);
+      if (always && always.detail) {
+        const rule = h('div', 'ask-rule', always.label + ' covers ');
+        rule.appendChild(h('code', '', clip(always.detail, 600)));
+        card.appendChild(rule);
+      }
       card.appendChild(row);
-      if (always && always.detail) card.appendChild(h('pre', 'ask-rule', clip(always.detail, 600)));
       return card;
     }
 
@@ -1697,7 +1709,9 @@
       applyLook(look) {
         el.style.setProperty('--chat-mono', `"${look.font}", "Cascadia Code", Consolas, monospace`);
         el.style.setProperty('--chat-size', Math.round(look.size * 96 / 72) + 'px');
-        for (const [name, value] of Object.entries(look.ink || {})) el.style.setProperty(name, value);
+        // The colours are the stylesheet's, in a dark and a light set; the shell says which, and how see-through its panes are.
+        el.dataset.scheme = look.onDark ? 'dark' : 'light';
+        el.style.setProperty('--chat-alpha', String(look.alpha ?? 1));
         el.style.colorScheme = look.onDark ? 'dark' : 'light';
         schedule();
       },

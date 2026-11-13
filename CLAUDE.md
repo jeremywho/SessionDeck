@@ -296,6 +296,10 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
   scanned sessions with one id, and `HostPairing` gives each host the one running under it first;
   taken in order, each row showed the other's name and status. The saved set and a session group
   are keyed by session id, so they hold it once.
+- **The pane has its own colours, by role** (`DESIGN.md`, tokens at the top of `chat.css`): a dark and a
+  light set chosen by `data-scheme`, which the shell sets from the terminal scheme with `--chat-alpha`
+  (`applyLook`). No hex outside the token block; a block is a step lighter than what it sits on
+  (`--chat-well`), and only a control or a card that waits for an answer has a border.
 - **The column's width is the person's.** A thin grip at each edge of the conversation column
   (`.chat-grip`, shown while the pointer is over the pane, desktop only) drags `--chat-wide`; the
   column is centred, so either grip moves both. The width is one for every chat on the page

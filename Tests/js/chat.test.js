@@ -491,7 +491,7 @@ test('what a subagent does is kept under the call that started it, and the call 
   m.durable(under('a1', { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Two files.' }, { type: 'tool_use', id: 'c2', name: 'Read', input: { file_path: 'a.js' } }] } }));
   m.durable(task('task_progress', 'a1', { description: 'Reading a.js', usage: { tool_uses: 2 } }));
   assert.deepEqual(agent.children.map(c => c.kind === 'tool' ? c.id : c.text), ['c1', 'Two files.', 'c2']);
-  assert.equal(liveStep(agent), 'Reading a.js (2 tool uses)');
+  assert.equal(liveStep(agent), 'Reading a.js, 2 tool uses');
   assert.equal(runOverview([agent]).running, true);
 
   m.durable(task('task_notification', 'a1', { status: 'completed', summary: 'done' }));

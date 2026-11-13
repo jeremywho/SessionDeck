@@ -19,7 +19,7 @@ struct ChatScreen: View {
                     .ignoresSafeArea(.container, edges: .bottom)
             }
         }
-        .background(Color(red: 0.047, green: 0.047, blue: 0.047))
+        .background(Color(red: 0.110, green: 0.118, blue: 0.133))
         .navigationTitle(bridge.title ?? (entry.name.isEmpty ? entry.provider : entry.name))
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { gateway.markViewed(entry.sessionId) }
@@ -94,7 +94,7 @@ struct ChatWebView: UIViewRepresentable {
         config.userContentController.add(bridge, name: "sd")
         let view = WKWebView(frame: .zero, configuration: config)
         view.isOpaque = false
-        view.backgroundColor = UIColor(red: 0.047, green: 0.047, blue: 0.047, alpha: 1)
+        view.backgroundColor = UIColor(red: 0.110, green: 0.118, blue: 0.133, alpha: 1)
         view.scrollView.backgroundColor = view.backgroundColor
         view.scrollView.bounces = false
         view.scrollView.contentInsetAdjustmentBehavior = .never
