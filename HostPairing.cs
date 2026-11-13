@@ -7,6 +7,9 @@ namespace SessionDeck;
 /// Claude, whose id the deck chose, else by process descent for Codex, which names its own thread.
 /// Hosts still running claim before hosts whose CLI has exited, so an old record left behind by a
 /// restart or a reboot cannot take the session away from the host that actually runs it now.
+/// <para>Two processes can have one conversation open at once (a chat moved to a conversation a
+/// terminal session still has): then there are two scanned sessions with one id, and each host's is
+/// the one running under it. Taken in order instead, each row showed the other's name and status.</para>
 /// </summary>
 internal static class HostPairing
 {
@@ -14,9 +17,20 @@ internal static class HostPairing
         IEnumerable<HostRecord> hosts, IReadOnlyList<SessionInfo> live, Func<SessionInfo, HostRecord, bool> descends, HashSet<SessionInfo> claimed)
     {
         var pairs = new List<(HostRecord, SessionInfo)>();
-        foreach (var h in hosts.OrderBy(h => h.HasExited).ThenByDescending(h => h.StartedAt))
+        var ordered = hosts.OrderBy(h => h.HasExited).ThenByDescending(h => h.StartedAt).ToList();
+        // First what is certain: the session with the host's id that runs under the host.
+        var own = new Dictionary<HostRecord, SessionInfo>();
+        foreach (var h in ordered)
         {
-            SessionInfo? match = null;
+            if (h.SessionId.Length == 0) continue;
+            var mine = live.FirstOrDefault(s => !claimed.Contains(s) && s.Pid > 0 && string.Equals(s.SessionId, h.SessionId, StringComparison.OrdinalIgnoreCase) && CanDescend(s, h) && descends(s, h));
+            if (mine == null) continue;
+            claimed.Add(mine);
+            own[h] = mine;
+        }
+        foreach (var h in ordered)
+        {
+            if (own.TryGetValue(h, out var match)) { pairs.Add((h, match)); continue; }
             if (h.SessionId.Length > 0)
                 match = live.FirstOrDefault(s => !claimed.Contains(s) && string.Equals(s.SessionId, h.SessionId, StringComparison.OrdinalIgnoreCase));
             match ??= live.FirstOrDefault(s => !claimed.Contains(s) && s.Pid > 0 && CanDescend(s, h) && descends(s, h));

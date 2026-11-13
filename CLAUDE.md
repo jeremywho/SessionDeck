@@ -291,6 +291,11 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
   `SessionRegistry.LeftBehind` takes the one a chat host moved away from out of the saved set at
   once (it would otherwise come back after a reboot inside the ten minutes a vanished session is
   kept).
+- **Two hosts can be on one conversation**, a chat moved to one a terminal session still has open.
+  The CLI allows it (both write the transcript) and the picker marks it. There are then two
+  scanned sessions with one id, and `HostPairing` gives each host the one running under it first;
+  taken in order, each row showed the other's name and status. The saved set and a session group
+  are keyed by session id, so they hold it once.
 - **An unsent message is kept by conversation.** The pane stores the box under
   `sd.chat.draft:<session id>` in `localStorage` (the deck names the session in its `open`
   message, a revision 3 host in its snapshot), so a restart under a half-typed message gives it

@@ -73,4 +73,28 @@ public class StaleHostTests
         Assert.Same(info, pairs.Single(p => p.Host == newer).Info);
         Assert.NotSame(info, pairs.Single(p => p.Host == older).Info);
     }
+
+    [Fact]
+    public void Two_hosts_on_one_conversation_each_get_the_session_running_under_them()
+    {
+        // A chat moved to a conversation a terminal session still has open: two processes, one session id.
+        var terminal = Host("term", "s1", 9, exited: false);
+        terminal.ChildPid = 70;
+        var chat = Host("chat", "s1", 1, exited: false);
+        chat.ChildPid = 81;
+        var underChat = new SessionInfo { SessionId = "s1", Pid = 81, Status = "busy", Kind = "interactive" };
+        var underTerminal = new SessionInfo { SessionId = "s1", Pid = 71, Status = "idle", Kind = "interactive" };
+        bool Descends(SessionInfo s, HostRecord h) => s.Pid == h.ChildPid || (s.Pid == 71 && h.ChildPid == 70);
+
+        // The terminal host claims first (it is the newer), and the chat's session is the first with that id.
+        var pairs = HostPairing.Pair(new[] { chat, terminal }, new[] { underChat, underTerminal }, Descends, new HashSet<SessionInfo>());
+        Assert.Same(underTerminal, pairs.Single(p => p.Host == terminal).Info);
+        Assert.Same(underChat, pairs.Single(p => p.Host == chat).Info);
+        Assert.Equal(new[] { "term", "chat" }, pairs.Select(p => p.Host.Id));
+
+        // Only one of the two is still running under its host: it keeps its own, and the other host takes what is left by id.
+        var one = HostPairing.Pair(new[] { chat, terminal }, new[] { underChat }, Descends, new HashSet<SessionInfo>());
+        Assert.Same(underChat, one.Single(p => p.Host == chat).Info);
+        Assert.NotSame(underChat, one.Single(p => p.Host == terminal).Info);
+    }
 }
