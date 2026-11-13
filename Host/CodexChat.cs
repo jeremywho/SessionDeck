@@ -25,7 +25,7 @@ internal sealed class CodexChat : IChatAgent
     const string RequestPrefix = "cx-";
     const int SeedTurns = 30, PageTurns = 30;
 
-    sealed record Pending(string What, string Request = "", string Tag = "", string Uuid = "", string Session = "");
+    sealed record Pending(string What, string Request = "", string Tag = "", string Uuid = "", string Session = "", string Name = "");
 
     readonly string _cwd;
     readonly int _budget;
@@ -182,6 +182,13 @@ internal sealed class CodexChat : IChatAgent
     {
         Call("thread/list", new { cwd = _cwd, limit = 100, sortKey = "updated_at", useStateDbOnly = true }, new Pending("sessions", request, tag)),
     };
+
+    /// <summary>Name the thread: <c>thread/name/set</c>, which Codex keeps with the thread (measured, 0.167: answered <c>{}</c>, then <c>thread/name/updated</c>).</summary>
+    public List<Effect> Rename(string request, string name, string tag, HostRecord record)
+    {
+        if (_thread.Length == 0) return new() { new Effect(Kind.Reply, ChatSessions.NotRenamedFrame(request, "There is no conversation to name yet."), tag) };
+        return new() { Call("thread/name/set", new { threadId = _thread, name }, new Pending("rename", request, tag, Session: _thread, Name: name)) };
+    }
 
     /// <summary>Move to another conversation. Refused, to the asking viewer, when it is not one or a turn is running.</summary>
     public List<Effect> Resume(string request, string session, string tag)
@@ -449,6 +456,16 @@ internal sealed class CodexChat : IChatAgent
                 effects.Add(new Effect(Kind.Reply, ChatSessions.ListFrame(pending.Request, _thread, entries), pending.Tag));
                 break;
             }
+            case "rename":
+                if (!ok)
+                {
+                    effects.Add(new Effect(Kind.Reply, ChatSessions.NotRenamedFrame(pending.Request, why.Length > 0 ? why : "Codex did not rename the conversation."), pending.Tag));
+                    break;
+                }
+                // The thread may have been left meanwhile: the name is the one it was given for.
+                if (pending.Session == _thread) { _titled = true; Title(pending.Name, record, effects); }
+                effects.Add(new Effect(Kind.Reply, ChatSessions.RenamedFrame(pending.Request, pending.Name), pending.Tag));
+                break;
             case "turn":
                 if (ok && Get(result, "turn", out var turn)) _turn = Text(turn, "id");
                 _turnStarting = false;

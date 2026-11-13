@@ -2,7 +2,7 @@
 // The lines here are shaped like the ones Claude Code 2.1.322 wrote in stream-json mode, cut down to the fields the pane reads.
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { ChatModel, LineReader, Wire, toolBrief, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText, liveStep, taskRunning, asks: asksPerson, offeredCommands, filterSessions, ago, startsOver, clampWide, diffKind } = require('../../wwwroot/chat.js');
+const { ChatModel, LineReader, Wire, toolBrief, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText, renameAsked, liveStep, taskRunning, asks: asksPerson, offeredCommands, filterSessions, ago, startsOver, clampWide, diffKind } = require('../../wwwroot/chat.js');
 
 const init = { type: 'system', subtype: 'init', session_id: 's1', model: 'claude-haiku-5-5' };
 const echo = text => ({ type: 'user', isReplay: true, message: { role: 'user', content: text }, parent_tool_use_id: null });
@@ -723,4 +723,25 @@ test('an agent other than Claude says its own name and modes, and Claude\'s stay
 
 test('a line of a diff is told by its first character, and a file header is neither added nor removed', () => {
   assert.deepEqual(['+new', '-old', ' same', '@@ -1 +1 @@', '+++ b/file', '--- a/file', ''].map(diffKind), ['add', 'del', 'same', 'same', 'same', 'same', 'same']);
+});
+
+test('/rename is the pane\'s to a host that names sessions, and the CLI\'s own before that', () => {
+  const cli = [{ name: 'compact', description: 'Summarize' }, { name: 'rename', description: 'the CLI one' }];
+  // A host from before revision 5 would drop the request: the text goes on as typed, to the CLI's own command.
+  assert.deepEqual(offeredCommands(cli, 4).map(c => c.name + ':' + c.description), ['resume:Resume a conversation from this folder', 'compact:Summarize', 'rename:the CLI one']);
+  const now = offeredCommands(cli, 5);
+  assert.deepEqual(now.map(c => c.name), ['resume', 'rename', 'compact']);
+  assert.deepEqual([now[1].description, now[1].hint], ['Name this session', '<name>']);
+  // An agent that lists none (Codex, Antigravity, OpenCode) is offered it all the same.
+  assert.deepEqual(offeredCommands([{ name: 'goal', description: 'Set a goal' }], 5).map(c => c.name), ['resume', 'rename', 'goal']);
+  assert.deepEqual(matchCommands(offeredCommands(cli, 5), 'ren').map(c => c.name), ['rename']);
+});
+
+test('what /rename asks for is the name on one line, and only /rename asks for it', () => {
+  assert.equal(renameAsked('/rename ship the thing'), 'ship the thing');
+  assert.equal(renameAsked('  /rename   ship \n  the\tthing  '), 'ship the thing');
+  assert.equal(renameAsked('/rename'), '');
+  assert.equal(renameAsked('/rename   '), '');
+  assert.equal(renameAsked('/rename /resume'), '/resume');
+  for (const other of ['/renamed it', '/renameship', 'please /rename this', '/resume', 'rename this', '/Rename x', '']) assert.equal(renameAsked(other), null, other);
 });

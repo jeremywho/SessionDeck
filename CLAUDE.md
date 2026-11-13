@@ -356,6 +356,22 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
   when the call ends); keeps an "always" for the folder past the session (the button says "in
   this folder"); and can fail `session/new` once (the next message asks again). OpenCode's
   default model is a paid one: test with a free model set through `RestoreModel`.
+- **`/rename <name>` is the host's, and never a turn** (chat revision 5). The pane sends
+  `{"type":"rename","request","name"}` instead of the text (`renameAsked` in `chat.js`; a bare
+  `/rename` only says how to use it), the host answers that viewer with `renamed`, and every
+  viewer hears the name as a `title` frame. Where the name is kept depends on the agent:
+  Claude is asked with the CLI's own `rename_session` control request (`source: "host"`,
+  `session_id` so a CLI that has moved on refuses; it says `session_title_changed` and then
+  answers, trims to 200 characters, and writes `custom-title` to the transcript); Codex with
+  `thread/name/set`; the Agent Client Protocol has no rename, so for Antigravity and OpenCode
+  the name is kept by conversation under `chat-names/` in the data folder (`Host/ChatNames.cs`,
+  one file named by a hash of agent and conversation id) and wins over the agent's own title in
+  the tab, after a reopen, and in the `/resume` list. Typed as a message instead, `/rename x`
+  is a free local command to the Claude CLI but a prompt, and a turn, to the other three. A
+  host older than revision 5 would drop the frame, so it is still sent the text, and a Codex,
+  AGY or OpenCode chat started before this build spends a turn on it until it is restarted. An AGY
+  chat's row is named by its host, not by a `/rename` once typed into an AGY terminal
+  (`SessionPipeline.ApplyAgyNames` leaves chats alone).
 - **A record write is retried past a reader** (`RecordGate.Write`). The deck reads
   `hosts/<id>.json` whenever it scans, and a replace is refused while a reader has the file
   open; a write that still fails is forgotten as written, so the next change carries it. Before

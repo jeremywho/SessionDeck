@@ -421,6 +421,64 @@ public class CodexChatTests
     }
 
     [Fact]
+    public void A_rename_is_codexs_own_request_and_no_turn()
+    {
+        var (chat, record) = Open();
+        var asked = chat.Rename("n1", "ship the thing", "viewer-a", record);
+        var set = Sent(asked).Single();
+        Assert.Equal(("thread/name/set", Thread, "ship the thing"), (Method(set), set.GetProperty("params").GetProperty("threadId").GetString(), set.GetProperty("params").GetProperty("name").GetString()));
+        Assert.Single(asked);
+        Assert.Equal("", record.Title);
+
+        var answered = chat.FromCli(J(Response(Id(set), "{}")), record, T0);
+        Assert.Empty(Sent(answered));
+        Assert.Empty(Kept(answered));
+        var title = Of(answered.Single(e => e.Kind == ChatEffectKind.Frame));
+        Assert.Equal(("title", "ship the thing"), (Type(title), title.GetProperty("title").GetString()));
+        var reply = answered.Single(e => e.Kind == ChatEffectKind.Reply);
+        Assert.Equal(("viewer-a", """{"type":"renamed","request":"n1","ok":true,"name":"ship the thing"}"""), (reply.Tag, Raw(reply)));
+        Assert.Equal("ship the thing", record.Title);
+        Assert.NotEqual("busy", record.AgentStatus);
+
+        // The first message does not take the title back, and what Codex then says of the name changes nothing.
+        var turn = chat.FromViewer(J(UserSays("what is left to do")), record, T0);
+        Assert.Equal("turn/start", Method(Sent(turn).Single()));
+        Assert.DoesNotContain(chat.FromCli(J(Item("completed", UserItem("u1", "what is left to do"))), record, T0), e => e.Kind == ChatEffectKind.Frame);
+        Assert.Equal("ship the thing", record.Title);
+        Assert.Empty(chat.FromCli(J(Note("thread/name/updated", "{\"threadId\":\"" + Thread + "\",\"threadName\":\"ship the thing\"}")), record, T0));
+        Assert.Equal("ship the thing", record.Title);
+    }
+
+    [Fact]
+    public void A_rename_answered_after_the_chat_moved_on_does_not_name_the_conversation_it_moved_to()
+    {
+        var (chat, record) = Open();
+        var set = Sent(chat.Rename("n1", "for the one left", "viewer-a", record)).Single();
+        var resume = Sent(chat.Resume("r1", Other, "viewer-a")).Single();
+        var seed = Sent(chat.FromCli(J(Response(Id(resume), ThreadResult.Replace("THREAD", Other).Replace("\"name\":null", "\"name\":\"Named thread\""))), record, T0)).Single();
+        chat.FromCli(J(Response(Id(seed), Page(null, Turn("o1", "completed", UserItem("ou1", "said there"), AgentItem("oa1", "answered there"))))), record, T0);
+        Assert.Equal((Other, "Named thread"), (record.SessionId, record.Title));
+
+        var late = chat.FromCli(J(Response(Id(set), "{}")), record, T0);
+        Assert.Equal(("viewer-a", """{"type":"renamed","request":"n1","ok":true,"name":"for the one left"}"""), (late.Single().Tag, Raw(late.Single())));
+        Assert.Equal("Named thread", record.Title);
+    }
+
+    [Fact]
+    public void A_rename_codex_refuses_is_told_to_the_viewer_that_asked_and_one_before_any_thread_goes_nowhere()
+    {
+        var (chat, record) = Open();
+        var set = Sent(chat.Rename("n1", "taken", "viewer-a", record)).Single();
+        var refused = chat.FromCli(J(Failure(Id(set), "thread name must not be empty")), record, T0).Single();
+        Assert.Equal((ChatEffectKind.Reply, "viewer-a", """{"type":"renamed","request":"n1","ok":false,"error":"thread name must not be empty"}"""), (refused.Kind, refused.Tag, Raw(refused)));
+        Assert.Equal("", record.Title);
+
+        var early = new CodexChat(@"C:\work", "", "", "", CodexChat.Full);
+        var none = early.Rename("n2", "too soon", "viewer-b", new HostRecord()).Single();
+        Assert.Equal((ChatEffectKind.Reply, "viewer-b", """{"type":"renamed","request":"n2","ok":false,"error":"There is no conversation to name yet."}"""), (none.Kind, none.Tag, Raw(none)));
+    }
+
+    [Fact]
     public void A_name_given_to_the_thread_becomes_the_title_and_what_is_not_an_object_is_let_go()
     {
         var (chat, record) = Open();

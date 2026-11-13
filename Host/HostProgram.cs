@@ -250,7 +250,7 @@ internal static class HostProgram
         if (chat) _pipe = new PipeChild(commandLine, spec.Cwd);
         int seedBytes = Math.Max(spec.RingBytes, 64 * 1024) / 2;
         if (chat && spec.Provider == "Codex") _agent = new CodexChat(spec.Cwd, spec.SessionId, spec.RestoreModel, spec.RestoreEffort, spec.RestoreMode, seedBytes);
-        else if (chat && AcpChat.Speaks(spec.Provider)) _agent = new AcpChat(spec.Provider, spec.Cwd, spec.SessionId, spec.RestoreModel, spec.RestoreEffort, spec.RestoreMode, seedBytes);
+        else if (chat && AcpChat.Speaks(spec.Provider)) _agent = new AcpChat(spec.Provider, spec.Cwd, spec.SessionId, spec.RestoreModel, spec.RestoreEffort, spec.RestoreMode, seedBytes, new ChatNames(Path.GetDirectoryName(spec.HostsDir)!, spec.Provider));
         else
         {
             DetachStdHandles();
@@ -703,6 +703,7 @@ internal static class HostProgram
             // What a CLI says before it has introduced itself is not part of the conversation still served: one that
             // cannot come up says only why, and that is told once it has ended.
             else if (unproven) return;
+            if (ChatStream.RenameAnswer(root, out string renameId, out string renameError)) { Renamed(renameId, renameError); return; }
             lock (_record)
             {
                 string title = _record.Title;
@@ -942,6 +943,10 @@ internal static class HostProgram
                     if (_agent != null) { string request = Text(root, "request"), session = Text(root, "session"); Agent(c => c.Resume(request, session, client.Tag)); }
                     else RequestResume(client, root);
                     break;
+                case "rename":
+                    if (_pipe == null) return;
+                    Rename(client, root);
+                    break;
                 case "input":
                     if (_exited) return;
                     if (_pipe != null)
@@ -1064,6 +1069,38 @@ internal static class HostProgram
             catch (Exception ex) { Log($"sessions: {ex.Message}"); }
             client.Out.Writer.TryWrite((true, ChatSessions.ListFrame(request, current, entries)));
         });
+    }
+
+    /// <summary>The renames asked of the Claude CLI and not yet answered: its request id to the viewer that asked.</summary>
+    static readonly Dictionary<string, (Client Client, string Request)> Renames = new(StringComparer.Ordinal);
+    static int _renameCount;
+
+    /// <summary>
+    /// <c>{"type":"rename","request":"…","name":"…"}</c>: name the session, answered to the asking
+    /// viewer alone (<c>renamed</c>). Never a turn: Claude and Codex are asked by the request each
+    /// has for it, and a translator whose agent has none keeps the name itself. Every viewer hears
+    /// the new name as a <c>title</c> frame.
+    /// </summary>
+    static void Rename(Client client, JsonElement ask)
+    {
+        string request = Text(ask, "request"), name = ChatNames.Clean(Text(ask, "name"));
+        string refusal = _exited ? "The session has ended." : name.Length == 0 ? "Give the session a name: /rename <name>" : "";
+        if (refusal.Length > 0) { client.Out.Writer.TryWrite((true, ChatSessions.NotRenamedFrame(request, refusal))); return; }
+        if (_agent != null) { Agent(c => c.Rename(request, name, client.Tag, _record)); return; }
+        string session, id;
+        lock (_record) session = _record.SessionId;
+        lock (Renames) { id = ChatStream.RenamePrefix + ++_renameCount; Renames[id] = (client, request); }
+        WriteChatInput(ChatStream.RenameLine(id, name, session));
+    }
+
+    /// <summary>The CLI answered a rename: it has already said the new name (<c>session_title_changed</c>), which is the one told back.</summary>
+    static void Renamed(string id, string error)
+    {
+        (Client Client, string Request) asked;
+        lock (Renames) if (!Renames.Remove(id, out asked)) return;
+        string title;
+        lock (_record) title = _record.Title;
+        asked.Client.Out.Writer.TryWrite((true, error.Length > 0 ? ChatSessions.NotRenamedFrame(asked.Request, error) : ChatSessions.RenamedFrame(asked.Request, title)));
     }
 
     /// <summary>

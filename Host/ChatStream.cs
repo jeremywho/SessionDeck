@@ -21,8 +21,9 @@ internal sealed class ChatStream
     /// 3: earlier conversation paged from the transcript, settings carried through a restart, and
     /// scrollback kept free of what no viewer reads. Before 3 the record carries no revision.
     /// 4: lists the conversations in its folder and moves to the one picked (<see cref="ChatSessions"/>).
+    /// 5: names the session when a viewer asks (<c>rename</c>), without a turn.
     /// </summary>
-    public const int Revision = 4;
+    public const int Revision = 5;
 
     /// <summary>Flags every chat launch carries; the session flags and the hook settings follow them.</summary>
     public const string ProtocolFlags = "-p --input-format stream-json --output-format stream-json --verbose --include-partial-messages --replay-user-messages --permission-prompt-tool stdio";
@@ -33,6 +34,33 @@ internal sealed class ChatStream
 
     /// <summary>A viewer changing the model, the effort or the permission mode names its request with this prefix; the host then asks what is in force.</summary>
     public const string SetPrefix = "sd-set-";
+
+    /// <summary>The host's requests to name the session carry this prefix: each is answered to the viewer that asked.</summary>
+    public const string RenamePrefix = "sd-rename-";
+
+    /// <summary>
+    /// The CLI's own request for naming a session from the application it runs in (measured, 2.1.x:
+    /// it says <c>system session_title_changed</c> and then answers; it keeps no more than 200
+    /// characters and refuses an empty name). Naming the session it is for makes the CLI refuse
+    /// when it has since moved to another.
+    /// </summary>
+    public static string RenameLine(string id, string title, string session)
+    {
+        var request = new Dictionary<string, string> { ["subtype"] = "rename_session", ["title"] = title, ["source"] = "host" };
+        if (session.Length > 0) request["session_id"] = session;
+        return JsonSerializer.Serialize(new { type = "control_request", request_id = id, request });
+    }
+
+    /// <summary>Whether a line is the CLI's answer to one of the host's renames, and why it was refused when it was.</summary>
+    public static bool RenameAnswer(JsonElement line, out string id, out string error)
+    {
+        id = error = "";
+        if (Text(line, "type") != "control_response" || !line.TryGetProperty("response", out var response)) return false;
+        id = Text(response, "request_id");
+        if (!id.StartsWith(RenamePrefix, StringComparison.Ordinal)) return false;
+        if (Text(response, "subtype") != "success") error = Text(response, "error") is { Length: > 0 } why ? why : "The session was not renamed.";
+        return true;
+    }
 
     readonly HashSet<string> _openRequests = new(StringComparer.Ordinal);
     string _catalog = "";

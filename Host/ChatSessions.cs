@@ -244,4 +244,11 @@ internal static class ChatSessions
     /// <summary>The answer to a request to switch that was not carried out, and why.</summary>
     public static byte[] RefusedFrame(string request, string error) =>
         JsonSerializer.SerializeToUtf8Bytes(new { type = "resumed", request, ok = false, error });
+
+    /// <summary>The answer to a viewer's <c>{"type":"rename","request":"…","name":"…"}</c>: the name the session now has.</summary>
+    public static byte[] RenamedFrame(string request, string name) =>
+        JsonSerializer.SerializeToUtf8Bytes(new { type = "renamed", request, ok = true, name });
+
+    public static byte[] NotRenamedFrame(string request, string error) =>
+        JsonSerializer.SerializeToUtf8Bytes(new { type = "renamed", request, ok = false, error });
 }

@@ -464,4 +464,28 @@ public class ChatStreamTests : IDisposable
         Assert.True(Host("chat", ChatStream.Kind).IsChat);
         Assert.False(Host("term", "").IsChat);
     }
+
+    [Fact]
+    public void A_rename_is_the_clis_own_request_made_as_the_host_for_the_session_open_now()
+    {
+        var line = JsonDocument.Parse(ChatStream.RenameLine("sd-rename-3", "ship the thing", "75f4a45c-5341-4c06-9d2f-fc0b5d6465e7")).RootElement;
+        var request = line.GetProperty("request");
+        Assert.Equal(("control_request", "sd-rename-3"), (line.GetProperty("type").GetString(), line.GetProperty("request_id").GetString()));
+        Assert.Equal(("rename_session", "ship the thing", "host", "75f4a45c-5341-4c06-9d2f-fc0b5d6465e7"),
+            (request.GetProperty("subtype").GetString(), request.GetProperty("title").GetString(), request.GetProperty("source").GetString(), request.GetProperty("session_id").GetString()));
+        Assert.False(JsonDocument.Parse(ChatStream.RenameLine("sd-rename-4", "no session yet", "")).RootElement.GetProperty("request").TryGetProperty("session_id", out _));
+    }
+
+    [Theory]
+    [InlineData("""{"type":"control_response","response":{"subtype":"success","request_id":"sd-rename-1"}}""", true, "sd-rename-1", "")]
+    [InlineData("""{"type":"control_response","response":{"subtype":"error","request_id":"sd-rename-2","error":"title must be non-empty"}}""", true, "sd-rename-2", "title must be non-empty")]
+    [InlineData("""{"type":"control_response","response":{"subtype":"error","request_id":"sd-rename-3"}}""", true, "sd-rename-3", "The session was not renamed.")]
+    [InlineData("""{"type":"control_response","response":{"subtype":"success","request_id":"sd-set-1"}}""", false, "", "")]
+    [InlineData("""{"type":"control_response","response":{"subtype":"success","request_id":"sd-initialize"}}""", false, "", "")]
+    [InlineData("""{"type":"system","subtype":"session_title_changed","title":"sd-rename-1"}""", false, "", "")]
+    public void The_clis_answer_to_a_rename_is_told_from_every_other_line(string line, bool answers, string id, string error)
+    {
+        bool is_answer = ChatStream.RenameAnswer(JsonDocument.Parse(line).RootElement, out string got, out string why);
+        Assert.Equal((answers, answers ? id : "", error), (is_answer, is_answer ? got : "", why));
+    }
 }

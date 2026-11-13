@@ -42,6 +42,16 @@ public class SessionPipelineTests
         Assert.Contains(tui, claimed);
         Assert.DoesNotContain(elsewhere, claimed);
     }
+
+    [Fact]
+    public void A_terminal_agy_pane_takes_the_name_typed_into_it_and_a_chat_keeps_its_hosts()
+    {
+        var terminal = new HostRecord { Id = "t", Provider = "Agy", SessionId = "conv-terminal", Title = "AGY" };
+        var chat = new HostRecord { Id = "c", Provider = "Agy", SessionId = "conv-chat", Kind = ChatStream.Kind, Title = "named in the chat" };
+        var pairs = new List<(HostRecord Host, SessionInfo Info)> { (terminal, new SessionInfo()), (chat, new SessionInfo()) };
+        SessionPipeline.ApplyAgyNames(pairs, new Dictionary<int, (int Parent, string Name)>(), id => "renamed in a terminal: " + id);
+        Assert.Equal(("renamed in a terminal: conv-terminal", ""), (pairs[0].Info.Name, pairs[1].Info.Name));
+    }
 }
 
 public class ReadOnlyReadersTests : IDisposable

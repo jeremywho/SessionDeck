@@ -62,8 +62,14 @@ internal sealed class AcpChat : IChatAgent
     string? _loading;
     bool _prompting, _canList, _canLoad, _titled;
 
-    public AcpChat(string provider, string cwd, string session, string model, string effort, string mode, int budget = 2 * 1024 * 1024)
+    /// <summary>Where the names given to conversations are kept: the protocol has no rename.</summary>
+    readonly IChatNames _names;
+    /// <summary>The name given to the conversation open now, or empty: nothing the agent calls it replaces one.</summary>
+    string _given = "";
+
+    public AcpChat(string provider, string cwd, string session, string model, string effort, string mode, int budget = 2 * 1024 * 1024, IChatNames? names = null)
     {
+        _names = names ?? new MemoryChatNames();
         _provider = provider;
         _cwd = cwd;
         _resume = session;
@@ -269,6 +275,21 @@ internal sealed class AcpChat : IChatAgent
         return new() { Call("session/load", new { sessionId = session, cwd = _cwd, mcpServers = Array.Empty<object>() }, new Pending("load", request, tag, session)) };
     }
 
+    /// <summary>The protocol has no rename, so the name is kept by the conversation here (<see cref="IChatNames"/>) and wins over what the agent calls it.</summary>
+    public List<Effect> Rename(string request, string name, string tag, HostRecord record)
+    {
+        string refusal = _session.Length == 0 ? "There is no conversation to name yet."
+            : _loading != null ? "The session is already changing."
+            : !_names.Set(_session, name) ? "The name could not be saved." : "";
+        if (refusal.Length > 0) return new() { new Effect(Kind.Reply, ChatSessions.NotRenamedFrame(request, refusal), tag) };
+        var effects = new List<Effect>();
+        _given = name;
+        _titled = true;
+        Title(name, record, effects);
+        effects.Add(new Effect(Kind.Reply, ChatSessions.RenamedFrame(request, name), tag));
+        return effects;
+    }
+
     /// <summary>The protocol replays a conversation whole or not at all: there is never an earlier page to give.</summary>
     public List<Effect> History(string request, string uuid, string tag) =>
         new() { new Effect(Kind.Reply, ChatStream.HistoryFrame(new ChatTranscript.Page(new List<byte[]>(), -1), request), tag) };
@@ -329,7 +350,8 @@ internal sealed class AcpChat : IChatAgent
                 if (Text(update, "title") is not { Length: > 0 } title) break;
                 // Said while a conversation is replayed, it names the one being opened, not the one still shown.
                 if (replay) { if (_loading != null) _titles[_loading] = title; }
-                else { _titled = true; Title(title, record, effects); }
+                else if (_given.Length == 0) { _titled = true; Title(title, record, effects); }
+                else _titles[_session] = title;
                 break;
             case "config_option_update":
                 if (Get(update, "configOptions", out var options)) { Configure(options, record); Catalog(effects); effects.Add(Frame(SettingsFrame())); }
@@ -598,7 +620,8 @@ internal sealed class AcpChat : IChatAgent
                 int size = lines.Sum(l => l.Length + 1), drop = 0;
                 while (drop < lines.Count - 1 && size > _budget) size -= lines[drop++].Length + 1;
                 lines.RemoveRange(0, drop);
-                string title = _titles.GetValueOrDefault(session, "");
+                _given = _names.Of(session);
+                string title = _given.Length > 0 ? _given : _titles.GetValueOrDefault(session, "");
                 bool named = title.Length > 0;
                 if (!named) title = Short(FirstSaid(lines));
                 _titled = title.Length > 0;
@@ -616,7 +639,7 @@ internal sealed class AcpChat : IChatAgent
             }
             case "title":
             {
-                if (!ok || !Get(result, "sessions", out var known) || known.ValueKind != JsonValueKind.Array) break;
+                if (!ok || _given.Length > 0 || !Get(result, "sessions", out var known) || known.ValueKind != JsonValueKind.Array) break;
                 foreach (var entry in known.EnumerateArray())
                 {
                     if (Text(entry, "sessionId") != _session || Text(entry, "title") is not { Length: > 0 } theirs) continue;
@@ -675,7 +698,7 @@ internal sealed class AcpChat : IChatAgent
                         _titles[sid] = Text(s, "title");
                         if (sid == _session || entries.Any(e => e.Id == sid)) continue;
                         long at = DateTimeOffset.TryParse(Text(s, "updatedAt"), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var when) ? when.ToUnixTimeMilliseconds() : 0;
-                        entries.Add(new ChatSessions.Entry(sid, ChatSessions.OneLine(Text(s, "title")), at, false));
+                        entries.Add(new ChatSessions.Entry(sid, _names.Of(sid) is { Length: > 0 } given ? given : ChatSessions.OneLine(Text(s, "title")), at, false));
                     }
                 }
                 // OpenCode answers a hundred at a time, and names a next page even after the last.

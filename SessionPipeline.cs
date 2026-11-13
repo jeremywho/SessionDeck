@@ -107,13 +107,15 @@ internal static class SessionPipeline
     }
 
     /// <summary>An agy pane is named by its conversation's own /rename, like Claude and Codex panes are named by their CLIs.</summary>
-    internal static void ApplyAgyNames(List<(Host.HostRecord Host, SessionInfo Info)> byHost, IReadOnlyDictionary<int, (int Parent, string Name)> table)
+    internal static void ApplyAgyNames(List<(Host.HostRecord Host, SessionInfo Info)> byHost, IReadOnlyDictionary<int, (int Parent, string Name)> table, Func<string, string>? nameOf = null)
     {
+        nameOf ??= AgyScanner.NameForConversation;
         if (!byHost.Any(x => x.Host.Provider == "Agy")) return;
         foreach (var (h, info) in byHost)
         {
-            if (h.Provider != "Agy" || h.HasExited) continue;
-            string name = h.SessionId.Length > 0 ? AgyScanner.NameForConversation(h.SessionId) : "";
+            // A chat is named by its host (the agent's title, or the name given with /rename), not by a /rename typed into a terminal once.
+            if (h.Provider != "Agy" || h.HasExited || h.IsChat) continue;
+            string name = h.SessionId.Length > 0 ? nameOf(h.SessionId) : "";
             if (h.SessionId.Length == 0)
             {
                 int agyPid = AgyScanner.AgyPidUnder(h.ChildPid, table);

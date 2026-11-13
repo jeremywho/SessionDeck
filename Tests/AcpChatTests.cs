@@ -207,6 +207,116 @@ public class AcpChatTests
         Assert.Empty(Sent(there));
     }
 
+    sealed class NoRoomForNames : IChatNames
+    {
+        public string Of(string session) => "";
+        public bool Set(string session, string name) => false;
+    }
+
+    [Theory]
+    [InlineData("Agy")]
+    [InlineData("OpenCode")]
+    public void A_rename_is_kept_here_and_nothing_is_said_to_the_agent(string provider)
+    {
+        var names = new MemoryChatNames();
+        var chat = new AcpChat(provider, Cwd, "", "", "", "", names: names);
+        var record = new HostRecord();
+        var create = Sent(chat.FromCli(J(Response(Id(Sent(chat.Start()).Single()), provider == "Agy" ? AgyInit : OcInit)), record, T0)).Single();
+        chat.FromCli(J(Response(Id(create), provider == "Agy" ? AgyNew : OcNew)), record, T0);
+        string session = SessionOf(provider);
+
+        var renamed = chat.Rename("n1", "ship the thing", "viewer-a", record);
+        Assert.Empty(Sent(renamed));
+        Assert.Empty(Kept(renamed));
+        Assert.Empty(Passed(renamed));
+        var title = Frames(renamed).Single();
+        Assert.Equal(("title", "ship the thing"), (Type(title), Str(title, "title")));
+        var reply = renamed.Single(e => e.Kind == ChatEffectKind.Reply);
+        Assert.Equal(("viewer-a", """{"type":"renamed","request":"n1","ok":true,"name":"ship the thing"}"""), (reply.Tag, Encoding.UTF8.GetString(reply.Data)));
+        Assert.Equal(("ship the thing", "ship the thing"), (record.Title, names.Of(session)));
+
+        // Neither the first message nor what the agent calls the conversation takes the title back.
+        var prompt = Prompt(chat, record, "what is left to do");
+        Assert.Equal("ship the thing", record.Title);
+        Assert.DoesNotContain(chat.FromCli(J(Update(session, """{"sessionUpdate":"session_info_update","title":"Remaining Work Summary"}""")), record, T0), e => e.Kind == ChatEffectKind.Frame);
+        Assert.Equal("ship the thing", record.Title);
+
+        // In the middle of a turn it is carried out at once: it is no message, and waits for nothing.
+        var again = chat.Rename("n2", "ship it today", "viewer-a", record);
+        Assert.Empty(Sent(again));
+        Assert.Equal(("ship it today", "ship it today"), (record.Title, names.Of(session)));
+        chat.FromCli(J(Response(Id(prompt), Stopped("end_turn"))), record, T0);
+        Assert.Equal("ship it today", record.Title);
+    }
+
+    [Fact]
+    public void A_rename_with_no_conversation_or_nowhere_to_keep_it_is_refused_and_changes_nothing()
+    {
+        var early = new AcpChat("OpenCode", Cwd, "", "", "", "");
+        var record = new HostRecord();
+        early.FromCli(J(Response(Id(Sent(early.Start()).Single()), OcInit)), record, T0);
+        var none = early.Rename("n1", "too soon", "viewer-a", record).Single();
+        Assert.Equal((ChatEffectKind.Reply, "viewer-a", """{"type":"renamed","request":"n1","ok":false,"error":"There is no conversation to name yet."}"""), (none.Kind, none.Tag, Encoding.UTF8.GetString(none.Data)));
+
+        var full = new AcpChat("OpenCode", Cwd, "", "", "", "", names: new NoRoomForNames());
+        var create = Sent(full.FromCli(J(Response(Id(Sent(full.Start()).Single()), OcInit)), record, T0)).Single();
+        full.FromCli(J(Response(Id(create), OcNew)), record, T0);
+        var unsaved = full.Rename("n2", "nowhere to go", "viewer-b", record).Single();
+        Assert.Equal((ChatEffectKind.Reply, """{"type":"renamed","request":"n2","ok":false,"error":"The name could not be saved."}"""), (unsaved.Kind, Encoding.UTF8.GetString(unsaved.Data)));
+        Assert.Equal("", record.Title);
+
+        var (moving, moved, _) = OpenWith("OpenCode");
+        Sent(moving.Resume("r1", OcOther, "viewer-a")).Single();
+        var changing = moving.Rename("n3", "mid move", "viewer-a", moved).Single();
+        Assert.Equal("""{"type":"renamed","request":"n3","ok":false,"error":"The session is already changing."}""", Encoding.UTF8.GetString(changing.Data));
+    }
+
+    [Fact]
+    public void A_given_name_stays_with_its_conversation_through_a_restart_a_move_and_the_list()
+    {
+        var names = new MemoryChatNames();
+        names.Set(OcId, "ship the thing");
+
+        // A restart: the conversation is reopened by a new translator, which is told the name was given.
+        var chat = new AcpChat("OpenCode", Cwd, OcId, "", "", "", names: names);
+        var record = new HostRecord();
+        var load = Sent(chat.FromCli(J(Response(Id(Sent(chat.Start()).Single()), OcInit)), record, T0)).Single();
+        chat.FromCli(J(Update(OcId, Text("user_message_chunk", "Do these in order, one tool call each.", "msg_1d5188c07001fdiBvEW46G1J9u"))), record, T0);
+        var loaded = chat.FromCli(J(Response(Id(load), OcConfig())), record, T0);
+        Assert.Equal("ship the thing", loaded.Single(e => e.Kind == ChatEffectKind.Reset).Seed!.Title);
+        Assert.Equal("ship the thing", record.Title);
+        Assert.Empty(Sent(loaded));
+
+        // The list shows it under the name given, and another conversation under the agent's.
+        var list = Sent(chat.Sessions("s1", "viewer-a")).Single();
+        names.Set(OcThird, "the ask lab");
+        var listed = Of(chat.FromCli(J(Response(Id(list), Page(null,
+            Listed(OcOther, @"C:\Temp\acplab\ws", "Exact reply instruction", "2026-11-13T13:26:56.168Z"),
+            Listed(OcThird, @"C:\Temp\acplab\ws", "Create ask.txt with alpha", "2026-11-13T13:48:00.000Z")))), record, T0).Single());
+        Assert.Equal(new[] { (OcThird, "the ask lab"), (OcOther, "Exact reply instruction") }, listed.GetProperty("sessions").EnumerateArray().Select(e => (Str(e, "id"), Str(e, "title"))));
+
+        // A move to a conversation never named takes the agent's name; moving back brings the given one.
+        var there = chat.FromCli(J(Response(Id(Sent(chat.Resume("r1", OcOther, "viewer-a")).Single()), OcConfig())), record, T0);
+        Assert.Equal("Exact reply instruction", there.Single(e => e.Kind == ChatEffectKind.Reset).Seed!.Title);
+        var said = chat.FromCli(J(Update(OcOther, """{"sessionUpdate":"session_info_update","title":"Exact Reply"}""")), record, T0);
+        Assert.Equal("Exact Reply", Str(Frames(said).Single(), "title"));
+        var back = chat.FromCli(J(Response(Id(Sent(chat.Resume("r2", OcId, "viewer-a")).Single()), OcConfig())), record, T0);
+        Assert.Equal("ship the thing", back.Single(e => e.Kind == ChatEffectKind.Reset).Seed!.Title);
+    }
+
+    [Fact]
+    public void A_name_looked_up_in_the_agents_list_does_not_replace_one_given_meanwhile()
+    {
+        var chat = new AcpChat("OpenCode", Cwd, OcId, "", "", "");
+        var record = new HostRecord();
+        var load = Sent(chat.FromCli(J(Response(Id(Sent(chat.Start()).Single()), OcInit)), record, T0)).Single();
+        var lookup = Sent(chat.FromCli(J(Response(Id(load), OcConfig())), record, T0)).Single();
+        chat.Rename("n1", "ship the thing", "viewer-a", record);
+        var late = chat.FromCli(J(Response(Id(lookup), Page(null, Listed(OcId, @"C:\Temp\acplab\ws", "Create and update note.txt", "2026-11-13T13:28:47.366Z")))), record, T0);
+        Assert.DoesNotContain(late, e => e.Kind == ChatEffectKind.Frame);
+        Assert.Equal("ship the thing", record.Title);
+    }
+
     [Fact]
     public void An_agent_that_cannot_list_is_not_asked_for_the_name()
     {

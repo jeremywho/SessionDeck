@@ -62,6 +62,14 @@ public class ChatHostTests : IDisposable
                 elseif ($m.request.subtype -eq 'get_settings') { $out.WriteLine('{"type":"control_response","response":{"subtype":"success","request_id":"' + $id + '","response":{"applied":{"model":"fake-model","effort":"' + $effort + '"}}}}') }
                 elseif ($m.request.subtype -eq 'set_permission_mode') { $mode = $m.request.mode; $out.WriteLine('{"type":"control_response","response":{"subtype":"success","request_id":"' + $id + '","response":{"mode":"' + $mode + '"}}}') }
                 elseif ($m.request.subtype -eq 'apply_flag_settings') { $effort = $m.request.settings.effortLevel; $out.WriteLine('{"type":"control_response","response":{"subtype":"success","request_id":"' + $id + '"}}') }
+                elseif ($m.request.subtype -eq 'rename_session') {
+                    # As the real CLI: the new name first, then the answer; a name it will not take is an error and no name.
+                    if ($m.request.title -eq 'taken') { $out.WriteLine('{"type":"control_response","response":{"subtype":"error","request_id":"' + $id + '","error":"that name is taken"}}') }
+                    else {
+                        $out.WriteLine((@{ type = 'system'; subtype = 'session_title_changed'; title = "$($m.request.title) [$($m.request.source) $($m.request.session_id)]" } | ConvertTo-Json -Compress))
+                        $out.WriteLine('{"type":"control_response","response":{"subtype":"success","request_id":"' + $id + '"}}')
+                    }
+                }
             }
             elseif ($m.type -eq 'control_response') {
                 $out.WriteLine($line)
@@ -195,6 +203,54 @@ public class ChatHostTests : IDisposable
         Assert.Equal(3, await viewer.Exited());
         Assert.True(_host.WaitForExit(15000), "host did not exit after its child did");
         Assert.Equal(3u, Record().ExitCode);
+    }
+
+    [Fact]
+    public async Task A_rename_is_asked_of_the_cli_by_its_own_request_and_is_never_a_message()
+    {
+        string script = Path.Combine(_dir, "fake-cli.ps1");
+        File.WriteAllText(script, FakeCli);
+        string transcript = Path.Combine(_dir, "transcript.jsonl");
+        File.WriteAllText(transcript, """{"type":"user","uuid":"u-1","message":{"role":"user","content":"said before"}}""" + "\n");
+        await Start(new HostSpec
+        {
+            Id = "chattest0001", SessionId = "planned-session", Provider = "Claude", Kind = ChatStream.Kind, HistoryPath = transcript,
+            CommandLine = $"\"{SessionLauncher.ResolvePowerShell()}\" -NoLogo -NoProfile -File \"{script}\"",
+            Cwd = _dir, HostsDir = Path.Combine(_dir, "hosts"), RingBytes = 256 * 1024,
+        });
+        using var viewer = await Viewer.Attach(Record(), after: 0);
+        await viewer.Until(l => Type(l) == "host");
+        await viewer.Pump(() => viewer.Catalog.HasValue);
+        int lines = viewer.Lines.Count;
+
+        await viewer.SendFrame("""{"type":"rename","request":"n1","name":"  ship\n  the thing  "}""");
+        var done = await viewer.NextAnswer();
+        // The name told back is the one the CLI gave, which the stand-in marks with who it was asked as and for which session.
+        const string Named = "ship the thing [host planned-session]";
+        Assert.Equal(("renamed", "n1", true, Named), (Type(done), done.GetProperty("request").GetString(), done.GetProperty("ok").GetBoolean(), done.GetProperty("name").GetString()));
+        Assert.Equal(Named, viewer.Titles[^1]);
+        var record = await RecordWhen(r => r.Title == Named);
+        Assert.Equal("idle", record.AgentStatus);
+
+        await viewer.SendFrame("""{"type":"rename","request":"n2","name":"taken"}""");
+        var refused = await viewer.NextAnswer();
+        Assert.Equal(("renamed", "n2", false, "that name is taken"), (Type(refused), refused.GetProperty("request").GetString(), refused.GetProperty("ok").GetBoolean(), refused.GetProperty("error").GetString()));
+        await viewer.SendFrame("""{"type":"rename","request":"n3","name":" \n "}""");
+        var blank = await viewer.NextAnswer();
+        Assert.Equal(("n3", false, "Give the session a name: /rename <name>"), (blank.GetProperty("request").GetString(), blank.GetProperty("ok").GetBoolean(), blank.GetProperty("error").GetString()));
+        Assert.Equal(Named, Record().Title);
+
+        // Nothing was typed to the CLI and nothing joined the conversation: the next message is the first turn.
+        Assert.Equal(lines, viewer.Lines.Count);
+        Assert.DoesNotContain(viewer.Live, l => Type(l) == "control_response" && l.GetProperty("response").GetProperty("request_id").GetString()!.StartsWith(ChatStream.RenamePrefix, StringComparison.Ordinal));
+        await viewer.Send(ChatStream.UserLine("after the rename"));
+        var turn = await viewer.Until(l => Type(l) == "result");
+        Assert.Equal(new[] { "user", "assistant", "result" }, turn.Select(Type));
+        Assert.Equal(("after the rename", "echo: after the rename"), (Said(turn[0]), Said(turn[1])));
+
+        await viewer.SendFrame("""{"type":"kill"}""");
+        await viewer.Exited();
+        Assert.True(_host!.WaitForExit(15000), "host did not exit after it was told to end");
     }
 
     async Task Start(HostSpec spec)
@@ -489,6 +545,19 @@ public class ChatHostTests : IDisposable
         record = await RecordWhen(r => r.AgentStatus == "idle" && r.LastEvent == "Stop");
         Assert.Equal("héllo", record.Title);
 
+        // A rename is kept by the host beside its records, and the agent hears nothing of it: the next prompt it gets is the next message.
+        await viewer.SendFrame("""{"type":"rename","request":"n1","name":"named here"}""");
+        var renamed = await viewer.NextAnswer();
+        Assert.Equal(("renamed", true, "named here"), (Type(renamed), renamed.GetProperty("ok").GetBoolean(), renamed.GetProperty("name").GetString()));
+        Assert.Equal("named here", viewer.Titles[^1]);
+        Assert.Equal("named here", (await RecordWhen(r => r.Title == "named here")).Title);
+        Assert.Equal("named here", new ChatNames(_dir, "OpenCode").Of(Session));
+        await viewer.Send(ChatStream.UserLine("again"));
+        var second = await viewer.Until(l => Type(l) == "result");
+        Assert.Equal(new[] { "user", "assistant", "result" }, second.Select(Type));
+        Assert.Equal(("again", "echo: again in " + Session), (Said(second[0]), Said(second[1])));
+        Assert.Equal("named here", Record().Title);
+
         await viewer.SendFrame("""{"type":"kill"}""");
         await viewer.Exited();
         Assert.True(_host!.WaitForExit(15000), "host did not exit after it was told to end");
@@ -599,7 +668,7 @@ public class ChatHostTests : IDisposable
                 switch (Type(frame))
                 {
                     case "snapshot": Snapshot = frame; Snapshots.Add(frame); break;
-                    case "sessions": case "resumed": _answers.Enqueue(frame); break;
+                    case "sessions": case "resumed": case "renamed": _answers.Enqueue(frame); break;
                     case "live": Live.Add(frame.GetProperty("line").Clone()); break;
                     case "title": Titles.Add(frame.GetProperty("title").GetString() ?? ""); break;
                     case "catalog": Catalog = frame; break;

@@ -129,6 +129,7 @@ public class AttachRelayTests
     [InlineData("{\"type\":\"history\",\"request\":\"q2\",\"uuid\":\"abc-1\"}", true)]
     [InlineData("{\"type\":\"sessions\",\"request\":\"q3\"}", true)]
     [InlineData("{\"type\":\"resume\",\"request\":\"q4\",\"session\":\"11111111-1111-4111-8111-111111111111\"}", true)]
+    [InlineData("{\"type\":\"rename\",\"request\":\"n1\",\"name\":\"named from a phone\"}", true)]
     [InlineData("{\"type\":\"resize\",\"cols\":80,\"rows\":24}", false)]
     [InlineData("{\"type\":7}", false)]
     [InlineData("[]", false)]

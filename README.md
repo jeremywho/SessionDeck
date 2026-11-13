@@ -140,7 +140,9 @@ does not ask: it is started with `--dangerously-skip-permissions`, as AGY termin
 more things differ in both: a message sent while the agent is working waits for the turn to end,
 and the whole conversation is loaded at once rather than a page at a time. Claude
 chats need the native `claude.exe` and use the default login; Codex chats need `codex.exe`, AGY
-chats `agy.exe`, and OpenCode chats `opencode` on the path.
+chats `agy.exe`, and OpenCode chats `opencode` on the path. In any chat `/rename a name` names
+the session at once without a turn: the name goes to the agent where it keeps names (Claude,
+Codex) and is kept by Session Deck where it does not (AGY, OpenCode).
 
 ## Docking
 Right-click the tray icon → **Dock to** → an edge or corner, and the window **snaps there on the

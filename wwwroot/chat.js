@@ -466,9 +466,19 @@
   // What the pane itself answers to, beside what the CLI offers. On pipes the CLI refuses /resume (its picker is
   // drawn in a terminal), so a host that can move to another conversation gets the command from here.
   const RESUME = { name: 'resume', description: 'Resume a conversation from this folder', hint: '' };
+  // Naming the session is the host's to do (revision 5). Typed to an agent it is a prompt like any other: a turn
+  // spent on a name. Before revision 5 the text goes on as typed, which the Claude CLI at least takes as its own command.
+  const RENAME = { name: 'rename', description: 'Name this session', hint: '<name>' };
   function offeredCommands(commands, hostRevision) {
     if (hostRevision < 4) return commands;
-    return [RESUME].concat(commands.filter(c => c.name !== RESUME.name));
+    const own = hostRevision >= 5 ? [RESUME, RENAME] : [RESUME];
+    return own.concat(commands.filter(c => !own.some(o => o.name === c.name)));
+  }
+
+  // The name `/rename …` asks for, on one line ('' when none was typed); null when the message is anything else.
+  function renameAsked(message) {
+    const m = /^\/rename(?:\s+([\s\S]*))?$/.exec(message.trim());
+    return m ? (m[1] || '').replace(/\s+/g, ' ').trim() : null;
   }
 
   // The conversations whose name holds every word typed, in the order given (newest first).
@@ -643,7 +653,7 @@
     return modes;
   }
 
-  const api = { ChatModel, LineReader, Wire, toolBrief, textOf, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText, liveStep, taskRunning, asks, offeredCommands, filterSessions, ago, startsOver, clampWide, diffKind };
+  const api = { ChatModel, LineReader, Wire, toolBrief, textOf, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText, liveStep, taskRunning, asks, offeredCommands, renameAsked, filterSessions, ago, startsOver, clampWide, diffKind };
   if (typeof module !== 'undefined' && module.exports) { module.exports = api; return; }
 
   // ================= the page side =================
@@ -1360,6 +1370,8 @@
       const taken = shots.filter(s => !s.error);
       if ((!text && !taken.length) || preparing || resuming) return;
       if (text === '/' + RESUME.name && !taken.length && hostRevision >= 4) { openPicker(); return; }
+      const naming = taken.length || hostRevision < 5 ? null : renameAsked(text);
+      if (naming !== null) { rename(naming); return; }
       let images = [];
       if (taken.length) {
         preparing = true;
@@ -1461,6 +1473,28 @@
     });
 
     // ---- the command menu ----
+
+    // ---- a name for the session ----
+
+    // Asked of the host, never sent as a message: the host names the session where its agent keeps names.
+    function rename(name) {
+      if (!name) {
+        model.add({ kind: 'note', tone: 'plain', text: 'Give the session a name: /rename <name>' });
+        schedule();
+        return;
+      }
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      ws.send(JSON.stringify({ type: 'rename', request: 'n' + nextAsk++, name }));
+      input.value = '';
+      keepDraft();
+      paintMenu();
+      grow();
+    }
+
+    function gotRenamed(msg) {
+      model.add(msg.ok ? { kind: 'note', tone: 'plain', text: 'Renamed to “' + String(msg.name || '') + '”' }
+        : { kind: 'note', tone: 'error', text: String(msg.error || 'The session was not renamed.') });
+    }
 
     // ---- another conversation ----
 
@@ -1673,6 +1707,7 @@
           else if (msg.type === 'history') { gotEarlier(msg); return; }
           else if (msg.type === 'sessions') { gotSessions(msg); return; }
           else if (msg.type === 'resumed') notResumed(msg);
+          else if (msg.type === 'renamed') gotRenamed(msg);
           else if (msg.type === 'catalog') { model.setCatalog(msg); paintMenu(); }
           else if (msg.type === 'settings') { hostTakesImages = true; model.setSettings(msg); }
           else if (msg.type === 'title') post({ type: 'title', id, title: msg.title });
