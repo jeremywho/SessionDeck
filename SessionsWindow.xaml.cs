@@ -1736,7 +1736,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
                 _ when host.IsChat && provider != SessionProvider.Claude => HostManager.TranslatedChatCommand(provider),
                 SessionProvider.Codex => HostManager.ResumeCodexCommand(sessionId, _app.Settings.CodexFlags),
                 SessionProvider.Agy => HostManager.ResumeAgyCommand(sessionId, HostManager.AgyDefaultFlags),
-                _ => ClaudeCommandFor(sessionId, null, hasTranscript, launcher, host.IsChat, host.IsChat ? host.Model : ""),
+                _ => ClaudeCommandFor(sessionId, HostManager.NameCarried(host), hasTranscript, launcher, host.IsChat, host.IsChat ? host.Model : ""),
             };
 
             if (!host.HasExited)

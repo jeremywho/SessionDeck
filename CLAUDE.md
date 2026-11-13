@@ -369,7 +369,9 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
   the tab, after a reopen, and in the `/resume` list. Typed as a message instead, `/rename x`
   is a free local command to the Claude CLI but a prompt, and a turn, to the other three. A
   host older than revision 5 would drop the frame, so it is still sent the text, and a Codex,
-  AGY or OpenCode chat started before this build spends a turn on it until it is restarted. An AGY
+  AGY or OpenCode chat started before this build spends a turn on it until it is restarted. A
+  Claude chat renamed before anything was said has no transcript for the name to be in, so a
+  restart that starts it fresh hands the name on with `--name` (`HostManager.NameCarried`). An AGY
   chat's row is named by its host, not by a `/rename` once typed into an AGY terminal
   (`SessionPipeline.ApplyAgyNames` leaves chats alone).
 - **A record write is retried past a reader** (`RecordGate.Write`). The deck reads

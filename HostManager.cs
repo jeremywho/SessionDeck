@@ -38,6 +38,14 @@ internal static class HostManager
     /// stream-json over pipes instead of drawn in a terminal. No hook settings: the stream itself
     /// says what the hooks would.
     /// </summary>
+    /// <summary>
+    /// The name a chat started fresh under its own id is told. A Claude chat renamed before anything was said has no
+    /// transcript for the CLI to have kept the name in (measured, 2.1.x: started again under the same id it has
+    /// none, and with <c>--name</c> it has), so the fresh start loses the name unless it is handed on. A terminal's
+    /// title is its CLI's to set, and is not a name.
+    /// </summary>
+    internal static string? NameCarried(HostRecord host) => host.IsChat && host.Title.Trim().Length > 0 ? host.Title.Trim() : null;
+
     public static string NewClaudeChatCommand(string sessionId, string? name, string extraFlags, string model = "", string effort = "")
     {
         string cmd = $"{ClaudeBinaryForChat()} {ChatStream.ProtocolFlags} --session-id {sessionId}";

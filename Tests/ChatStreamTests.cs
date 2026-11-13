@@ -466,6 +466,14 @@ public class ChatStreamTests : IDisposable
     }
 
     [Fact]
+    public void A_chat_started_fresh_is_told_the_name_it_was_given_and_a_terminal_is_not()
+    {
+        Assert.Equal("named before a word", HostManager.NameCarried(new HostRecord { Kind = ChatStream.Kind, Title = " named before a word " }));
+        Assert.Null(HostManager.NameCarried(new HostRecord { Kind = ChatStream.Kind, Title = "  " }));
+        Assert.Null(HostManager.NameCarried(new HostRecord { Kind = "", Title = "Claude Code" }));
+    }
+
+    [Fact]
     public void A_rename_is_the_clis_own_request_made_as_the_host_for_the_session_open_now()
     {
         var line = JsonDocument.Parse(ChatStream.RenameLine("sd-rename-3", "ship the thing", "75f4a45c-5341-4c06-9d2f-fc0b5d6465e7")).RootElement;
