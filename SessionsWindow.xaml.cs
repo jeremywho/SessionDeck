@@ -766,7 +766,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             {
                 SessionProvider.Codex => HostManager.ResumeCodexCommand(s.Id, _app.Settings.CodexFlags),
                 SessionProvider.Agy => HostManager.ResumeAgyCommand(s.Id, HostManager.AgyDefaultFlags),
-                _ => ClaudeCommandFor(s.Id, s.Name, SessionScanner.HasTranscript(s.Id, cwd), launcher, chat),
+                _ => ClaudeCommandFor(s.Id, s.Name, SessionScanner.HasTranscript(s.Id, cwd, chat), launcher, chat),
             };
             return HostManager.Spawn(s.Id, s.Provider, cmd, cwd, s.Name, profile: s.Profile, kind: chat ? Host.ChatStream.Kind : "");
         }
@@ -1649,7 +1649,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             if (!forCli && !forHost) continue;
             // Only a session whose live conversation is provably resumable is touched on its own;
             // anything else waits for a restart you ask for.
-            if (!SessionScanner.HasConversation(row.TranscriptPath)) continue;
+            if (!SessionScanner.CanResume(row.TranscriptPath, row.Host.IsChat)) continue;
             // Idle means the row shows Completed (hook or registry, whichever is live) with nothing of
             // its own running, and has for a while; the host's hook status alone can be stale when
             // the CLI in the pane was started by hand.
@@ -1685,7 +1685,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             // prompt, and taking it there exits the TUI. Update first, then resume onto the result.
             if (provider == SessionProvider.Codex && !await CodexUpdater.EnsureCurrentAsync())
                 PerformanceLog.Write($"restart host={host.Id}: codex update did not complete; resuming on v{InstalledVersions.Codex}");
-            bool hasTranscript = SessionScanner.HasConversation(row.TranscriptPath);
+            bool hasTranscript = SessionScanner.CanResume(row.TranscriptPath, host.IsChat);
             string launcher = ClaudeProfiles.CommandFor(host.Profile);
             string cmd = provider switch
             {

@@ -32,4 +32,26 @@ public class HasConversationTests
         Assert.False(SessionScanner.HasConversation(""));
         Assert.False(SessionScanner.HasConversation(Path.Combine(Path.GetTempPath(), "sd-conv-missing.jsonl")));
     }
+
+    [Fact]
+    public void A_chat_is_resumed_whenever_its_transcript_exists_and_a_terminal_only_once_something_was_said()
+    {
+        // What a chat's transcript holds after "/resume" was typed into it and nothing else (Claude Code 2.1.323):
+        // starting the session again under its id is refused ("already in use"), resuming it works.
+        string commandOnly = Temp("{\"type\":\"queue-operation\",\"operation\":\"enqueue\",\"content\":\"/resume\"}\n{\"type\":\"queue-operation\",\"operation\":\"dequeue\"}\n{\"type\":\"attachment\"}\n{\"type\":\"system\",\"subtype\":\"local_command\",\"content\":\"/resume\"}\n");
+        string said = Temp("{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"hi\"}}\n");
+        string missing = Path.Combine(Path.GetTempPath(), "sd-conv-missing.jsonl");
+        try
+        {
+            Assert.True(SessionScanner.CanResume(commandOnly, chat: true));
+            Assert.False(SessionScanner.CanResume(commandOnly, chat: false));
+            Assert.True(SessionScanner.CanResume(said, chat: true));
+            Assert.True(SessionScanner.CanResume(said, chat: false));
+            // No transcript at all: nothing to resume, and the id is free to start under.
+            Assert.False(SessionScanner.CanResume(missing, chat: true));
+            Assert.False(SessionScanner.CanResume(missing, chat: false));
+            Assert.False(SessionScanner.CanResume("", chat: true));
+        }
+        finally { File.Delete(commandOnly); File.Delete(said); }
+    }
 }

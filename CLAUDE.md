@@ -253,6 +253,12 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
   the command line, last, because the CLI takes the last `--model` (measured), and the mode and
   effort as `HostSpec.RestoreMode`/`RestoreEffort`, which the host sets right after `initialize`.
   A record written before revision 3 has no mode or effort to hand on.
+- **A chat is resumed whenever its transcript exists** (`SessionScanner.CanResume`), not only once
+  something was said. On pipes the CLI keeps a transcript that a slash command alone wrote
+  (`queue-operation`, `system local_command`, no `user` line); `--session-id` under that id is then
+  refused with "Session ID … is already in use", while `--resume` works and takes messages
+  (measured, 2.1.323: set the file aside and `--session-id` works again). A terminal still resumes
+  only with a `user` line.
 - **An unsent message is kept by conversation.** The pane stores the box under
   `sd.chat.draft:<session id>` in `localStorage` (the deck names the session in its `open`
   message, a revision 3 host in its snapshot), so a restart under a half-typed message gives it

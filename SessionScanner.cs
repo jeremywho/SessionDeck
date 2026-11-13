@@ -190,9 +190,23 @@ internal static class SessionScanner
     static readonly Dictionary<string, FallbackProbe> _fallback = new();
     static readonly TimeSpan FallbackRetry = TimeSpan.FromSeconds(30);
 
-    /// <summary>Claude writes a transcript only once something has been said; without one, <c>--resume</c> refuses the id.</summary>
-    public static bool HasTranscript(string sessionId, string cwd) =>
-        HasConversation(TranscriptPath(new SessionInfo { SessionId = sessionId, Cwd = cwd }));
+    /// <summary>Whether the session is brought back with <c>--resume</c> (see <see cref="CanResume"/>), looked up by id and folder.</summary>
+    public static bool HasTranscript(string sessionId, string cwd, bool chat = false) =>
+        CanResume(TranscriptPath(new SessionInfo { SessionId = sessionId, Cwd = cwd }), chat);
+
+    /// <summary>
+    /// Whether to bring a session back with <c>--resume</c> rather than start it fresh under its id.
+    /// A terminal session resumes only once something was said (<see cref="HasConversation"/>).
+    /// A chat session resumes whenever its transcript exists: on pipes the CLI keeps a transcript
+    /// that a slash command alone wrote, refuses to start a session under an id that has one
+    /// ("Session ID … is already in use"), and resumes it without complaint (measured, 2.1.323).
+    /// </summary>
+    public static bool CanResume(string transcriptPath, bool chat)
+    {
+        if (!chat) return HasConversation(transcriptPath);
+        try { return transcriptPath.Length > 0 && File.Exists(transcriptPath); }
+        catch { return false; }
+    }
 
     /// <summary>
     /// Whether <c>claude --resume</c> would find a conversation here. A fresh session writes metadata
