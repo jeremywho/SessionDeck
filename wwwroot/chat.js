@@ -8,6 +8,10 @@
   const SOLO_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode', 'Agent', 'Task']);
   const SET_PREFIX = 'sd-set-';
   const DRAFT_PREFIX = 'sd.chat.draft:';
+  // How wide the conversation column is. The person sets it by dragging the column's edge; it is one width for every
+  // chat on the page and is kept, like a window's size.
+  const WIDE_KEY = 'sd.chat.wide', WIDE_MIN = 480, GRIP_INSET = 6;
+  const widePanes = new Set();
   // A subagent can make hundreds of calls; the latest of them are drawn.
   const SUB_SHOWN = 200;
 
@@ -488,6 +492,24 @@
     return snapshot.start !== seq || (snapshot.epoch || 0) !== epoch;
   }
 
+  // The width a drag asks for, as one the column can take: no narrower than reads well, no wider than the pane
+  // (a pane narrower than that minimum is simply filled).
+  function clampWide(px, available) {
+    return Math.round(Math.max(WIDE_MIN, Math.min(px, Math.max(WIDE_MIN, available))));
+  }
+
+  // The width last chosen, or 0 for the stylesheet's own.
+  function storedWide() {
+    try { const n = Number(localStorage.getItem(WIDE_KEY)); return n >= WIDE_MIN ? n : 0; } catch { return 0; }
+  }
+
+  // Every chat on the page takes the width as it is dragged; it is written down when the drag ends.
+  function setWide(px, keep) {
+    for (const pane of widePanes) pane(px);
+    if (!keep) return;
+    try { if (px) localStorage.setItem(WIDE_KEY, String(px)); else localStorage.removeItem(WIDE_KEY); } catch { }
+  }
+
   // Which entry of the model list is the one in force. The session reports the full model id; the list is keyed by
   // alias, and two aliases can name the same model, so the one last picked here wins, then a named alias over "default".
   function modelInForce(models, model, picked) {
@@ -612,7 +634,7 @@
     return modes;
   }
 
-  const api = { ChatModel, LineReader, Wire, toolBrief, textOf, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText, liveStep, taskRunning, asks, offeredCommands, filterSessions, ago, startsOver };
+  const api = { ChatModel, LineReader, Wire, toolBrief, textOf, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText, liveStep, taskRunning, asks, offeredCommands, filterSessions, ago, startsOver, clampWide };
   if (typeof module !== 'undefined' && module.exports) { module.exports = api; return; }
 
   // ================= the page side =================
@@ -747,8 +769,65 @@
     // latest message: they stay there, rather than being left looking at whatever is now at the top.
     let atLatest = true;
     scroll.addEventListener('scroll', () => { atLatest = nearBottom(); });
-    const resized = new ResizeObserver(() => { if (atLatest) scroll.scrollTop = scroll.scrollHeight; });
+    const resized = new ResizeObserver(() => { if (atLatest) scroll.scrollTop = scroll.scrollHeight; placeGrips(); });
     resized.observe(scroll);
+
+    // ---- the column's width ----
+
+    // A thin line at each edge of the column, shown while the pointer is over the pane. Dragging either moves both,
+    // since the column stays centred; a double click goes back to the stylesheet's width. A phone has no edges to drag.
+    const grips = opts.touch ? [] : ['left', 'right'].map(side => {
+      const grip = h('div', 'chat-grip ' + side);
+      grip.title = 'Drag to change the width of the conversation. Double-click to reset.';
+      el.appendChild(grip);
+      return grip;
+    });
+
+    function placeGrips() {
+      if (!grips.length) return;
+      // Kept a little inside the scrolling area: a column as wide as its pane would otherwise put them under the
+      // scrollbar and the edge of the next pane, where they cannot be taken hold of.
+      const pane = el.getBoundingClientRect(), col = column.getBoundingClientRect(), area = scroll.getBoundingClientRect();
+      const least = area.left - pane.left + GRIP_INSET, most = area.left - pane.left + scroll.clientWidth - GRIP_INSET;
+      grips[0].style.left = Math.max(least, col.left - pane.left) + 'px';
+      grips[1].style.left = Math.min(most, col.right - pane.left) + 'px';
+    }
+
+    function applyWide(px) {
+      if (px) el.style.setProperty('--chat-wide', px + 'px'); else el.style.removeProperty('--chat-wide');
+      // A width someone chose is the width they want to read at: the stylesheet's own limit on a line's length steps aside.
+      el.classList.toggle('widened', !!px);
+      placeGrips();
+      if (atLatest) scroll.scrollTop = scroll.scrollHeight;
+    }
+
+    for (const grip of grips) {
+      grip.addEventListener('pointerdown', ev => {
+        if (ev.button !== 0) return;
+        ev.preventDefault();
+        grip.setPointerCapture(ev.pointerId);
+        el.classList.add('sizing');
+        // The column is centred in the scrolling area, so its width is twice the pointer's distance from that centre.
+        const centre = scroll.getBoundingClientRect().left + scroll.clientWidth / 2;
+        let wide = 0;
+        const move = e => { wide = clampWide(2 * Math.abs(e.clientX - centre), scroll.clientWidth); setWide(wide, false); };
+        const end = () => {
+          grip.removeEventListener('pointermove', move);
+          grip.removeEventListener('pointerup', end);
+          grip.removeEventListener('pointercancel', end);
+          el.classList.remove('sizing');
+          if (wide) setWide(wide, true);
+        };
+        grip.addEventListener('pointermove', move);
+        grip.addEventListener('pointerup', end);
+        grip.addEventListener('pointercancel', end);
+      });
+      grip.addEventListener('dblclick', () => setWide(0, true));
+    }
+    if (grips.length) {
+      widePanes.add(applyWide);
+      applyWide(storedWide());
+    }
 
     function schedule() {
       if (frame) return;
@@ -1626,6 +1705,7 @@
         closed = true;
         if (frame) cancelAnimationFrame(frame);
         resized.disconnect();
+        widePanes.delete(applyWide);
         try { if (ws) ws.close(); } catch { }
         for (const shot of shots) URL.revokeObjectURL(shot.url);
         for (const item of model.items) for (const url of item.images || []) URL.revokeObjectURL(url);

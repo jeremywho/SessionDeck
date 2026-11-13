@@ -2,7 +2,7 @@
 // The lines here are shaped like the ones Claude Code 2.1.322 wrote in stream-json mode, cut down to the fields the pane reads.
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { ChatModel, LineReader, Wire, toolBrief, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText, liveStep, taskRunning, asks: asksPerson, offeredCommands, filterSessions, ago, startsOver } = require('../../wwwroot/chat.js');
+const { ChatModel, LineReader, Wire, toolBrief, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText, liveStep, taskRunning, asks: asksPerson, offeredCommands, filterSessions, ago, startsOver, clampWide } = require('../../wwwroot/chat.js');
 
 const init = { type: 'system', subtype: 'init', session_id: 's1', model: 'claude-haiku-5-5' };
 const echo = text => ({ type: 'user', isReplay: true, message: { role: 'user', content: text }, parent_tool_use_id: null });
@@ -697,4 +697,13 @@ test('a viewer starts over when the scrollback does not go on from its last byte
   assert.equal(startsOver(500, 0, { start: 500, epoch: 1 }), true);
   assert.equal(startsOver(500, 1, { start: 500, epoch: 1 }), false);
   assert.equal(startsOver(0, 0, { start: 0, epoch: 3 }), true);
+});
+
+test('the column can be dragged no narrower than reads well and no wider than its pane', () => {
+  assert.equal(clampWide(900.4, 1400), 900);
+  assert.equal(clampWide(200, 1400), 480);
+  assert.equal(clampWide(2000, 1400), 1400);
+  // A pane narrower than the least width is simply filled: the least width is still what is asked for.
+  assert.equal(clampWide(300, 400), 480);
+  assert.equal(clampWide(1000, 400), 480);
 });

@@ -296,6 +296,12 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
   scanned sessions with one id, and `HostPairing` gives each host the one running under it first;
   taken in order, each row showed the other's name and status. The saved set and a session group
   are keyed by session id, so they hold it once.
+- **The column's width is the person's.** A thin grip at each edge of the conversation column
+  (`.chat-grip`, shown while the pointer is over the pane, desktop only) drags `--chat-wide`; the
+  column is centred, so either grip moves both. The width is one for every chat on the page
+  (`setWide` tells each pane), kept in `localStorage` under `sd.chat.wide`, and a double click
+  goes back to the stylesheet's. A chosen width also lifts the 74ch limit on a paragraph
+  (`.widened`), or the text would not get wider with its column.
 - **An unsent message is kept by conversation.** The pane stores the box under
   `sd.chat.draft:<session id>` in `localStorage` (the deck names the session in its `open`
   message, a revision 3 host in its snapshot), so a restart under a half-typed message gives it
