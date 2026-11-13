@@ -62,11 +62,43 @@ internal static class HostManager
     }
 
     /// <summary>The permission mode and effort a restarted chat session comes back with (see <see cref="HostSpec.RestoreMode"/>).</summary>
-    internal sealed record ChatRestore(string Mode, string Effort)
+    internal sealed record ChatRestore(string Mode, string Effort, string Model = "")
     {
         /// <summary>What the host being replaced last recorded; null for a terminal, which has neither.</summary>
-        public static ChatRestore? Of(HostRecord host) => host.IsChat ? new ChatRestore(host.PermissionMode, host.Effort) : null;
+        public static ChatRestore? Of(HostRecord host) => host.IsChat ? new ChatRestore(host.PermissionMode, host.Effort, host.Model) : null;
     }
+
+    /// <summary>
+    /// A Codex chat: the app server on plain pipes (<see cref="CodexChat"/>). The same command starts
+    /// a conversation and comes back to one; which it is goes in the host's spec, not here.
+    /// </summary>
+    public static string CodexChatCommand() =>
+        CodexExeLocator() is { } exe
+            ? $"\"{exe}\" app-server"
+            : throw new InvalidOperationException("Codex chat sessions need codex.exe on PATH");
+
+    /// <summary>Test seam: where codex.exe is, without depending on what the machine has installed.</summary>
+    internal static Func<string?> CodexExeLocator { get; set; } = () =>
+        FindCodexExe(Environment.GetEnvironmentVariable("PATH") ?? "", Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), File.Exists);
+
+    internal static string? FindCodexExe(string path, string localAppData, Func<string, bool> exists)
+    {
+        var dirs = path.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(d => d.Trim('"'))
+            .Append(Path.Combine(localAppData, "Programs", "OpenAI", "Codex", "bin"));
+        foreach (var dir in dirs)
+        {
+            string candidate;
+            try { candidate = Path.Combine(dir, "codex.exe"); }
+            catch (ArgumentException) { continue; }
+            if (exists(candidate)) return candidate;
+        }
+        return null;
+    }
+
+    /// <summary>How a new Codex chat treats commands and file changes: as the deck's Codex terminals do. Flags that skip approval mean full access; anything else asks first.</summary>
+    public static string CodexChatMode(string codexFlags) =>
+        codexFlags.Contains("--dangerously-bypass-approvals-and-sandbox", StringComparison.Ordinal) || codexFlags.Contains("--yolo", StringComparison.Ordinal)
+            ? CodexChat.Full : CodexChat.Ask;
 
     /// <summary>
     /// A chat host starts the CLI itself, with no shell in between to find it, so the binary is named
@@ -154,7 +186,7 @@ internal static class HostManager
     {
         Directory.CreateDirectory(HostsDir);
         string id = Guid.NewGuid().ToString("N")[..12];
-        bool chat = kind == ChatStream.Kind;
+        bool chat = kind == ChatStream.Kind, codexChat = chat && provider == "Codex";
         string folder = string.IsNullOrWhiteSpace(cwd) ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) : cwd;
         var spec = new HostSpec
         {
@@ -168,11 +200,13 @@ internal static class HostManager
             Title = title ?? "",
             Profile = profile ?? "",
             Kind = kind ?? "",
-            HistoryPath = chat ? SessionScanner.TranscriptPathFor(sessionId, folder) : "",
+            HistoryPath = chat && !codexChat ? SessionScanner.TranscriptPathFor(sessionId, folder) : "",
             RestoreMode = chat ? restore?.Mode ?? "" : "",
             RestoreEffort = chat ? restore?.Effort ?? "" : "",
+            RestoreModel = codexChat ? restore?.Model ?? "" : "",
             // Built here, for every chat host however it is started, so none is left unable to switch conversations.
-            ChatResumeCommand = chat ? ResumeClaudeChatCommand(ChatSessions.SessionPlaceholder, Settings.Peek().ResumeFlags) : "",
+            // (A Codex chat switches inside its app server and needs no command for it.)
+            ChatResumeCommand = chat && !codexChat ? ResumeClaudeChatCommand(ChatSessions.SessionPlaceholder, Settings.Peek().ResumeFlags) : "",
         };
 
         var psi = new ProcessStartInfo(HostExe())

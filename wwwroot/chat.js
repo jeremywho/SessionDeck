@@ -33,7 +33,7 @@
 
   class ChatModel {
     constructor() {
-      this.catalog = { models: [], commands: [] };
+      this.catalog = { models: [], commands: [], modes: MODES, agent: 'Claude' };
       this.settings = { mode: '', model: '', effort: '', resume: '' };
       this.reset();
     }
@@ -124,9 +124,12 @@
     }
 
     setCatalog(frame) {
+      // The modes and the name are the agent's: Claude's are the ones known here, and another agent's host says its own.
       this.catalog = {
         models: Array.isArray(frame.models) ? frame.models : [],
         commands: Array.isArray(frame.commands) ? frame.commands : [],
+        modes: Array.isArray(frame.modes) && frame.modes.every(m => Array.isArray(m) && m.length >= 2) ? frame.modes : MODES,
+        agent: typeof frame.agent === 'string' && frame.agent ? frame.agent : 'Claude',
       };
     }
 
@@ -492,6 +495,12 @@
     return snapshot.start !== seq || (snapshot.epoch || 0) !== epoch;
   }
 
+  // What a line of a unified diff is: added, removed, or neither (context, a hunk header, a file header).
+  function diffKind(line) {
+    if (line.startsWith('+++') || line.startsWith('---')) return 'same';
+    return line.startsWith('+') ? 'add' : line.startsWith('-') ? 'del' : 'same';
+  }
+
   // The width a drag asks for, as one the column can take: no narrower than reads well, no wider than the pane
   // (a pane narrower than that minimum is simply filled).
   function clampWide(px, available) {
@@ -634,7 +643,7 @@
     return modes;
   }
 
-  const api = { ChatModel, LineReader, Wire, toolBrief, textOf, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText, liveStep, taskRunning, asks, offeredCommands, filterSessions, ago, startsOver, clampWide };
+  const api = { ChatModel, LineReader, Wire, toolBrief, textOf, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText, liveStep, taskRunning, asks, offeredCommands, filterSessions, ago, startsOver, clampWide, diffKind };
   if (typeof module !== 'undefined' && module.exports) { module.exports = api; return; }
 
   // ================= the page side =================
@@ -888,7 +897,7 @@
       }
       action.disabled = state === 'ended' || state === 'offline' || preparing || !!resuming || !!choosing || (!stop && nothing);
       input.disabled = state === 'ended';
-      input.placeholder = !choosing ? 'Message Claude' : opts.touch ? 'Type to filter' : 'Type to filter, Enter to open, Esc to close';
+      input.placeholder = !choosing ? 'Message ' + model.catalog.agent : opts.touch ? 'Type to filter' : 'Type to filter, Enter to open, Esc to close';
       paintPickers(state);
     }
 
@@ -939,8 +948,9 @@
       const levels = inForce && inForce.efforts && inForce.efforts.length ? inForce.efforts.slice() : EFFORTS.slice();
       if (s.effort && !levels.includes(s.effort)) levels.push(s.effort);
       options(effortPick, levels.map(l => [l, l, 'Effort']), s.effort);
-      const modePairs = MODES.map(m => [m[0], narrow ? m[2] : m[1]]);
-      if (s.mode && !MODES.some(m => m[0] === s.mode)) modePairs.push([s.mode, s.mode]);
+      const modes = model.catalog.modes;
+      const modePairs = modes.map(m => [m[0], narrow ? m[2] || m[1] : m[1]]);
+      if (s.mode && !modes.some(m => m[0] === s.mode)) modePairs.push([s.mode, s.mode]);
       options(modePick, modePairs, s.mode);
     }
 
@@ -1117,6 +1127,14 @@
         const box = h('div', 'diff');
         const lines = lineDiff(input.old_string, input.new_string);
         for (const line of lines.slice(0, 400)) box.appendChild(h('div', 'diff-line ' + (line.op === '-' ? 'del' : line.op === '+' ? 'add' : 'same'), line.op + ' ' + line.text));
+        if (lines.length > 400) box.appendChild(h('div', 'diff-line same', `… ${lines.length - 400} more lines`));
+        return box;
+      }
+      // A change that arrives as a diff already (Codex): each line says by its first character what it is.
+      if (typeof input.diff === 'string' && input.diff) {
+        const box = h('div', 'diff');
+        const lines = input.diff.split('\n');
+        for (const line of lines.slice(0, 400)) box.appendChild(h('div', 'diff-line ' + diffKind(line), line));
         if (lines.length > 400) box.appendChild(h('div', 'diff-line same', `… ${lines.length - 400} more lines`));
         return box;
       }

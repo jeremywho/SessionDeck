@@ -44,6 +44,8 @@ internal sealed class HostSpec
     /// <summary>The permission mode and effort a restarted chat session had, put back once the CLI is up; empty to leave them as the CLI starts.</summary>
     public string RestoreMode { get; set; } = "";
     public string RestoreEffort { get; set; } = "";
+    /// <summary>The model a restarted Codex chat was on. (Claude takes its model on the command line.)</summary>
+    public string RestoreModel { get; set; } = "";
 
     /// <summary>The command that starts the CLI on another conversation in the same folder, with <see cref="ChatSessions.SessionPlaceholder"/> where its id goes; empty for a session that cannot switch.</summary>
     public string ChatResumeCommand { get; set; } = "";
@@ -133,6 +135,8 @@ internal static class HostProgram
         public readonly Channel<(bool Text, byte[] Data)> Out = Channel.CreateUnbounded<(bool, byte[])>(new UnboundedChannelOptions { SingleReader = true });
         /// <summary>A viewer that answers none of the program's terminal queries (a phone through the gateway); the host answers for it.</summary>
         public bool Passive;
+        /// <summary>Names this viewer to whatever answers it later (a Codex chat's answers come back on another thread).</summary>
+        public readonly string Tag = Guid.NewGuid().ToString("N");
     }
 
     /// <summary>The host answers cursor-position queries itself unless a viewer that can answer them is attached: exactly one responder, never two.</summary>
@@ -148,6 +152,8 @@ internal static class HostProgram
     /// <summary>Whether the transcript held more conversation than the scrollback was started with. (A scrollback that has since dropped its oldest lines has more behind it too.)</summary>
     static bool _chatEarlier;
     static readonly ChatStream _chat = new();
+    /// <summary>Set for a Codex chat: the child is <c>codex app-server</c>, and this turns its protocol into the lines a viewer reads.</summary>
+    static CodexChat? _codex;
     static readonly object ChatInputLock = new();
     static readonly StringBuilder _chatErrors = new();
     /// <summary>The conversation the CLI was last started on, its transcript, and the command that started it. The record's session id can run ahead of this: the CLI names its session at each turn.</summary>
@@ -242,6 +248,8 @@ internal static class HostProgram
         var ready = Console.Out;
         bool chat = spec.Kind == ChatStream.Kind;
         if (chat) _pipe = new PipeChild(commandLine, spec.Cwd);
+        if (chat && spec.Provider == "Codex")
+            _codex = new CodexChat(spec.Cwd, spec.SessionId, spec.RestoreModel, spec.RestoreEffort, spec.RestoreMode, Math.Max(spec.RingBytes, 64 * 1024) / 2);
         else
         {
             DetachStdHandles();
@@ -440,11 +448,19 @@ internal static class HostProgram
             var errors = new Thread(() => DrainChatErrors(pipe)) { IsBackground = true, Name = "chat-stderr" };
             reader.Start();
             errors.Start();
-            // What the CLI offers and what is in force, asked once so every viewer can be told without asking itself.
-            WriteChatInput(ChatStream.InitializeLine());
-            foreach (var line in ChatStream.RestoreLines(mode, effort)) WriteChatInput(line);
-            WriteChatInput(ChatStream.SettingsLine());
-            if (prompt.Length > 0) WriteChatInput(ChatStream.UserLine(prompt));
+            if (_codex != null)
+            {
+                Codex(c => c.Start());
+                if (prompt.Length > 0) CodexInput(ChatStream.UserLine(prompt));
+            }
+            else
+            {
+                // What the CLI offers and what is in force, asked once so every viewer can be told without asking itself.
+                WriteChatInput(ChatStream.InitializeLine());
+                foreach (var line in ChatStream.RestoreLines(mode, effort)) WriteChatInput(line);
+                WriteChatInput(ChatStream.SettingsLine());
+                if (prompt.Length > 0) WriteChatInput(ChatStream.UserLine(prompt));
+            }
             prompt = "";
             // A kill that arrived while the CLI was between conversations found nothing to end.
             if (_killRequested) pipe.KillTree();
@@ -576,6 +592,56 @@ internal static class HostProgram
         Log($"serving {c.Session} epoch={_chatEpoch}");
     }
 
+    /// <summary>As <see cref="Serve(Conversation)"/>, for a Codex chat: the app server has moved to another conversation and said what it holds.</summary>
+    static void Serve(CodexChat.Seed seed)
+    {
+        lock (ClientsLock)
+        {
+            _chatEarlier = seed.Earlier;
+            _ringFloor = _ring.Clear();
+            _chatEpoch++;
+            byte[] snapshot = Encoding.UTF8.GetBytes(SnapshotJson(_ringFloor, _ringFloor, seed.Title, 0, 0, ChatStream.Kind, ChatStream.Revision, seed.Session, _chatEarlier, _chatEpoch));
+            foreach (var client in Clients) client.Out.Writer.TryWrite((true, snapshot));
+            foreach (var line in seed.Lines) AppendChatLine(line);
+        }
+        Log($"serving codex {seed.Session} epoch={_chatEpoch}");
+    }
+
+    /// <summary>Asks the Codex translator for what follows from something (a line from the app server, a viewer's message) and carries it out.</summary>
+    static void Codex(Func<CodexChat, List<CodexChat.Effect>> what)
+    {
+        List<CodexChat.Effect> effects;
+        bool changed;
+        lock (_record)
+        {
+            string before = ChatStream.Signature(_record);
+            effects = what(_codex!);
+            changed = ChatStream.Signature(_record) != before;
+        }
+        foreach (var effect in effects)
+            switch (effect.Kind)
+            {
+                case CodexChat.Kind.ToCli: WriteChatInput(Encoding.UTF8.GetString(effect.Data)); break;
+                case CodexChat.Kind.Durable: AppendChatLine(effect.Data); break;
+                case CodexChat.Kind.Live: Broadcast(true, ChatStream.LiveFrame(effect.Data)); break;
+                case CodexChat.Kind.Frame: Broadcast(true, effect.Data); break;
+                case CodexChat.Kind.Reset: Serve(effect.Seed!); break;
+                case CodexChat.Kind.Reply:
+                    Client? asker;
+                    lock (ClientsLock) asker = Clients.FirstOrDefault(c => c.Tag == effect.Tag);
+                    asker?.Out.Writer.TryWrite((true, effect.Data));
+                    break;
+            }
+        if (changed) WriteRecord();
+    }
+
+    static void CodexInput(string line)
+    {
+        using var doc = JsonDocument.Parse(line);
+        var root = doc.RootElement;
+        Codex(c => c.FromViewer(root, _record, DateTime.UtcNow));
+    }
+
     static void ChatReadLoop(PipeChild pipe)
     {
         var buf = new byte[65536];
@@ -606,6 +672,18 @@ internal static class HostProgram
         while (length > 0 && (raw[length - 1] == (byte)'\r' || raw[length - 1] == (byte)' ')) length--;
         if (length == 0) return;
         byte[] line = length == raw.Length ? raw : raw[..length];
+        if (_codex != null)
+        {
+            // The app server speaks only JSON-RPC on this pipe; anything else is noise.
+            try
+            {
+                using var said = JsonDocument.Parse(line);
+                var message = said.RootElement;
+                Codex(c => c.FromCli(message, _record, DateTime.UtcNow));
+            }
+            catch (JsonException) { }
+            return;
+        }
         bool durable, ownAnswer;
         ChatStream.Change change;
         string? renamed, decline, catalog = null, settings = null;
@@ -793,7 +871,7 @@ internal static class HostProgram
                 if (_pipe != null)
                 {
                     string catalog, settings;
-                    lock (_record) { catalog = _chat.CatalogFrame(); settings = _chat.SettingsFrame(); }
+                    lock (_record) { catalog = _codex?.CatalogFrame() ?? _chat.CatalogFrame(); settings = _codex?.SettingsFrame() ?? _chat.SettingsFrame(); }
                     if (catalog.Length > 0) client.Out.Writer.TryWrite((true, Encoding.UTF8.GetBytes(catalog)));
                     client.Out.Writer.TryWrite((true, Encoding.UTF8.GetBytes(settings)));
                 }
@@ -850,21 +928,25 @@ internal static class HostProgram
             {
                 case "history":
                     if (_pipe == null) return;
-                    SendHistory(client, root);
+                    if (_codex != null) { string request = Text(root, "request"), uuid = Text(root, "uuid"); Codex(c => c.History(request, uuid, client.Tag)); }
+                    else SendHistory(client, root);
                     break;
                 case "sessions":
                     if (_pipe == null) return;
-                    SendSessions(client, root);
+                    if (_codex != null) { string request = Text(root, "request"); Codex(c => c.Sessions(request, client.Tag)); }
+                    else SendSessions(client, root);
                     break;
                 case "resume":
                     if (_pipe == null) return;
-                    RequestResume(client, root);
+                    if (_codex != null) { string request = Text(root, "request"), session = Text(root, "session"); Codex(c => c.Resume(request, session, client.Tag)); }
+                    else RequestResume(client, root);
                     break;
                 case "input":
                     if (_exited) return;
                     if (_pipe != null)
                     {
-                        foreach (var line in ChatStream.InputLines(root.GetProperty("data").GetString() ?? "")) WriteChatInput(line);
+                        foreach (var line in ChatStream.InputLines(root.GetProperty("data").GetString() ?? ""))
+                            if (_codex != null) CodexInput(line); else WriteChatInput(line);
                         break;
                     }
                     var bytes = Encoding.UTF8.GetBytes(root.GetProperty("data").GetString() ?? "");
@@ -1138,9 +1220,10 @@ internal static class HostProgram
             {
                 string json = JsonSerializer.Serialize(_record, Json);
                 if (!RecordGate.Changed(json, ref _lastWritten)) return;
-                string tmp = _recordPath + ".tmp";
-                File.WriteAllText(tmp, json);
-                File.Move(tmp, _recordPath, overwrite: true);
+                if (RecordGate.Write(_recordPath, json)) return;
+                // Not on disk: forgotten as written, so the next change (or the next call with this one) writes it.
+                _lastWritten = null;
+                Log("record: could not be written; will be written with the next change");
             }
         }
         catch (Exception ex) { Log($"record: {ex.Message}"); }

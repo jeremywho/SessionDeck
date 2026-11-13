@@ -392,7 +392,22 @@ public class ChatStreamTests : IDisposable
             Assert.Equal((ChatStream.Kind, "Claude", "notes", "hello"), (plan.Kind, plan.Provider, plan.Title, plan.Prompt));
             Assert.Contains($"--session-id {plan.SessionId} --name \"notes\"", plan.Command);
             Assert.Equal("", SessionStarter.Plan(new StartRequest("claude", home), settings)!.Kind);
-            Assert.Equal("", SessionStarter.Plan(new StartRequest("codex", home, Chat: true), settings)!.Kind);
+            Assert.Equal("", SessionStarter.Plan(new StartRequest("codex", home), settings)!.Kind);
+
+            // A Codex chat is the app server, with no thread yet; what was picked in the dialog and what the deck's flags
+            // say about asking go to the host, which sends them with the first turn.
+            var foundCodex = HostManager.CodexExeLocator;
+            try
+            {
+                HostManager.CodexExeLocator = () => @"C:\Tools\codex.exe";
+                var asks = SessionStarter.Plan(new StartRequest("codex", home, Prompt: "hello", Model: "gpt-6-astra", Effort: "high", Chat: true), new Settings { CodexFlags = "" })!;
+                Assert.Equal((ChatStream.Kind, "Codex", "", "\"C:\\Tools\\codex.exe\" app-server", "hello"), (asks.Kind, asks.Provider, asks.SessionId, asks.Command, asks.Prompt));
+                Assert.Equal(new HostManager.ChatRestore(CodexChat.Ask, "high", "gpt-6-astra"), asks.Restore);
+                // The deck's own default flags skip approval, so a chat started with them has full access.
+                var full = SessionStarter.Plan(new StartRequest("codex", home, Chat: true), settings)!;
+                Assert.Equal(new HostManager.ChatRestore(CodexChat.Full, "", ""), full.Restore);
+            }
+            finally { HostManager.CodexExeLocator = foundCodex; }
 
             HostManager.ClaudeExeLocator = () => null;
             var missing = Assert.Throws<InvalidOperationException>(() => HostManager.NewClaudeChatCommand("abc", null, ""));

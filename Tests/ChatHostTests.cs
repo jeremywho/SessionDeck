@@ -325,6 +325,121 @@ public class ChatHostTests : IDisposable
         Assert.NotNull(Record().ExitedAt);
     }
 
+    // Stands in for `codex app-server`: JSON-RPC, one object per line. It opens or resumes a thread, runs a turn
+    // that echoes what was said, lists two threads, and pages each thread's one turn of history.
+    const string FakeCodex = """
+        [Console]::InputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+        $out = [Console]::Out
+        function Say($o) { $out.WriteLine(($o | ConvertTo-Json -Compress -Depth 12)) }
+        $thread = ''
+        $turn = 0
+        while ($null -ne ($line = [Console]::In.ReadLine())) {
+            $m = $line | ConvertFrom-Json
+            if ($null -eq $m.id) { continue }
+            switch ($m.method) {
+                'initialize' { Say @{ id = $m.id; result = @{ userAgent = 'fake' } } }
+                'model/list' { Say @{ id = $m.id; result = @{ data = @(@{ id = 'fake-codex'; model = 'fake-codex'; displayName = 'Fake Codex'; description = ''; hidden = $false; supportedReasoningEfforts = @(@{ reasoningEffort = 'low' }) }) } } }
+                'thread/start' { $thread = 'cccccccc-1111-4111-8111-111111111111'; Say @{ id = $m.id; result = @{ thread = @{ id = $thread; preview = ''; name = $null; path = 'C:\rollouts\new.jsonl' }; model = 'fake-codex'; reasoningEffort = 'low' } } }
+                'thread/resume' {
+                    if ($m.params.threadId -like 'dead*') { Say @{ id = $m.id; error = @{ code = -32000; message = 'thread not found' } }; continue }
+                    $thread = $m.params.threadId
+                    Say @{ id = $m.id; result = @{ thread = @{ id = $thread; preview = 'asked there'; name = 'Other thread'; path = 'C:\rollouts\other.jsonl' }; model = 'fake-codex'; reasoningEffort = 'low' } }
+                }
+                'thread/turns/list' { Say @{ id = $m.id; result = @{ nextCursor = $null; data = @(@{ id = 'old-turn'; status = 'completed'; items = @(@{ type = 'userMessage'; id = 'old-u'; content = @(@{ type = 'text'; text = 'asked there' }) }, @{ type = 'agentMessage'; id = 'old-a'; text = 'answered there' }) }) } } }
+                'thread/list' { Say @{ id = $m.id; result = @{ data = @(@{ id = $thread; name = $null; preview = 'this one'; updatedAt = 20 }, @{ id = 'dddddddd-2222-4222-8222-222222222222'; name = 'Other thread'; preview = 'asked there'; updatedAt = 10 }) } } }
+                'turn/start' {
+                    $turn++
+                    $text = $m.params.input[0].text
+                    Say @{ id = $m.id; result = @{ turn = @{ id = "turn-$turn"; status = 'inProgress' } } }
+                    Say @{ method = 'turn/started'; params = @{ threadId = $thread; turn = @{ id = "turn-$turn" } } }
+                    Say @{ method = 'item/completed'; params = @{ threadId = $thread; item = @{ type = 'userMessage'; id = "u-$turn"; content = @(@{ type = 'text'; text = $text }) } } }
+                    if ($text -eq 'ask') { Say @{ id = 70; method = 'item/commandExecution/requestApproval'; params = @{ threadId = $thread; turnId = "turn-$turn"; itemId = 'exec-1'; command = 'make'; reason = 'builds' } }; continue }
+                    Say @{ method = 'item/started'; params = @{ threadId = $thread; item = @{ type = 'agentMessage'; id = "a-$turn"; text = '' } } }
+                    Say @{ method = 'item/agentMessage/delta'; params = @{ threadId = $thread; itemId = "a-$turn"; delta = 'echo' } }
+                    Say @{ method = 'item/completed'; params = @{ threadId = $thread; item = @{ type = 'agentMessage'; id = "a-$turn"; text = "echo: $text in $thread" } } }
+                    Say @{ method = 'turn/completed'; params = @{ threadId = $thread; turn = @{ id = "turn-$turn"; status = 'completed'; error = $null } } }
+                }
+                default {
+                    # The answer to the approval it asked for: the turn goes on and ends.
+                    if ($m.id -eq 70 -and $null -ne $m.result) {
+                        Say @{ method = 'item/completed'; params = @{ threadId = $thread; item = @{ type = 'agentMessage'; id = 'a-ask'; text = "decision: $($m.result.decision)" } } }
+                        Say @{ method = 'turn/completed'; params = @{ threadId = $thread; turn = @{ id = "turn-$turn"; status = 'completed'; error = $null } } }
+                    }
+                }
+            }
+        }
+        """;
+
+    [Fact]
+    public async Task A_codex_chat_host_speaks_json_rpc_to_the_app_server_and_the_same_lines_to_a_viewer()
+    {
+        string script = Path.Combine(_dir, "fake-codex.ps1");
+        File.WriteAllText(script, FakeCodex);
+        await Start(new HostSpec
+        {
+            Id = "chattest0001", SessionId = "", Provider = "Codex", Kind = ChatStream.Kind,
+            CommandLine = $"\"{SessionLauncher.ResolvePowerShell()}\" -NoLogo -NoProfile -File \"{script}\"",
+            Cwd = _dir, HostsDir = Path.Combine(_dir, "hosts"), RingBytes = 256 * 1024, RestoreMode = CodexChat.Ask,
+        });
+        const string First = "cccccccc-1111-4111-8111-111111111111", Second = "dddddddd-2222-4222-8222-222222222222";
+        // The thread is the app server's to name: the record learns it once the thread is open.
+        var record = await RecordWhen(r => r.SessionId == First && r.Model == "fake-codex");
+        Assert.Equal((ChatStream.Kind, "Codex", "default", "low", @"C:\rollouts\new.jsonl"), (record.Kind, record.Provider, record.PermissionMode, record.Effort, record.TranscriptPath));
+
+        using var viewer = await Viewer.Attach(record, after: 0);
+        await viewer.Pump(() => viewer.Catalog.HasValue && viewer.Settings.Count > 0);
+        Assert.Equal(("Codex", "fake-codex"), (viewer.Catalog!.Value.GetProperty("agent").GetString(), viewer.Catalog.Value.GetProperty("models")[0].GetProperty("value").GetString()));
+        Assert.Equal(("default", "fake-codex", "low"), SettingsOf(viewer));
+
+        await viewer.Send(ChatStream.UserLine("héllo"));
+        var turn = await viewer.Until(l => Type(l) == "result");
+        Assert.Equal(new[] { "user", "assistant", "result" }, turn.Select(Type));
+        Assert.Equal(("héllo", "echo: héllo in " + First), (Said(turn[0]), Said(turn[1])));
+        // The start of the turn and the words as they came went to the viewer attached then, and not into the scrollback.
+        Assert.Equal(new[] { "system", "stream_event", "stream_event" }, viewer.Live.Select(Type));
+        record = await RecordWhen(r => r.AgentStatus == "idle" && r.LastEvent == "Stop");
+        Assert.Equal("héllo", record.Title);
+        Assert.Equal(new[] { "héllo" }, viewer.Titles);
+
+        // An approval reaches the viewer as a request, and the viewer's answer reaches the app server as Codex names it.
+        await viewer.Send(ChatStream.UserLine("ask"));
+        var asked = await viewer.Until(l => Type(l) == "control_request");
+        Assert.Equal(("cx-70", "Shell", "make"), (asked[^1].GetProperty("request_id").GetString(), asked[^1].GetProperty("request").GetProperty("tool_name").GetString(), asked[^1].GetProperty("request").GetProperty("input").GetProperty("command").GetString()));
+        Assert.Equal("waiting", (await RecordWhen(r => r.AgentStatus == "waiting")).AgentStatus);
+        await viewer.Send("""{"type":"control_response","response":{"subtype":"success","request_id":"cx-70","response":{"behavior":"allow","updatedPermissions":[{"type":"addRules"}]}}}""");
+        var answered = await viewer.Until(l => Type(l) == "result");
+        Assert.Equal(new[] { "control_response", "assistant", "result" }, answered.Select(Type));
+        Assert.Equal("decision: acceptForSession", Said(answered[1]));
+
+        // The conversations in the folder, without the one open here; then a move to one, in the same process.
+        int child = Record().ChildPid;
+        await viewer.SendFrame("""{"type":"sessions","request":"s1"}""");
+        var list = await viewer.NextAnswer();
+        Assert.Equal(new[] { (Second, "Other thread") }, list.GetProperty("sessions").EnumerateArray().Select(e => (e.GetProperty("id").GetString()!, e.GetProperty("title").GetString()!)));
+        await viewer.SendFrame(JsonSerializer.Serialize(new { type = "resume", request = "r0", session = "dead0000-3333-4333-8333-333333333333" }));
+        var refused = await viewer.NextAnswer();
+        Assert.Equal((false, "Could not resume that conversation: thread not found"), (refused.GetProperty("ok").GetBoolean(), refused.GetProperty("error").GetString()));
+        await viewer.SendFrame(JsonSerializer.Serialize(new { type = "resume", request = "r1", session = Second }));
+        await viewer.Pump(() => viewer.Snapshots.Count == 2);
+        Assert.Equal((1, Second, "Other thread"), (viewer.Snapshot.GetProperty("epoch").GetInt32(), viewer.Snapshot.GetProperty("session").GetString(), viewer.Snapshot.GetProperty("title").GetString()));
+        var seeded = await viewer.Until(l => Type(l) == "assistant");
+        Assert.Equal(new[] { "asked there", "answered there" }, seeded.Select(Said));
+        Assert.All(seeded, l => Assert.True(l.GetProperty("history").GetBoolean()));
+        record = await RecordWhen(r => r.SessionId == Second);
+        Assert.Equal((child, "Other thread", @"C:\rollouts\other.jsonl"), (record.ChildPid, record.Title, record.TranscriptPath));
+        await viewer.Send(ChatStream.UserLine("who"));
+        Assert.Equal("echo: who in " + Second, Said((await viewer.Until(l => Type(l) == "result"))[1]));
+
+        // Earlier turns are the app server's to page: asked by the oldest message shown, answered to the asker.
+        await viewer.SendFrame("""{"type":"history","request":"h1","uuid":"old-u"}""");
+        var page = await viewer.NextHistory();
+        Assert.Equal(("h1", 0, JsonValueKind.Null), (page.GetProperty("request").GetString(), page.GetProperty("lines").GetArrayLength(), page.GetProperty("next").ValueKind));
+
+        await viewer.SendFrame("""{"type":"kill"}""");
+        await viewer.Exited();
+        Assert.True(_host!.WaitForExit(15000), "host did not exit after it was told to end");
+    }
+
     HostRecord Record() => JsonSerializer.Deserialize<HostRecord>(File.ReadAllText(Path.Combine(_dir, "hosts", "chattest0001.json")))!;
 
     async Task<HostRecord> RecordWhen(Func<HostRecord, bool> ready)

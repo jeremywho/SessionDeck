@@ -231,7 +231,8 @@ public class ChatTranscriptTests : IDisposable
 
         // And that is what its replacement is started with; a terminal has nothing of the kind to hand on.
         record.Kind = ChatStream.Kind;
-        Assert.Equal(new HostManager.ChatRestore("plan", "high"), HostManager.ChatRestore.Of(record));
+        // (The model goes too: Claude takes it on the command line, and a Codex chat with its first turn.)
+        Assert.Equal(new HostManager.ChatRestore("plan", "high", "m"), HostManager.ChatRestore.Of(record));
         Assert.Null(HostManager.ChatRestore.Of(new HostRecord { PermissionMode = "plan", Effort = "high" }));
     }
 }

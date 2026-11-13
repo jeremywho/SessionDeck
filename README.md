@@ -128,7 +128,11 @@ update a chat left idle restarts itself onto the new build with its model, mode 
 session underneath: it shows in the list with the same states, survives a deck restart, and comes
 back after a reboot with its conversation. The phone app opens a chat as the same conversation
 (Return adds a line there and the button sends; `+` attaches an image) and can start one from its
-`+` menu. Chat sessions are Claude only, need the native `claude.exe`, and use the default login.
+`+` menu. Codex has a chat too (**New Codex chat** in the same menu, or **Chat view** with Codex picked): the
+same pane over Codex's app server, with its models and efforts, approvals as cards, file changes as
+diffs, and `/resume` over the folder's Codex conversations. A Codex chat either asks before each
+command and file change or has full access, as your Codex flags say; it has no sandbox mode. Claude
+chats need the native `claude.exe` and use the default login; Codex chats need `codex.exe`.
 
 ## Docking
 Right-click the tray icon → **Dock to** → an edge or corner, and the window **snaps there on the

@@ -135,6 +135,7 @@
                 <MenuItem Header="New Claude session" Click="NewClaudeMenu_Click" Tag="{Binding}"/>
                 <MenuItem Header="New Claude chat" Click="NewChatMenu_Click" Tag="{Binding}"/>
                 <MenuItem Header="New Codex session" Click="NewCodexMenu_Click" Tag="{Binding}"/>
+                <MenuItem Header="New Codex chat" Click="NewCodexChatMenu_Click" Tag="{Binding}"/>
                 <MenuItem Header="New AGY session" Click="NewAgyMenu_Click" Tag="{Binding}"/>
                 <MenuItem Header="New terminal" Click="NewShellMenu_Click" Tag="{Binding}"/>
                 <Separator/>

@@ -82,6 +82,7 @@ struct SessionsView: View {
                         Button { start("Claude") } label: { Label("New Claude session", systemImage: "sparkle") }
                         Button { start("Claude", chat: true) } label: { Label("New Claude chat", systemImage: "bubble.left") }
                         Button { start("Codex") } label: { Label("New Codex session", systemImage: "diamond") }
+                        Button { start("Codex", chat: true) } label: { Label("New Codex chat", systemImage: "bubble.left") }
                         Button { start("Agy") } label: { Label("New AGY session", systemImage: "diamond.inset.filled") }
                         Button { start("Shell") } label: { Label("New terminal", systemImage: "terminal") }
                     } label: { Image(systemName: "plus") }

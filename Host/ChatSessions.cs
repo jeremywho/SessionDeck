@@ -141,7 +141,7 @@ internal static class ChatSessions
         return text.Length == 0 || text.StartsWith('<') ? null : text;
     }
 
-    static string OneLine(string text)
+    internal static string OneLine(string text)
     {
         var sb = new StringBuilder(Math.Min(text.Length, TitleLength));
         bool space = false;

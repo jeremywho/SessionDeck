@@ -105,6 +105,7 @@ internal partial class DeckPane : UserControl
     void NewClaudeMenu_Click(object sender, RoutedEventArgs e) => RequestNew(sender, "claude");
     void NewChatMenu_Click(object sender, RoutedEventArgs e) => RequestNew(sender, "chat");
     void NewCodexMenu_Click(object sender, RoutedEventArgs e) => RequestNew(sender, "codex");
+    void NewCodexChatMenu_Click(object sender, RoutedEventArgs e) => RequestNew(sender, "codex-chat");
     void NewShellMenu_Click(object sender, RoutedEventArgs e) => RequestNew(sender, "shell");
     void NewAgyMenu_Click(object sender, RoutedEventArgs e) => RequestNew(sender, "agy");
 

@@ -148,6 +148,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
                 case "shell": SpawnShellIntoDeck(); break;
                 case "agy": SpawnAgyIntoDeck(); break;
                 case "chat": NewChatSession(); break;
+                case "codex-chat": NewCodexChatSession(); break;
                 case var p when p.StartsWith("profile:", StringComparison.Ordinal): NewProfileSession(p["profile:".Length..]); break;
                 default: NewSessionButton_Click(this, new RoutedEventArgs()); break;
             }
@@ -666,6 +667,21 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         SpawnIntoDeck(sessionId, SessionProvider.Claude, HostManager.NewClaudeCommand(sessionId, null, _app.Settings.ResumeFlags, launcher: launcher), HomeDir, null, profile: profile);
     }
 
+    /// <summary>A new Codex conversation in a chat pane: the app server in the home folder, asking or not as the deck's Codex terminals do.</summary>
+    void NewCodexChatSession()
+    {
+        try
+        {
+            var restore = new HostManager.ChatRestore(HostManager.CodexChatMode(_app.Settings.CodexFlags), "", "");
+            Deck.Open(HostManager.Spawn("", SessionProvider.Codex, HostManager.CodexChatCommand(), HomeDir, null, kind: Host.ChatStream.Kind, restore: restore));
+        }
+        catch (Exception ex)
+        {
+            App.LogError(ex);
+            LiveLabel.Text = "Could not start the chat: " + ex.Message;
+        }
+    }
+
     /// <summary>A new Claude conversation in a chat pane rather than a terminal: same flags, same kind of session underneath.</summary>
     void NewChatSession()
     {
@@ -760,16 +776,18 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     {
         string cwd = string.IsNullOrWhiteSpace(s.Cwd) ? HomeDir : s.Cwd;
         string launcher = ClaudeProfiles.CommandFor(s.Profile);
-        bool chat = s.Kind == Host.ChatStream.Kind && s.Provider == SessionProvider.Claude;
+        bool chat = s.Kind == Host.ChatStream.Kind && s.Provider is SessionProvider.Claude or SessionProvider.Codex;
         try
         {
             string cmd = s.Provider switch
             {
-                SessionProvider.Codex => HostManager.ResumeCodexCommand(s.Id, _app.Settings.CodexFlags),
+                SessionProvider.Codex => chat ? HostManager.CodexChatCommand() : HostManager.ResumeCodexCommand(s.Id, _app.Settings.CodexFlags),
                 SessionProvider.Agy => HostManager.ResumeAgyCommand(s.Id, HostManager.AgyDefaultFlags),
                 _ => ClaudeCommandFor(s.Id, s.Name, SessionScanner.HasTranscript(s.Id, cwd, chat), launcher, chat),
             };
-            return HostManager.Spawn(s.Id, s.Provider, cmd, cwd, s.Name, profile: s.Profile, kind: chat ? Host.ChatStream.Kind : "");
+            // A Codex chat after a reboot asks or not as the deck's Codex terminals do: what it was set to is not saved with the session.
+            var restore = chat && s.Provider == SessionProvider.Codex ? new HostManager.ChatRestore(HostManager.CodexChatMode(_app.Settings.CodexFlags), "", s.Model) : null;
+            return HostManager.Spawn(s.Id, s.Provider, cmd, cwd, s.Name, profile: s.Profile, kind: chat ? Host.ChatStream.Kind : "", restore: restore);
         }
         catch (Exception ex)
         {
@@ -1700,7 +1718,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             string launcher = ClaudeProfiles.CommandFor(host.Profile);
             string cmd = provider switch
             {
-                SessionProvider.Codex => HostManager.ResumeCodexCommand(sessionId, _app.Settings.CodexFlags),
+                SessionProvider.Codex => host.IsChat ? HostManager.CodexChatCommand() : HostManager.ResumeCodexCommand(sessionId, _app.Settings.CodexFlags),
                 SessionProvider.Agy => HostManager.ResumeAgyCommand(sessionId, HostManager.AgyDefaultFlags),
                 _ => ClaudeCommandFor(sessionId, null, hasTranscript, launcher, host.IsChat, host.IsChat ? host.Model : ""),
             };

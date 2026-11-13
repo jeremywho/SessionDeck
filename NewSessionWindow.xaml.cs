@@ -40,8 +40,6 @@ internal partial class NewSessionWindow : Wpf.Ui.Controls.FluentWindow
         Fill(EffortBox, codex ? CodexEfforts : ClaudeEfforts, codex ? _settings.LastCodexEffort : _settings.LastClaudeEffort);
         NameBox.IsEnabled = !codex;
         NameBox.ToolTip = codex ? "Codex names a thread from inside the TUI" : null;
-        ChatBox.IsEnabled = !codex;
-        if (codex) ChatBox.IsChecked = false;
         string flags = codex ? _settings.CodexFlags : _settings.ResumeFlags;
         FlagsNote.Text = flags.Length > 0 ? "Also: " + flags : "";
         FlagsNote.ToolTip = flags.Length > 0 ? "Flags from Settings, appended to every launch" : null;
@@ -89,7 +87,7 @@ internal partial class NewSessionWindow : Wpf.Ui.Controls.FluentWindow
         else { _settings.LastClaudeModel = model; _settings.LastClaudeEffort = effort; }
         _settings.RememberFolder(cwd);
         _settings.Save();
-        Result = new NewSessionRequest(Provider, cwd, codex ? "" : NameBox.Text.Trim(), model, effort, PromptBox.Text.Trim(), !codex && ChatBox.IsChecked == true);
+        Result = new NewSessionRequest(Provider, cwd, codex ? "" : NameBox.Text.Trim(), model, effort, PromptBox.Text.Trim(), ChatBox.IsChecked == true);
         DialogResult = true;
     }
 }

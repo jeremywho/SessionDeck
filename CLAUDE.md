@@ -306,6 +306,33 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
   (`setWide` tells each pane), kept in `localStorage` under `sd.chat.wide`, and a double click
   goes back to the stylesheet's. A chosen width also lifts the 74ch limit on a paragraph
   (`.widened`), or the text would not get wider with its column.
+- **A Codex chat is the same pane over a translator** (`Host/CodexChat.cs`, measured against
+  codex-cli 0.167.2). The child is `codex app-server` on pipes: JSON-RPC, one object per line
+  (`initialize`, `thread/start|resume`, `turn/start|steer|interrupt`, `thread/list`,
+  `thread/turns/list`, `model/list`; `codex app-server generate-ts --out <dir>` prints every
+  type). `CodexChat` turns its notifications into the lines a viewer already reads from Claude
+  (user, assistant, `tool_use`/`tool_result`, `control_request`, `result`) and a viewer's lines
+  into requests, as a list of effects the host carries out (`HostProgram.Codex`). It is pure and
+  tested on its own; `ChatHostTests` runs the real host against a script standing in for the app
+  server.
+- **What differs from Claude, by measurement:** the thread id is the app server's to name, so
+  the record's `SessionId` is empty until the thread is open; one process starts, resumes and
+  lists threads, so `/resume` and earlier history are requests and never a restart
+  (`thread/turns/list` pages newest first behind an opaque cursor, kept per page by its first
+  message's id); model, effort and approval policy go with each `turn/start`, so a picker change
+  is in force from the next turn; a message typed mid-turn is `turn/steer`; images are data
+  URLs; an approval is a JSON-RPC request the host answers `accept`, `acceptForSession` or
+  `decline`, and any other request from the server is answered with an error at once (unanswered,
+  it holds the turn).
+- **Codex has two modes here: ask first, or full access** (`CodexChat.Ask`/`Full`, named as
+  Claude's `default`/`bypassPermissions`). The sandbox is off in both: on Windows its
+  restricted-token sandbox refuses to run any command in `workspace-write`. A new chat takes its
+  mode from `Settings.CodexFlags` (`HostManager.CodexChatMode`). The catalog frame carries
+  `agent` and `modes`, which the pane uses for its placeholder and mode picker.
+- **A record write is retried past a reader** (`RecordGate.Write`). The deck reads
+  `hosts/<id>.json` whenever it scans, and a replace is refused while a reader has the file
+  open; a write that still fails is forgotten as written, so the next change carries it. Before
+  this a status change could be lost until the session's next one.
 - **An unsent message is kept by conversation.** The pane stores the box under
   `sd.chat.draft:<session id>` in `localStorage` (the deck names the session in its `open`
   message, a revision 3 host in its snapshot), so a restart under a half-typed message gives it

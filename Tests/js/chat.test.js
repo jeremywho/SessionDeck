@@ -2,7 +2,7 @@
 // The lines here are shaped like the ones Claude Code 2.1.322 wrote in stream-json mode, cut down to the fields the pane reads.
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { ChatModel, LineReader, Wire, toolBrief, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText, liveStep, taskRunning, asks: asksPerson, offeredCommands, filterSessions, ago, startsOver, clampWide } = require('../../wwwroot/chat.js');
+const { ChatModel, LineReader, Wire, toolBrief, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText, liveStep, taskRunning, asks: asksPerson, offeredCommands, filterSessions, ago, startsOver, clampWide, diffKind } = require('../../wwwroot/chat.js');
 
 const init = { type: 'system', subtype: 'init', session_id: 's1', model: 'claude-haiku-5-5' };
 const echo = text => ({ type: 'user', isReplay: true, message: { role: 'user', content: text }, parent_tool_use_id: null });
@@ -706,4 +706,21 @@ test('the column can be dragged no narrower than reads well and no wider than it
   // A pane narrower than the least width is simply filled: the least width is still what is asked for.
   assert.equal(clampWide(300, 400), 480);
   assert.equal(clampWide(1000, 400), 480);
+});
+
+test('an agent other than Claude says its own name and modes, and Claude\'s stay the default', () => {
+  const m = new ChatModel();
+  assert.equal(m.catalog.agent, 'Claude');
+  assert.deepEqual(m.catalog.modes.map(x => x[0]), ['default', 'acceptEdits', 'plan', 'bypassPermissions']);
+  m.setCatalog({ models: [{ value: 'gpt-x', name: 'GPT X', efforts: ['low', 'ultra'] }], commands: [], agent: 'Codex', modes: [['default', 'Ask before acting', 'Ask'], ['bypassPermissions', 'Full access', 'Full']] });
+  assert.equal(m.catalog.agent, 'Codex');
+  assert.deepEqual(m.catalog.modes.map(x => x[1]), ['Ask before acting', 'Full access']);
+  // A frame without them (every Claude host) or with something that is not a list of pairs leaves Claude's.
+  m.setCatalog({ models: [], commands: [], modes: ['nonsense'] });
+  assert.equal(m.catalog.agent, 'Claude');
+  assert.equal(m.catalog.modes.length, 4);
+});
+
+test('a line of a diff is told by its first character, and a file header is neither added nor removed', () => {
+  assert.deepEqual(['+new', '-old', ' same', '@@ -1 +1 @@', '+++ b/file', '--- a/file', ''].map(diffKind), ['add', 'del', 'same', 'same', 'same', 'same', 'same']);
 });

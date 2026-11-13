@@ -106,4 +106,29 @@ public class HostRecordWriteTests : IDisposable
         Assert.Equal(("chat", 3, "s1", true), (chat.RootElement.GetProperty("kind").GetString(), chat.RootElement.GetProperty("chat").GetInt32(), chat.RootElement.GetProperty("session").GetString(), chat.RootElement.GetProperty("earlier").GetBoolean()));
         Assert.Equal("{\"type\":\"size\",\"cols\":80,\"rows\":24}", HostProgram.SizeJson(80, 24));
     }
+
+    [Fact]
+    public void A_record_is_written_past_a_reader_that_has_the_file_open_and_says_so_when_it_cannot_be()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "sd-recordwrite-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        string path = Path.Combine(dir, "h.json");
+        try
+        {
+            Assert.True(RecordGate.Write(path, "{\"n\":1}"));
+            Assert.Equal("{\"n\":1}", File.ReadAllText(path));
+
+            // A reader opens the file as File.ReadAllText does: while it is open the replace is refused.
+            var reader = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            Assert.False(RecordGate.Write(path, "{\"n\":2}", attempts: 2, waitMs: 5));
+            Assert.Equal("{\"n\":1}", new StreamReader(reader).ReadToEnd());
+
+            // The reader is done a moment later, and the write that was being retried lands.
+            var release = Task.Run(async () => { await Task.Delay(60); reader.Dispose(); });
+            Assert.True(RecordGate.Write(path, "{\"n\":3}", attempts: 200, waitMs: 5));
+            release.Wait();
+            Assert.Equal("{\"n\":3}", File.ReadAllText(path));
+        }
+        finally { try { Directory.Delete(dir, true); } catch { } }
+    }
 }

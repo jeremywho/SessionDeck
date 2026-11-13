@@ -356,7 +356,7 @@ internal sealed class ChatStream
         record.StatusAt = now;
     }
 
-    static string Signature(HostRecord r) => $"{r.AgentStatus}|{r.StatusAt?.Ticks}|{r.SessionId}|{r.Model}|{r.Title}|{r.LastTool}|{r.LastEvent}|{r.PermissionMode}|{r.Effort}";
+    internal static string Signature(HostRecord r) => $"{r.AgentStatus}|{r.StatusAt?.Ticks}|{r.SessionId}|{r.Model}|{r.Title}|{r.LastTool}|{r.LastEvent}|{r.PermissionMode}|{r.Effort}";
 
     /// <summary>
     /// The CLI asks its controller things over the same pipe. A viewer answers permission requests;
