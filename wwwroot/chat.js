@@ -804,9 +804,11 @@
 
     // A keyboard coming up (or a window made shorter) shrinks the conversation under a reader who was at the
     // latest message: they stay there, rather than being left looking at whatever is now at the top.
-    let atLatest = true;
-    scroll.addEventListener('scroll', () => { atLatest = nearBottom(); });
-    const resized = new ResizeObserver(() => { if (atLatest) scroll.scrollTop = scroll.scrollHeight; placeGrips(); });
+    let atLatest = true, heightSeen = scroll.clientHeight;
+    // A scroll reported while the area is changing height (a phone's keyboard coming up) is the browser's doing,
+    // not the reader's: it must not be read as their having left the latest message, or they are left behind.
+    scroll.addEventListener('scroll', () => { if (scroll.clientHeight === heightSeen) atLatest = nearBottom(); });
+    const resized = new ResizeObserver(() => { heightSeen = scroll.clientHeight; if (atLatest) scroll.scrollTop = scroll.scrollHeight; placeGrips(); });
     resized.observe(scroll);
 
     // ---- the column's width ----

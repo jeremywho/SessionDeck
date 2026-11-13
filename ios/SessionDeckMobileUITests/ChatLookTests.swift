@@ -40,6 +40,12 @@ final class ChatLookTests: XCTestCase {
         XCTAssertLessThanOrEqual(send.frame.maxY, firstRow.minY, "the send button is under the keyboard")
         // The keyboard's own row of suggestions is some 50 points; the web view's form bar was another 50.
         XCTAssertLessThan(gap, 110, "something sits between the message box and the keyboard")
+        // A reader at the latest message is still there once the keyboard has taken half the screen.
+        let latest = web.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Good. Now make the cap configurable'")).firstMatch
+        XCTAssertTrue(latest.waitForExistence(timeout: 5), "the latest message is not on the page")
+        print("PROBE latest=\(latest.frame)")
+        XCTAssertGreaterThan(latest.frame.minY, 90, "the latest message is above the top of the conversation")
+        XCTAssertLessThanOrEqual(latest.frame.maxY, box.frame.minY, "the latest message is under the message box: the conversation did not stay at its end")
         sleep(5)
 
         // With no bar over the keyboard there is no button to put it away: a tap on the conversation does.
