@@ -134,9 +134,11 @@ diffs, and `/resume` over the folder's Codex conversations. A Codex chat either 
 command and file change or has full access, as your Codex flags say; it has no sandbox mode.
 Antigravity and OpenCode have chats as well (**New AGY chat** and **New OpenCode chat**), over each
 agent's own Agent Client Protocol server: the pickers show that agent's models, efforts and modes,
-and approvals, diffs and `/resume` work the same. Two things differ there: a message sent while the
-agent is working waits for the turn to end, and the whole conversation is loaded at once rather than
-a page at a time. OpenCode's "always allow" lasts for the folder, not just the session. Claude
+and diffs and `/resume` work the same. An OpenCode chat asks when OpenCode's own permission settings
+say to, as cards, and its "always allow" lasts for the folder, not just the session. An AGY chat
+does not ask: it is started with `--dangerously-skip-permissions`, as AGY terminals here are. Two
+more things differ in both: a message sent while the agent is working waits for the turn to end,
+and the whole conversation is loaded at once rather than a page at a time. Claude
 chats need the native `claude.exe` and use the default login; Codex chats need `codex.exe`, AGY
 chats `agy.exe`, and OpenCode chats `opencode` on the path.
 

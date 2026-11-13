@@ -336,7 +336,8 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
   from the agent). The model, effort and mode pickers are the agent's own `configOptions` by
   category (`model`, `thought_level`, `mode`), so nothing about either agent's models is in
   this repo. The deck starts `"<agy.exe>" acp --dangerously-skip-permissions` and
-  `"<opencode.exe>" acp` (`HostManager.AgyChatCommand`/`OpenCodeChatCommand`; the npm
+  `"<opencode.exe>" acp` (`HostManager.AgyChatCommand`/`OpenCodeChatCommand`; with that flag
+  Antigravity sends no `session/request_permission`, so an AGY chat started here never asks; the npm
   `opencode.cmd` shim is followed to the exe behind it). The same command starts a conversation and comes back to one: the session id goes in
   `HostSpec.SessionId` and the translator loads it.
 - **What ACP does not have, by measurement:** no earlier page (`session/load` replays the whole

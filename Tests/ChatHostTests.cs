@@ -494,7 +494,7 @@ public class ChatHostTests : IDisposable
         Assert.True(_host!.WaitForExit(15000), "host did not exit after it was told to end");
     }
 
-    HostRecord Record() => JsonSerializer.Deserialize<HostRecord>(File.ReadAllText(Path.Combine(_dir, "hosts", "chattest0001.json")))!;
+    HostRecord Record() => HostManager.ReadRecord(Path.Combine(_dir, "hosts", "chattest0001.json")) ?? throw new IOException("the host record could not be read");
 
     async Task<HostRecord> RecordWhen(Func<HostRecord, bool> ready)
     {
