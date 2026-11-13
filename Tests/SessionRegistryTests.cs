@@ -237,4 +237,23 @@ public class SessionRegistryTests
         SessionRegistry.Snapshot(new[] { Session("same") });   // identical, seconds later
         Assert.Equal(first, File.GetLastWriteTimeUtc(RegistryFile));
     }
+
+    [Fact]
+    public void A_conversation_is_left_behind_when_its_host_names_another_and_no_host_names_it()
+    {
+        var before = new Dictionary<string, string> { ["h1"] = "A", ["h2"] = "B", ["h3"] = "", ["h4"] = "D", ["h5"] = "E" };
+        var now = new Dictionary<string, string>
+        {
+            ["h1"] = "X",   // moved: A is left
+            ["h2"] = "B",   // stayed
+            ["h3"] = "C",   // only just learned its id: nothing was left
+            ["h4"] = "",    // lost its id for a moment: D is not thrown away on that
+            ["h6"] = "F",   // new host
+        };                  // h5 went away with its conversation: ending a session is not moving it
+        Assert.Equal(new[] { "A" }, SessionRegistry.LeftBehind(before, now));
+        // Two hosts swap conversations, or one takes over another's: each is still held by a host.
+        Assert.Empty(SessionRegistry.LeftBehind(new Dictionary<string, string> { ["h1"] = "A", ["h2"] = "B" }, new Dictionary<string, string> { ["h1"] = "B", ["h2"] = "A" }));
+        Assert.Empty(SessionRegistry.LeftBehind(new Dictionary<string, string> { ["h1"] = "A" }, new Dictionary<string, string> { ["h1"] = "a" }));
+        Assert.Empty(SessionRegistry.LeftBehind(new Dictionary<string, string>(), now));
+    }
 }

@@ -44,6 +44,9 @@ internal sealed class HostSpec
     /// <summary>The permission mode and effort a restarted chat session had, put back once the CLI is up; empty to leave them as the CLI starts.</summary>
     public string RestoreMode { get; set; } = "";
     public string RestoreEffort { get; set; } = "";
+
+    /// <summary>The command that starts the CLI on another conversation in the same folder, with <see cref="ChatSessions.SessionPlaceholder"/> where its id goes; empty for a session that cannot switch.</summary>
+    public string ChatResumeCommand { get; set; } = "";
 }
 
 /// <summary>
@@ -147,6 +150,18 @@ internal static class HostProgram
     static readonly ChatStream _chat = new();
     static readonly object ChatInputLock = new();
     static readonly StringBuilder _chatErrors = new();
+    /// <summary>The conversation the CLI was last started on, its transcript, and the command that started it. The record's session id can run ahead of this: the CLI names its session at each turn.</summary>
+    static string _chatSession = "", _chatHistoryPath = "", _chatCommand = "";
+    /// <summary>Goes up each time the CLI is started on another conversation; a viewer that sees it change drops what it shows.</summary>
+    static int _chatEpoch;
+    /// <summary>Where the scrollback was last emptied: what it holds begins at a whole line unless it has dropped bytes since.</summary>
+    static long _ringFloor;
+    static readonly object SwapLock = new();
+    /// <summary>The conversation to start when the CLI ends, asked for by a viewer; null when its end is the session's end.</summary>
+    static string? _swapTo;
+    /// <summary>The conversation the CLI was just started on and has not yet introduced itself in (<see cref="ChatStream.Introduces"/>). It becomes the one served when it does; if the CLI ends before that, the one before it is started again and no viewer ever saw the change.</summary>
+    static Conversation? _unproven;
+    static volatile bool _swapping, _killRequested;
     static HostRecord _record = null!;
     static string _recordPath = "";
     static HostSpec _spec = new();
@@ -265,6 +280,7 @@ internal static class HostProgram
             // The CLI reports nothing until it is spoken to: a chat session starts out waiting for the person.
             _record.AgentStatus = "idle";
             _record.StatusAt = _record.StartedAt;
+            (_chatSession, _chatHistoryPath, _chatCommand) = (spec.SessionId, spec.HistoryPath, commandLine);
             var seed = ChatTranscript.Before(spec.HistoryPath, long.MaxValue, Math.Max(spec.RingBytes, 64 * 1024) / 2, int.MaxValue);
             _chatEarlier = seed.Next >= 0;
             foreach (var line in seed.Lines) AppendChatLine(line);
@@ -273,36 +289,27 @@ internal static class HostProgram
         ready.WriteLine("ready");
         ready.Flush();
 
-        var reader = new Thread(chat ? ChatReadLoop : ReadLoop) { IsBackground = true, Name = "pty-read" };
-        reader.Start();
+        Thread reader, waiter;
         if (chat)
         {
-            new Thread(DrainChatErrors) { IsBackground = true, Name = "chat-stderr" }.Start();
-            // What the CLI offers and what is in force, asked once so every viewer can be told without asking itself.
-            WriteChatInput(ChatStream.InitializeLine());
-            foreach (var line in ChatStream.RestoreLines(spec.RestoreMode, spec.RestoreEffort)) WriteChatInput(line);
-            WriteChatInput(ChatStream.SettingsLine());
+            // One thread sees the CLI through its life, and through each conversation it is started again on.
+            reader = waiter = new Thread(() => ChatSupervise(spec)) { IsBackground = true, Name = "chat-child" };
+            reader.Start();
         }
-        if (spec.InitialPrompt.Length > 0)
+        else
         {
-            if (chat) WriteChatInput(ChatStream.UserLine(spec.InitialPrompt));
-            else new Thread(() => TypeWhenQuiet(spec.InitialPrompt)) { IsBackground = true, Name = "initial-prompt" }.Start();
-        }
-        var waiter = new Thread(() =>
-        {
-            if (chat)
+            reader = new Thread(ReadLoop) { IsBackground = true, Name = "pty-read" };
+            reader.Start();
+            if (spec.InitialPrompt.Length > 0)
+                new Thread(() => TypeWhenQuiet(spec.InitialPrompt)) { IsBackground = true, Name = "initial-prompt" }.Start();
+            waiter = new Thread(() =>
             {
-                _exitCode = _pipe!.WaitForExit();
+                _exitCode = _pty.WaitForExit();
                 _exited = true;
-                // Something the CLI started can hold the output pipe open past the CLI's own exit; nothing more will be said on it.
-                if (!reader.Join(TimeSpan.FromSeconds(3))) _pipe.KillTree();
-                return;
-            }
-            _exitCode = _pty.WaitForExit();
-            _exited = true;
-            _pty.ClosePseudoConsole();
-        }) { IsBackground = true, Name = "pty-wait" };
-        waiter.Start();
+                _pty.ClosePseudoConsole();
+            }) { IsBackground = true, Name = "pty-wait" };
+            waiter.Start();
+        }
 
         var accept = Task.Run(() => AcceptLoop(listener));
         reader.Join();
@@ -412,14 +419,171 @@ internal static class HostProgram
         AppendAndSend(framed);
     }
 
-    static void ChatReadLoop()
+    /// <summary>The conversation a chat host's CLI runs: its id, the command that starts the CLI on it, its transcript, and what to call it.</summary>
+    sealed record Conversation(string Session, string Command, string HistoryPath, string Title);
+
+    /// <summary>
+    /// Sees the CLI through its life. A chat can be moved to another conversation; on pipes the CLI
+    /// cannot do that itself, so it is ended and started again on the one picked. The host, its
+    /// viewers and its tab stay: only the child and the scrollback change, and those only once the
+    /// CLI has introduced itself on the new conversation (<see cref="Serve(Conversation)"/>). If it
+    /// ends without doing so, the conversation before it is started again and a line says why, so
+    /// a bad pick never leaves a dead session.
+    /// </summary>
+    static void ChatSupervise(HostSpec spec)
+    {
+        string mode = spec.RestoreMode, effort = spec.RestoreEffort, prompt = spec.InitialPrompt;
+        while (true)
+        {
+            var pipe = _pipe!;
+            var reader = new Thread(() => ChatReadLoop(pipe)) { IsBackground = true, Name = "chat-read" };
+            var errors = new Thread(() => DrainChatErrors(pipe)) { IsBackground = true, Name = "chat-stderr" };
+            reader.Start();
+            errors.Start();
+            // What the CLI offers and what is in force, asked once so every viewer can be told without asking itself.
+            WriteChatInput(ChatStream.InitializeLine());
+            foreach (var line in ChatStream.RestoreLines(mode, effort)) WriteChatInput(line);
+            WriteChatInput(ChatStream.SettingsLine());
+            if (prompt.Length > 0) WriteChatInput(ChatStream.UserLine(prompt));
+            prompt = "";
+            // A kill that arrived while the CLI was between conversations found nothing to end.
+            if (_killRequested) pipe.KillTree();
+
+            uint code = pipe.WaitForExit();
+            // Something the CLI started can hold the output pipe open past the CLI's own exit; nothing more will be said on it.
+            if (!reader.Join(TimeSpan.FromSeconds(3))) pipe.KillTree();
+            reader.Join();
+            errors.Join(TimeSpan.FromSeconds(3));
+
+            string? picked;
+            Conversation? silent;
+            lock (SwapLock)
+            {
+                picked = _swapTo;
+                _swapTo = null;
+                silent = _unproven;
+                _unproven = null;
+            }
+            // The mode and effort are what the session was in a moment ago; the CLI that reported them is gone.
+            lock (_record) (mode, effort) = (_record.PermissionMode, _record.Effort);
+            bool started = false;
+            if (_killRequested) { }
+            else if (picked != null)
+                started = Begin(For(picked), true, "", pipe) || Begin(Current(), false, "Could not resume that conversation.", pipe);
+            else if (silent != null)
+            {
+                string said;
+                lock (_chatErrors) said = _chatErrors.ToString().Trim();
+                started = Begin(Current(), false, "Could not resume that conversation" + (said.Length > 0 ? ": " + said : "."), pipe);
+            }
+            if (started) continue;
+            lock (SwapLock)
+            {
+                _swapping = false;
+                _exitCode = code;
+                _exited = true;
+            }
+            return;
+        }
+    }
+
+    /// <summary>The conversation served now, as something to start the CLI on again. Once it has a transcript the CLI refuses to start a session under its id and resumes it instead; before that it is the other way round.</summary>
+    static Conversation Current()
+    {
+        string session, title, model;
+        lock (_record) { session = _record.SessionId; title = _record.Title; model = _record.Model; }
+        string path = ChatTranscriptPath();
+        bool resumable = _spec.ChatResumeCommand.Length > 0 && ChatSessions.IsSessionId(session) && File.Exists(path);
+        return new Conversation(session, resumable ? ChatSessions.Command(_spec.ChatResumeCommand, session, model) : _chatCommand, path, title);
+    }
+
+    static Conversation For(string session)
+    {
+        string model;
+        lock (_record) model = _record.Model;
+        string path = ChatSessions.TranscriptOf(Path.GetDirectoryName(_chatHistoryPath) ?? "", session);
+        return new Conversation(session, ChatSessions.Command(_spec.ChatResumeCommand, session, model), path, path.Length > 0 ? ChatSessions.Title(path) ?? "" : "");
+    }
+
+    /// <summary>
+    /// Starts the CLI on a conversation. One that is <paramref name="unproven"/> (another than the
+    /// one served) changes nothing a viewer sees until the CLI introduces itself. Otherwise it is the
+    /// conversation already served, started again after a pick that did not come up: the scrollback
+    /// stands, and <paramref name="note"/> is added to it and sent to the viewers as the answer to
+    /// their request. False when the CLI could not be started at all.
+    /// </summary>
+    static bool Begin(Conversation c, bool unproven, string note, PipeChild old)
+    {
+        if (c.Command.Length == 0) return false;
+        PipeChild fresh;
+        try { fresh = new PipeChild(c.Command, _spec.Cwd); }
+        catch (Exception ex) { Log($"start {c.Session}: {ex.Message}"); return false; }
+        lock (ChatInputLock) _pipe = fresh;
+        old.Dispose();
+        lock (_chatErrors) _chatErrors.Clear();
+        lock (_record)
+        {
+            _chat.NewConversation();
+            _record.ChildPid = fresh.Pid;
+            _record.AgentStatus = "idle";
+            _record.StatusAt = DateTime.UtcNow;
+            _record.LastTool = "";
+            _record.LastEvent = "";
+        }
+        _chatCommand = unproven ? _chatCommand : c.Command;
+        lock (SwapLock)
+        {
+            _unproven = unproven ? c : null;
+            if (!unproven) _swapping = false;
+        }
+        WriteRecord();
+        Log($"started on {c.Session} child={fresh.Pid} unproven={unproven}");
+        if (note.Length > 0)
+        {
+            AppendChatLine(ChatStream.HostLine("stderr", note));
+            Broadcast(true, ChatSessions.RefusedFrame("", note));
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// The CLI has introduced itself on the conversation it was started on, so that is the one this host serves
+    /// from here: the record names it, the scrollback is emptied and filled from its transcript, and
+    /// every viewer is told to start over (a snapshot with a new epoch).
+    /// </summary>
+    static void Serve(Conversation c)
+    {
+        var seed = ChatTranscript.Before(c.HistoryPath, long.MaxValue, Math.Max(_spec.RingBytes, 64 * 1024) / 2, int.MaxValue);
+        lock (_record)
+        {
+            _record.SessionId = c.Session;
+            _record.TranscriptPath = c.HistoryPath;
+            _record.CommandLine = c.Command;
+            _record.Title = c.Title;
+        }
+        (_chatSession, _chatHistoryPath, _chatCommand) = (c.Session, c.HistoryPath, c.Command);
+        lock (ClientsLock)
+        {
+            _chatEarlier = seed.Next >= 0;
+            _ringFloor = _ring.Clear();
+            _chatEpoch++;
+            byte[] snapshot = Encoding.UTF8.GetBytes(SnapshotJson(_ringFloor, _ringFloor, c.Title, 0, 0, ChatStream.Kind, ChatStream.Revision, c.Session, _chatEarlier, _chatEpoch));
+            foreach (var client in Clients) client.Out.Writer.TryWrite((true, snapshot));
+            foreach (var line in seed.Lines) AppendChatLine(line);
+        }
+        lock (SwapLock) _swapping = false;
+        WriteRecord();
+        Log($"serving {c.Session} epoch={_chatEpoch}");
+    }
+
+    static void ChatReadLoop(PipeChild pipe)
     {
         var buf = new byte[65536];
         var partial = new MemoryStream();
         while (true)
         {
             int n;
-            try { n = _pipe!.Output.Read(buf, 0, buf.Length); }
+            try { n = pipe.Output.Read(buf, 0, buf.Length); }
             catch { break; }
             if (n <= 0) break;
             int from = 0;
@@ -449,6 +613,17 @@ internal static class HostProgram
         {
             using var doc = JsonDocument.Parse(line);
             var root = doc.RootElement;
+            Conversation? proven = null;
+            bool unproven;
+            lock (SwapLock)
+            {
+                unproven = _unproven != null;
+                if (unproven && ChatStream.Introduces(root)) (proven, _unproven) = (_unproven, null);
+            }
+            if (proven != null) Serve(proven);
+            // What a CLI says before it has introduced itself is not part of the conversation still served: one that
+            // cannot come up says only why, and that is told once it has ended.
+            else if (unproven) return;
             lock (_record)
             {
                 string title = _record.Title;
@@ -463,7 +638,9 @@ internal static class HostProgram
         }
         catch (JsonException)
         {
-            AppendChatLine(ChatStream.HostLine("output", Encoding.UTF8.GetString(line)));
+            bool unproven;
+            lock (SwapLock) unproven = _unproven != null;
+            if (!unproven) AppendChatLine(ChatStream.HostLine("output", Encoding.UTF8.GetString(line)));
             return;
         }
         if (change.Record) WriteRecord();
@@ -487,13 +664,13 @@ internal static class HostProgram
     }
 
     /// <summary>What the CLI says outside the protocol: kept to its last few kilobytes, shown when it ends.</summary>
-    static void DrainChatErrors()
+    static void DrainChatErrors(PipeChild pipe)
     {
         var buf = new byte[4096];
         while (true)
         {
             int n;
-            try { n = _pipe!.Error.Read(buf, 0, buf.Length); }
+            try { n = pipe.Error.Read(buf, 0, buf.Length); }
             catch { break; }
             if (n <= 0) break;
             lock (_chatErrors)
@@ -609,7 +786,7 @@ internal static class HostProgram
                 (long start, byte[] data) = _ring.Since(after);
                 long end = start + data.Length;
                 string snapshot = _pipe != null
-                    ? SnapshotJson(start, end, _record.Title, 0, 0, ChatStream.Kind, ChatStream.Revision, _record.SessionId, _chatEarlier || _ring.Start > 0)
+                    ? SnapshotJson(start, end, _record.Title, 0, 0, ChatStream.Kind, ChatStream.Revision, _record.SessionId, _chatEarlier || _ring.Start > _ringFloor, _chatEpoch, start > _ringFloor)
                     : SnapshotJson(start, end, _record.Title, _pty.Cols, _pty.Rows);
                 client.Out.Writer.TryWrite((true, Encoding.UTF8.GetBytes(snapshot)));
                 if (data.Length > 0) client.Out.Writer.TryWrite((false, data));
@@ -675,6 +852,14 @@ internal static class HostProgram
                     if (_pipe == null) return;
                     SendHistory(client, root);
                     break;
+                case "sessions":
+                    if (_pipe == null) return;
+                    SendSessions(client, root);
+                    break;
+                case "resume":
+                    if (_pipe == null) return;
+                    RequestResume(client, root);
+                    break;
                 case "input":
                     if (_exited) return;
                     if (_pipe != null)
@@ -694,6 +879,8 @@ internal static class HostProgram
                     }
                     break;
                 case "kill":
+                    // Said first: the CLI ending is otherwise read as making way for another conversation, when one was asked for.
+                    _killRequested = true;
                     if (_pipe != null) _pipe.KillTree(); else _pty.KillTree();
                     break;
             }
@@ -737,16 +924,17 @@ internal static class HostProgram
 
     /// <summary>The first text frame of an attach: where the bytes that follow start in the ring, and the pty's size so a viewer that may not resize can render it.</summary>
     /// <summary>For a chat host, <paramref name="chat"/> says what it can do, <paramref name="session"/> names the conversation, which a viewer keys an unsent draft by, and <paramref name="earlier"/> says the transcript goes back further than the scrollback did at its start.</summary>
-    internal static string SnapshotJson(long start, long end, string title, int cols, int rows, string kind = "", int chat = 0, string session = "", bool earlier = false) =>
-        JsonSerializer.Serialize(new { type = "snapshot", start, end, title, cols, rows, kind, chat, session, earlier });
+    /// <summary><paramref name="epoch"/> changes when a chat host moves to another conversation: what a viewer shows is then of a conversation no longer here. <paramref name="cut"/> says the bytes that follow may begin mid-line.</summary>
+    internal static string SnapshotJson(long start, long end, string title, int cols, int rows, string kind = "", int chat = 0, string session = "", bool earlier = false, int epoch = 0, bool cut = false) =>
+        JsonSerializer.Serialize(new { type = "snapshot", start, end, title, cols, rows, kind, chat, session, earlier, epoch, cut });
 
     /// <summary>The transcript of the conversation this host runs now: beside the one it started with, under the id the CLI last reported.</summary>
     static string ChatTranscriptPath()
     {
-        string dir = Path.GetDirectoryName(_spec.HistoryPath) ?? "";
+        string dir = Path.GetDirectoryName(_chatHistoryPath) ?? "";
         string session;
         lock (_record) session = _record.SessionId;
-        return dir.Length == 0 || session.Length == 0 || session == _spec.SessionId ? _spec.HistoryPath : Path.Combine(dir, session + ".jsonl");
+        return dir.Length == 0 || session.Length == 0 || session == _chatSession ? _chatHistoryPath : Path.Combine(dir, session + ".jsonl");
     }
 
     /// <summary>
@@ -761,7 +949,7 @@ internal static class HostProgram
         string request = Text(ask, "request");
         long before = ask.TryGetProperty("before", out var b) && b.ValueKind == JsonValueKind.Number && b.TryGetInt64(out var at) ? at : -1;
         string uuid = Text(ask, "uuid");
-        string[] paths = { ChatTranscriptPath(), _spec.HistoryPath };
+        string[] paths = { ChatTranscriptPath(), _chatHistoryPath };
         _ = Task.Run(() =>
         {
             try
@@ -776,6 +964,55 @@ internal static class HostProgram
                 client.Out.Writer.TryWrite((true, ChatStream.HistoryFrame(new ChatTranscript.Page(new List<byte[]>(), -1), request)));
             }
         });
+    }
+
+    /// <summary><c>{"type":"sessions","request":"…"}</c>: the conversations in this session's folder, answered to the asking viewer alone.</summary>
+    static void SendSessions(Client client, JsonElement ask)
+    {
+        string request = Text(ask, "request");
+        string dir = Path.GetDirectoryName(_chatHistoryPath) ?? "";
+        string current;
+        int child;
+        lock (_record) { current = _record.SessionId; child = _record.ChildPid; }
+        _ = Task.Run(() =>
+        {
+            var entries = new List<ChatSessions.Entry>();
+            try { entries = ChatSessions.List(dir, current, ChatSessions.LiveElsewhere(SessionScanner.SessionsDirectory, child)); }
+            catch (Exception ex) { Log($"sessions: {ex.Message}"); }
+            client.Out.Writer.TryWrite((true, ChatSessions.ListFrame(request, current, entries)));
+        });
+    }
+
+    /// <summary>
+    /// <c>{"type":"resume","request":"…","session":"…"}</c>: move this chat to another conversation
+    /// in its folder. Refused, with the reason, to the asking viewer alone; carried out by ending
+    /// the CLI, which <see cref="ChatSupervise"/> then starts again on the conversation picked.
+    /// </summary>
+    static void RequestResume(Client client, JsonElement ask)
+    {
+        string request = Text(ask, "request"), session = Text(ask, "session");
+        string path = ChatSessions.TranscriptOf(Path.GetDirectoryName(_chatHistoryPath) ?? "", session);
+        string refusal = "";
+        lock (_record)
+        {
+            if (_spec.ChatResumeCommand.Length == 0) refusal = "This session cannot switch conversations. Restart it and try again.";
+            else if (path.Length == 0) refusal = "That conversation is not in this folder.";
+            else if (string.Equals(session, _record.SessionId, StringComparison.OrdinalIgnoreCase)) refusal = "That conversation is the one open here.";
+            else if (_record.AgentStatus is "busy" or "waiting") refusal = "Stop the current turn first.";
+        }
+        if (refusal.Length == 0)
+            lock (SwapLock)
+            {
+                if (_exited || _killRequested || _swapping) refusal = "The session is already changing.";
+                else { _swapTo = session; _swapping = true; }
+            }
+        if (refusal.Length > 0)
+        {
+            client.Out.Writer.TryWrite((true, ChatSessions.RefusedFrame(request, refusal)));
+            return;
+        }
+        Log($"resume asked: {session}");
+        _pipe!.KillTree();
     }
 
     internal static string SizeJson(int cols, int rows) =>

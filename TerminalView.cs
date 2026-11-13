@@ -13,7 +13,8 @@ internal sealed class TerminalView
 {
     readonly DeckBrowser _browser;
 
-    public HostRecord Host { get; }
+    /// <summary>The host's record as last read. A host outlives the conversation it started with (a chat moved to another one, a <c>/resume</c> typed in a terminal), so what names the session here has to follow it.</summary>
+    public HostRecord Host { get; private set; }
     public string Title { get; private set; }
     public bool Exited { get; private set; }
 
@@ -26,6 +27,15 @@ internal sealed class TerminalView
         Host = host;
         Title = string.IsNullOrWhiteSpace(host.Title) ? DefaultTitle(host) : host.Title;
         Exited = host.HasExited;
+    }
+
+    /// <summary>Takes a newer reading of the same host's record. True when it names another conversation or another child than the one held.</summary>
+    public bool Follow(HostRecord host)
+    {
+        if (host.Id != Host.Id) return false;
+        bool moved = host.SessionId != Host.SessionId || host.ChildPid != Host.ChildPid;
+        Host = host;
+        return moved;
     }
 
     static string DefaultTitle(HostRecord h) =>

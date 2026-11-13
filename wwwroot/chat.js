@@ -456,6 +456,38 @@
       .map(x => x.c);
   }
 
+  // What the pane itself answers to, beside what the CLI offers. On pipes the CLI refuses /resume (its picker is
+  // drawn in a terminal), so a host that can move to another conversation gets the command from here.
+  const RESUME = { name: 'resume', description: 'Resume a conversation from this folder', hint: '' };
+  function offeredCommands(commands, hostRevision) {
+    if (hostRevision < 4) return commands;
+    return [RESUME].concat(commands.filter(c => c.name !== RESUME.name));
+  }
+
+  // The conversations whose name holds every word typed, in the order given (newest first).
+  function filterSessions(sessions, typed) {
+    const words = typed.toLowerCase().split(/\s+/).filter(Boolean);
+    if (!words.length) return sessions;
+    return sessions.filter(s => { const t = (s.title || '').toLowerCase(); return words.every(w => t.includes(w)); });
+  }
+
+  // How long ago, as a person would say it at a glance.
+  function ago(at, now) {
+    const minutes = Math.max(0, Math.floor((now - at) / 60000));
+    if (minutes < 1) return 'just now';
+    if (minutes < 60) return `${minutes}m ago`;
+    if (minutes < 24 * 60) return `${Math.floor(minutes / 60)}h ago`;
+    const days = Math.floor(minutes / (24 * 60));
+    if (days < 30) return `${days}d ago`;
+    return new Date(at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  }
+
+  // Whether a snapshot means "drop what is shown": the scrollback no longer continues from the last byte seen,
+  // or the host has moved to another conversation (its epoch changed) and may be answering from that same byte.
+  function startsOver(seq, epoch, snapshot) {
+    return snapshot.start !== seq || (snapshot.epoch || 0) !== epoch;
+  }
+
   // Which entry of the model list is the one in force. The session reports the full model id; the list is keyed by
   // alias, and two aliases can name the same model, so the one last picked here wins, then a named alias over "default".
   function modelInForce(models, model, picked) {
@@ -580,7 +612,7 @@
     return modes;
   }
 
-  const api = { ChatModel, LineReader, Wire, toolBrief, textOf, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText, liveStep, taskRunning, asks };
+  const api = { ChatModel, LineReader, Wire, toolBrief, textOf, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText, liveStep, taskRunning, asks, offeredCommands, filterSessions, ago, startsOver };
   if (typeof module !== 'undefined' && module.exports) { module.exports = api; return; }
 
   // ================= the page side =================
@@ -651,6 +683,9 @@
     let ws = null, seq = 0, reader = new LineReader(false), closed = false, retries = 0, connected = false, frame = 0;
     // Earlier conversation: whether this host pages it, whether a page was already put in, and the request out now.
     let hostPages = false, paged = false, asked = '', nextAsk = 1, draftKey = '';
+    // The host's conversation counter and what it can do; the list of conversations while one is being picked;
+    // and the conversation asked for until the host has moved to it or said it will not.
+    let epoch = 0, hostRevision = 0, choosing = null, resuming = '';
 
     el.classList.add('chat');
     const scroll = h('div', 'chat-scroll');
@@ -759,6 +794,7 @@
       el.dataset.state = state;
       working.hidden = state !== 'busy';
       stateText.textContent = preparing ? 'Preparing image…'
+        : resuming ? 'Resuming…'
         : state === 'waiting' ? 'Answer required'
         : state === 'ended' ? (model.ended === '' ? 'Session ended' : `Session ended (exit ${model.ended})`)
         : state === 'offline' ? 'Reconnecting…'
@@ -771,8 +807,9 @@
         action.setAttribute('aria-label', stop ? 'Stop' : 'Send');
         action.title = stop ? 'Stop (Esc)' : 'Send (Enter)';
       }
-      action.disabled = state === 'ended' || state === 'offline' || preparing || (!stop && nothing);
+      action.disabled = state === 'ended' || state === 'offline' || preparing || !!resuming || !!choosing || (!stop && nothing);
       input.disabled = state === 'ended';
+      input.placeholder = !choosing ? 'Message Claude' : opts.touch ? 'Type to filter' : 'Type to filter, Enter to open, Esc to close';
       paintPickers(state);
     }
 
@@ -1178,7 +1215,7 @@
     }
 
     function takeDraft(session) {
-      if (draftKey || !session) return;
+      if (!session || draftKey === DRAFT_PREFIX + session) return;
       draftKey = DRAFT_PREFIX + session;
       let kept = '';
       try { kept = localStorage.getItem(draftKey) || ''; } catch { }
@@ -1212,7 +1249,8 @@
     async function submit() {
       const text = input.value.trim();
       const taken = shots.filter(s => !s.error);
-      if ((!text && !taken.length) || preparing) return;
+      if ((!text && !taken.length) || preparing || resuming) return;
+      if (text === '/' + RESUME.name && !taken.length && hostRevision >= 4) { openPicker(); return; }
       let images = [];
       if (taken.length) {
         preparing = true;
@@ -1315,9 +1353,109 @@
 
     // ---- the command menu ----
 
+    // ---- another conversation ----
+
+    // The list is the host's: it reads the folder the session runs in. The message box is the filter while it is open.
+    function openPicker() {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      choosing = { request: 'p' + nextAsk++, sessions: null, active: 0 };
+      ws.send(JSON.stringify({ type: 'sessions', request: choosing.request }));
+      input.value = '';
+      keepDraft();
+      grow();
+      paintMenu();
+      paintStatus();
+      input.focus();
+    }
+
+    function closePicker() {
+      if (!choosing) return;
+      choosing = null;
+      input.value = '';
+      grow();
+      paintMenu();
+      paintStatus();
+    }
+
+    function gotSessions(msg) {
+      if (!choosing || msg.request !== choosing.request) return;
+      choosing.sessions = Array.isArray(msg.sessions) ? msg.sessions : [];
+      paintMenu();
+    }
+
+    function resume(session) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      ws.send(JSON.stringify({ type: 'resume', request: 'r' + nextAsk++, session: session.id }));
+      resuming = session.id;
+      closePicker();
+    }
+
+    // Not carried out: the host says why. A pick that did not come up is also a line in the conversation, which says it there.
+    function notResumed(msg) {
+      resuming = '';
+      if (msg.request && msg.error) model.add({ kind: 'note', tone: 'error', text: String(msg.error) });
+      paintStatus();
+    }
+
+    function paintPicker() {
+      const shown = choosing.sessions ? filterSessions(choosing.sessions, input.value) : [];
+      if (choosing.active >= shown.length) choosing.active = 0;
+      menu.hidden = false;
+      menu.textContent = '';
+      menu.classList.add('resume');
+      const head = h('div', 'resume-head');
+      head.appendChild(h('span', 'resume-heading', 'Resume a conversation'));
+      const close = h('button', 'resume-close', 'Close');
+      close.type = 'button';
+      close.addEventListener('mousedown', ev => ev.preventDefault());
+      close.addEventListener('click', () => { closePicker(); input.focus(); });
+      head.appendChild(close);
+      menu.appendChild(head);
+      if (!shown.length) {
+        menu.appendChild(h('div', 'resume-empty', !choosing.sessions ? 'Looking for conversations…'
+          : choosing.sessions.length ? 'Nothing matches.' : 'No other conversations in this folder.'));
+        return;
+      }
+      const now = Date.now();
+      shown.forEach((session, i) => {
+        const row = h('button', 'slash-option resume-row' + (i === choosing.active ? ' active' : ''));
+        row.type = 'button';
+        row.tabIndex = -1;
+        row.setAttribute('role', 'option');
+        row.setAttribute('aria-selected', String(i === choosing.active));
+        row.dataset.session = session.id;
+        row.appendChild(h('span', 'resume-title', session.title || 'Untitled conversation'));
+        const meta = h('span', 'resume-meta');
+        if (session.live) meta.appendChild(h('span', 'resume-live', 'open in another session'));
+        meta.appendChild(h('span', 'resume-when', ago(session.at, now)));
+        row.appendChild(meta);
+        row.title = session.title || '';
+        row.addEventListener('mousedown', ev => ev.preventDefault());
+        row.addEventListener('click', () => resume(session));
+        menu.appendChild(row);
+      });
+      const active = menu.querySelector('.resume-row.active');
+      if (active) active.scrollIntoView({ block: 'nearest' });
+    }
+
+    function pickerKey(ev) {
+      if (!choosing || ev.isComposing) return false;
+      const shown = choosing.sessions ? filterSessions(choosing.sessions, input.value) : [];
+      if (ev.key === 'ArrowDown' && shown.length) choosing.active = (choosing.active + 1) % shown.length;
+      else if (ev.key === 'ArrowUp' && shown.length) choosing.active = (choosing.active - 1 + shown.length) % shown.length;
+      else if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); if (shown[choosing.active]) resume(shown[choosing.active]); return true; }
+      else if (ev.key === 'Escape') { ev.preventDefault(); closePicker(); return true; }
+      else return false;
+      ev.preventDefault();
+      paintMenu();
+      return true;
+    }
+
     function paintMenu() {
+      if (choosing) { paintPicker(); return; }
+      menu.classList.remove('resume');
       const query = commandQuery(input.value);
-      menuItems = query === null || menuClosedFor === input.value ? [] : matchCommands(model.catalog.commands, query);
+      menuItems = query === null || menuClosedFor === input.value ? [] : matchCommands(offeredCommands(model.catalog.commands, hostRevision), query);
       if (menuClosedFor !== null && menuClosedFor !== input.value) menuClosedFor = null;
       if (menuActive >= menuItems.length) menuActive = 0;
       menu.hidden = menuItems.length === 0;
@@ -1367,8 +1505,16 @@
       return true;
     }
 
-    input.addEventListener('input', () => { menuActive = 0; grow(); paintMenu(); paintStatus(); keepDraft(); });
+    input.addEventListener('input', () => {
+      menuActive = 0;
+      grow();
+      // While a conversation is being picked the box is the filter, not a message being written.
+      if (choosing) choosing.active = 0; else keepDraft();
+      paintMenu();
+      paintStatus();
+    });
     input.addEventListener('keydown', ev => {
+      if (pickerKey(ev)) return;
       if (menuKey(ev)) return;
       // On a touch keyboard Return is a new line, as in any message box there; the button sends.
       if (ev.key === 'Enter' && !opts.touch && !ev.shiftKey && !ev.ctrlKey && !ev.altKey && !ev.isComposing) { ev.preventDefault(); submit(); }
@@ -1377,7 +1523,7 @@
     input.addEventListener('focus', () => { if (opts.onFocus) opts.onFocus(); });
     // A tap on one of the menu's rows can take the focus for a moment on a touch screen: the menu closes only if the focus stays away.
     input.addEventListener('blur', () => setTimeout(() => {
-      if (document.activeElement !== input && !menu.hidden) { menuClosedFor = input.value; paintMenu(); }
+      if (document.activeElement !== input && !menu.hidden && !choosing) { menuClosedFor = input.value; paintMenu(); }
     }, 250));
     action.addEventListener('click', () => { if (action.classList.contains('stop')) interrupt(); else submit(); input.focus(); });
     el.addEventListener('keydown', ev => {
@@ -1401,7 +1547,12 @@
           let msg;
           try { msg = JSON.parse(ev.data); } catch { return; }
           if (msg.type === 'snapshot') {
-            if (msg.start !== seq) { model.reset(); reader = new LineReader(msg.start > 0); paged = false; }
+            // A host that can move between conversations says whether what follows begins mid-line; before that, a
+            // scrollback that did not start at its first byte always might.
+            if (startsOver(seq, epoch, msg)) { model.reset(); reader = new LineReader(msg.cut !== undefined ? !!msg.cut : msg.start > 0); paged = false; }
+            if ((msg.epoch || 0) !== epoch) resuming = '';
+            epoch = msg.epoch || 0;
+            hostRevision = msg.chat || 0;
             seq = msg.start;
             // `start` says nothing about what came before: a viewer that reattaches asks for what follows the
             // last byte it has, and is answered from there. The host says whether its transcript goes back further.
@@ -1411,6 +1562,8 @@
             if (msg.title) post({ type: 'title', id, title: msg.title });
           } else if (msg.type === 'live') model.live(msg.line);
           else if (msg.type === 'history') { gotEarlier(msg); return; }
+          else if (msg.type === 'sessions') { gotSessions(msg); return; }
+          else if (msg.type === 'resumed') notResumed(msg);
           else if (msg.type === 'catalog') { model.setCatalog(msg); paintMenu(); }
           else if (msg.type === 'settings') { hostTakesImages = true; model.setSettings(msg); }
           else if (msg.type === 'title') post({ type: 'title', id, title: msg.title });
@@ -1428,6 +1581,8 @@
         ws = null;
         connected = false;
         asked = '';
+        resuming = '';
+        closePicker();
         schedule();
         if (closed) return;
         if (openedAt && Date.now() - openedAt > 15000) retries = 0;

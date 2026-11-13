@@ -186,6 +186,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     readonly DateTime _openedAtUtc = DateTime.UtcNow;
     readonly DispatcherTimer _saveSoon = new() { Interval = TimeSpan.FromMilliseconds(600) };
     string _sessionMap = "";
+    Dictionary<string, string> _chatSessions = new();
 
     void SaveLayoutSoon() { _layoutSave.Stop(); _layoutSave.Start(); }
     void SaveSoon() { _saveSoon.Stop(); _saveSoon.Start(); }
@@ -1043,7 +1044,12 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             foreach (var (h, s) in byHost)
             {
                 seen.Add(h.Id);
-                if (_rowsById.TryGetValue(h.Id, out var row)) propertyChanges += row.Update(s, h);
+                if (_rowsById.TryGetValue(h.Id, out var row))
+                {
+                    propertyChanges += row.Update(s, h);
+                    // The tab names the session too (its tooltip, and what "end session" takes out of the saved set).
+                    if (Deck.FindByHost(h.Id) is { } open && open.View.Follow(h)) open.Raise(nameof(DeckPane.DeckTab.Tooltip));
+                }
                 else
                 {
                     row = new SessionRow(h, s);
@@ -1078,6 +1084,11 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             s => rowOf.TryGetValue(s, out var r) && r.State is SessionState.Completed or SessionState.Idle ? r.LastChanged : null,
             s => rowOf.TryGetValue(s, out var r) ? r.Host.Profile : "",
             s => rowOf.TryGetValue(s, out var r) ? r.Host.Kind : "");
+        // A chat moved to another conversation has left the one before it: that one is no longer a session of
+        // this deck, and must not come back with it after a reboot.
+        var chats = Rows.Where(r => r.Host.IsChat && !r.Host.HasExited).ToDictionary(r => r.Host.Id, r => r.LiveSessionId);
+        foreach (string left in SessionRegistry.LeftBehind(_chatSessions, chats)) SessionRegistry.Forget(left);
+        _chatSessions = chats;
         SaveLayoutIfSessionsMoved();
         ApplyReadLedger();
         SyncFrontRow();

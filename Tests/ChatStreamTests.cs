@@ -147,6 +147,11 @@ public class ChatStreamTests : IDisposable
         Assert.Equal("", chat.CatalogFrame());
         var introduction = Line(Introduction.Replace("LONG", new string('x', 400)));
         Assert.True(ChatStream.AnswersTheHost(introduction));
+        // That answer is the sign the CLI came up; what a CLI that cannot resume says instead is not, and nor is any other answer.
+        Assert.True(ChatStream.Introduces(introduction));
+        Assert.False(ChatStream.Introduces(Line("""{"type":"result","subtype":"error_during_execution","is_error":true,"errors":["No conversation found with session ID: x"]}""")));
+        Assert.False(ChatStream.Introduces(Line("""{"type":"control_response","response":{"subtype":"error","request_id":"sd-initialize","error":"no"}}""")));
+        Assert.False(ChatStream.Introduces(Line("""{"type":"control_response","response":{"subtype":"success","request_id":"sd-settings","response":{}}}""")));
         Assert.False(chat.Durable(introduction));
         var change = chat.Apply(introduction, record, T0);
         // The record changes too: it now carries the mode, which a restart has to put back.

@@ -259,6 +259,38 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
   refused with "Session ID … is already in use", while `--resume` works and takes messages
   (measured, 2.1.323: set the file aside and `--session-id` works again). A terminal still resumes
   only with a `user` line.
+- **`/resume` is the host's, not the CLI's** (`Host/ChatSessions.cs`, `ChatSupervise` in
+  `HostProgram.cs`). On pipes the CLI refuses it (`commandOutcome: unavailable_headless`): its
+  picker is drawn in a terminal. So the pane offers the command itself to a revision 4 host and
+  never sends it. `{"type":"sessions","request"}` lists the conversations in the session's
+  project folder (every transcript with something said in it, newest first, named by
+  `custom-title`, else `ai-title`, else the first prompt; only the two ends of each file are
+  read), marking ones another live CLI has open (`~/.claude/sessions`). They stay pickable:
+  resuming a conversation that is still open in a terminal works, as does resuming one a terminal
+  session wrote (measured, 2.1.323).
+- **A chat moves to another conversation by restarting its CLI under the same host.**
+  `{"type":"resume","request","session"}` is refused with a `resumed {ok:false,error}` frame when
+  the id is not a session id, has no transcript in the folder, is the one open, or a turn is
+  running. Otherwise the host ends the CLI and starts it on `HostSpec.ChatResumeCommand` (the
+  spawner's resume form, `{SD_CHAT_SESSION}` replaced; the launch command is never edited) with
+  the chat's model last and its mode and effort put back. The host id, port, tab and viewers
+  stay.
+- **Nothing changes for a viewer until the new CLI introduces itself.** A CLI that cannot resume
+  says one `result error_during_execution`, the reason on stderr, and exits; a healthy one
+  answers `initialize` first (`ChatStream.Introduces`). Until that answer the conversation is
+  unproven: its lines are dropped, and if it ends, the conversation before it is started again
+  with a line saying why. On the answer the host serves it: the record names it, the ring is
+  emptied (`Ring.Clear`, sequence numbers go on) and seeded from its transcript, and every viewer
+  gets a snapshot with a new `epoch`. A viewer starts over on a new epoch even when `start`
+  equals the byte it had reached (`startsOver` in `chat.js`); `cut` says whether the bytes begin
+  mid-line, since after an emptying `start > 0` no longer means that.
+- **A `kill` is said before the CLI is ended** (`_killRequested`): otherwise the CLI going away
+  could be read as making way for another conversation.
+- **The deck follows a host whose conversation changed.** `TerminalView.Follow` takes each new
+  reading of the record, so a tab's tooltip and "end session" name the conversation open now, and
+  `SessionRegistry.LeftBehind` takes the one a chat host moved away from out of the saved set at
+  once (it would otherwise come back after a reboot inside the ten minutes a vanished session is
+  kept).
 - **An unsent message is kept by conversation.** The pane stores the box under
   `sd.chat.draft:<session id>` in `localStorage` (the deck names the session in its `open`
   message, a revision 3 host in its snapshot), so a restart under a half-typed message gives it
@@ -284,8 +316,8 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
   (`socketUrl`), exactly as `mobile.html` does for a terminal; the app's `ChatScreen` is a web
   view around it. A chat pane change therefore reaches phones with the deck update, not an app
   build. `CatalogEntry.MobileReady` stays false for a chat (an older app must not open it as a
-  terminal) and `ChatReady` says this gateway relays it. `AttachRelay` forwards `input` and
-  `history` (a request to read, which changes nothing), which is everything a chat sends.
+  terminal) and `ChatReady` says this gateway relays it. `AttachRelay` forwards `input`,
+  `history`, `sessions` and `resume`, which is everything a chat sends.
 - **Phone differences live behind `opts.touch`:** Return is a new line and the button sends, an
   attach button stands in for paste, and under 600 px the pickers use one-word labels because
   three full ones do not fit.

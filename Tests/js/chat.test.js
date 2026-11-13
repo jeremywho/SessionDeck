@@ -2,7 +2,7 @@
 // The lines here are shaped like the ones Claude Code 2.1.322 wrote in stream-json mode, cut down to the fields the pane reads.
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { ChatModel, LineReader, Wire, toolBrief, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText, liveStep, taskRunning, asks: asksPerson } = require('../../wwwroot/chat.js');
+const { ChatModel, LineReader, Wire, toolBrief, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText, liveStep, taskRunning, asks: asksPerson, offeredCommands, filterSessions, ago, startsOver } = require('../../wwwroot/chat.js');
 
 const init = { type: 'system', subtype: 'init', session_id: 's1', model: 'claude-haiku-5-5' };
 const echo = text => ({ type: 'user', isReplay: true, message: { role: 'user', content: text }, parent_tool_use_id: null });
@@ -651,4 +651,50 @@ test('a run of calls split by where a page ends is one run once the page is in',
   apart.durable(old(500, used('t3', 'Read', {})));
   apart.prepend([old(200, used('t1', 'Read', {})), old(300, said('Now the next.'))], null);
   assert.deepEqual(kinds(apart), ['tools', 'assistant', 'tools']);
+});
+
+test('/resume is offered by the pane, first, to a host that can move between conversations', () => {
+  const cli = [{ name: 'compact', description: 'Summarize' }, { name: 'context', description: 'Show context' }];
+  // The CLI does not list it on pipes; a host from before it could move gets nothing added.
+  assert.deepEqual(offeredCommands(cli, 3).map(c => c.name), ['compact', 'context']);
+  assert.deepEqual(offeredCommands(cli, 4).map(c => c.name), ['resume', 'compact', 'context']);
+  assert.equal(offeredCommands(cli, 4)[0].hint, '');
+  // Should the CLI ever list one of its own, there is still one, and it is the pane's.
+  const both = offeredCommands(cli.concat([{ name: 'resume', description: 'the CLI one' }]), 4);
+  assert.deepEqual(both.map(c => c.name), ['resume', 'compact', 'context']);
+  assert.notEqual(both[0].description, 'the CLI one');
+  assert.deepEqual(matchCommands(offeredCommands(cli, 4), 'res').map(c => c.name), ['resume']);
+});
+
+test('the list of conversations is narrowed by every word typed, in the order it came', () => {
+  const list = [{ id: 'a', title: 'Fix the login bug' }, { id: 'b', title: 'Bees and wasps' }, { id: 'c', title: '' }, { id: 'd', title: 'login page copy' }];
+  assert.deepEqual(filterSessions(list, '').map(s => s.id), ['a', 'b', 'c', 'd']);
+  assert.deepEqual(filterSessions(list, '   ').map(s => s.id), ['a', 'b', 'c', 'd']);
+  assert.deepEqual(filterSessions(list, 'LOGIN').map(s => s.id), ['a', 'd']);
+  assert.deepEqual(filterSessions(list, 'bug login').map(s => s.id), ['a']);
+  assert.deepEqual(filterSessions(list, 'zebra').map(s => s.id), []);
+});
+
+test('when a conversation was last touched is said the way a person would', () => {
+  const now = Date.UTC(2026, 10, 12, 12, 0, 0), minute = 60000, hour = 60 * minute, day = 24 * hour;
+  assert.equal(ago(now - 20000, now), 'just now');
+  assert.equal(ago(now + 5000, now), 'just now');
+  assert.equal(ago(now - 59 * minute, now), '59m ago');
+  assert.equal(ago(now - 60 * minute, now), '1h ago');
+  assert.equal(ago(now - 23 * hour - 59 * minute, now), '23h ago');
+  assert.equal(ago(now - day, now), '1d ago');
+  assert.equal(ago(now - 29 * day, now), '29d ago');
+  assert.match(ago(now - 45 * day, now), /2026/);
+});
+
+test('a viewer starts over when the scrollback does not go on from its last byte, or the host moved to another conversation', () => {
+  // Caught up, same conversation: what follows is appended.
+  assert.equal(startsOver(500, 0, { start: 500, epoch: 0 }), false);
+  // A host from before conversations could change says no epoch at all.
+  assert.equal(startsOver(500, 0, { start: 500 }), false);
+  assert.equal(startsOver(500, 0, { start: 900 }), true);
+  // The host moved while this viewer was away and answers from the very byte it had reached: still another conversation.
+  assert.equal(startsOver(500, 0, { start: 500, epoch: 1 }), true);
+  assert.equal(startsOver(500, 1, { start: 500, epoch: 1 }), false);
+  assert.equal(startsOver(0, 0, { start: 0, epoch: 3 }), true);
 });

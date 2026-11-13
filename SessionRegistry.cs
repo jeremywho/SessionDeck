@@ -83,6 +83,22 @@ internal static class SessionRegistry
         return _known;
     }
 
+    /// <summary>
+    /// Conversations a host has moved away from between two looks (host id to session id): the host is
+    /// in both, names another conversation now, and no host names the old one any more. A host that
+    /// only just learned its id, or went away, left nothing behind.
+    /// </summary>
+    internal static List<string> LeftBehind(IReadOnlyDictionary<string, string> before, IReadOnlyDictionary<string, string> now)
+    {
+        var held = new HashSet<string>(now.Values, StringComparer.OrdinalIgnoreCase);
+        var left = new List<string>();
+        foreach (var (host, was) in before)
+            if (was.Length > 0 && now.TryGetValue(host, out var isNow) && isNow.Length > 0
+                && !string.Equals(was, isNow, StringComparison.OrdinalIgnoreCase) && !held.Contains(was) && !left.Contains(was, StringComparer.OrdinalIgnoreCase))
+                left.Add(was);
+        return left;
+    }
+
     /// <summary>The user ended or removed this session: it leaves the file now and is not kept back.</summary>
     public static void Forget(string sessionId)
     {

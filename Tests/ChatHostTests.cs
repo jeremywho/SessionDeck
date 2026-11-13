@@ -33,6 +33,9 @@ public class ChatHostTests : IDisposable
     const string FakeCli = """
         [Console]::InputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
         $out = [Console]::Out
+        $session = if ($args.Count -gt 0) { $args[0] } else { 'live-session' }
+        # As the real CLI fails a resume: one error result on stdout, the reason on stderr, exit 1, and no answer to anything.
+        if ($session -like 'dead*') { $out.WriteLine('{"type":"result","subtype":"error_during_execution","is_error":true,"errors":["No conversation found"]}'); [Console]::Error.WriteLine("No conversation found with session ID: $session"); exit 1 }
         $out.WriteLine('a line that is not part of the protocol')
         $effort = 'high'
         $mode = 'default'
@@ -42,14 +45,15 @@ public class ChatHostTests : IDisposable
                 $text = $m.message.content
                 $content = $text
                 if ($text -isnot [string]) { $text = 'an image' }
-                $out.WriteLine('{"type":"system","subtype":"init","session_id":"live-session","model":"fake-model","permissionMode":"' + $mode + '"}')
+                $out.WriteLine('{"type":"system","subtype":"init","session_id":"' + $session + '","model":"fake-model","permissionMode":"' + $mode + '"}')
                 if ($text -like 'h*') { $out.WriteLine('{"type":"system","subtype":"session_title_changed","title":"named by the cli"}') }
                 $out.WriteLine((@{ type = 'user'; isReplay = $true; message = @{ role = 'user'; content = $content } } | ConvertTo-Json -Compress -Depth 8))
                 if ($text -eq 'quit') { [Console]::Error.WriteLine('fake cli: told to quit'); exit 3 }
                 if ($text -eq 'ask') { $out.WriteLine('{"type":"control_request","request_id":"r1","request":{"subtype":"can_use_tool","tool_name":"Write","input":{},"tool_use_id":"t1"}}'); continue }
                 if ($text -eq 'mcp') { $out.WriteLine('{"type":"control_request","request_id":"m1","request":{"subtype":"mcp_message"}}'); continue }
                 $out.WriteLine('{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"echo"}}}')
-                $out.WriteLine((@{ type = 'assistant'; message = @{ role = 'assistant'; content = @(@{ type = 'text'; text = "echo: $text" }) } } | ConvertTo-Json -Compress -Depth 6))
+                $said = if ($text -eq 'who') { "i am $session" } else { "echo: $text" }
+                $out.WriteLine((@{ type = 'assistant'; message = @{ role = 'assistant'; content = @(@{ type = 'text'; text = $said }) } } | ConvertTo-Json -Compress -Depth 6))
                 $out.WriteLine('{"type":"result","subtype":"success","is_error":false}')
             }
             elseif ($m.type -eq 'control_request') {
@@ -89,12 +93,7 @@ public class ChatHostTests : IDisposable
             // As a restart hands a session on: it was planning, at medium effort.
             RestoreMode = "plan", RestoreEffort = "medium",
         };
-        var psi = new ProcessStartInfo(HostExe) { UseShellExecute = false, RedirectStandardInput = true, RedirectStandardOutput = true, CreateNoWindow = true };
-        psi.ArgumentList.Add("--host");
-        _host = Process.Start(psi)!;
-        _host.StandardInput.Write(JsonSerializer.Serialize(spec));
-        _host.StandardInput.Close();
-        Assert.Equal("ready", await _host.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(20)));
+        await Start(spec);
 
         var record = Record();
         Assert.Equal((ChatStream.Kind, "idle", transcript, "planned-session"), (record.Kind, record.AgentStatus, record.TranscriptPath, record.SessionId));
@@ -198,6 +197,134 @@ public class ChatHostTests : IDisposable
         Assert.Equal(3u, Record().ExitCode);
     }
 
+    async Task Start(HostSpec spec)
+    {
+        var psi = new ProcessStartInfo(HostExe) { UseShellExecute = false, RedirectStandardInput = true, RedirectStandardOutput = true, CreateNoWindow = true };
+        psi.ArgumentList.Add("--host");
+        _host = Process.Start(psi)!;
+        _host.StandardInput.Write(JsonSerializer.Serialize(spec));
+        _host.StandardInput.Close();
+        Assert.Equal("ready", await _host.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(20)));
+    }
+
+    const string Open = "aaaaaaaa-1111-4111-8111-111111111111", Bees = "bbbbbbbb-2222-4222-8222-222222222222", Dead = "deadbeef-3333-4333-8333-333333333333";
+
+    static string Said(JsonElement line) =>
+        line.GetProperty("message").GetProperty("content") is { ValueKind: JsonValueKind.String } text ? text.GetString()! : line.GetProperty("message").GetProperty("content")[0].GetProperty("text").GetString()!;
+
+    [Fact]
+    public async Task A_chat_moves_to_another_conversation_in_its_folder_and_a_pick_that_fails_brings_the_last_one_back()
+    {
+        string script = Path.Combine(_dir, "fake-cli.ps1");
+        File.WriteAllText(script, FakeCli);
+        string Transcript(string id, DateTime written, params string[] lines)
+        {
+            string path = Path.Combine(_dir, id + ".jsonl");
+            File.WriteAllLines(path, lines);
+            File.SetLastWriteTimeUtc(path, written);
+            return path;
+        }
+        var t0 = DateTime.UtcNow.AddHours(-1);
+        string open = Transcript(Open, t0.AddMinutes(3), """{"type":"user","uuid":"a-1","message":{"role":"user","content":"said in the open one"}}""");
+        string bees = Transcript(Bees, t0.AddMinutes(2), """{"type":"user","uuid":"b-1","message":{"role":"user","content":"tell me about bees"}}""",
+            """{"type":"assistant","uuid":"b-2","message":{"role":"assistant","content":[{"type":"text","text":"they hum"}]}}""", """{"type":"custom-title","customTitle":"Bees"}""");
+        Transcript(Dead, t0.AddMinutes(1), """{"type":"user","uuid":"d-1","message":{"role":"user","content":"this one will not come up"}}""");
+        string cli = $"\"{SessionLauncher.ResolvePowerShell()}\" -NoLogo -NoProfile -File \"{script}\"";
+        await Start(new HostSpec
+        {
+            Id = "chattest0001", SessionId = Open, Provider = "Claude", Kind = ChatStream.Kind, HistoryPath = open,
+            CommandLine = cli + " " + Open, ChatResumeCommand = cli + " " + ChatSessions.SessionPlaceholder,
+            Cwd = _dir, HostsDir = Path.Combine(_dir, "hosts"), RingBytes = 256 * 1024, RestoreMode = "plan",
+        });
+        var record = Record();
+        int firstChild = record.ChildPid;
+        using var viewer = await Viewer.Attach(record, after: 0);
+        Assert.Equal((0, false, Open), (viewer.Snapshot.GetProperty("epoch").GetInt32(), viewer.Snapshot.GetProperty("cut").GetBoolean(), viewer.Snapshot.GetProperty("session").GetString()));
+        var before = await viewer.Until(l => Type(l) == "host");
+        Assert.Equal("said in the open one", Said(before[0]));
+        await viewer.Send("""{"type":"control_request","request_id":"sd-set-1","request":{"subtype":"apply_flag_settings","settings":{"effortLevel":"low"}}}""");
+        await viewer.Pump(() => viewer.Settings.Any(f => f.GetProperty("effort").GetString() == "low" && f.GetProperty("mode").GetString() == "plan"));
+        await RecordWhen(r => r.Effort == "low" && r.Model == "fake-model");
+
+        // What there is to move to: every conversation in the folder but the one open here, newest first, by name.
+        await viewer.SendFrame("""{"type":"sessions","request":"s1"}""");
+        var list = await viewer.NextAnswer();
+        Assert.Equal(("sessions", "s1", Open), (Type(list), list.GetProperty("request").GetString(), list.GetProperty("current").GetString()));
+        Assert.Equal(new[] { (Bees, "Bees"), (Dead, "this one will not come up") }, list.GetProperty("sessions").EnumerateArray().Select(e => (e.GetProperty("id").GetString()!, e.GetProperty("title").GetString()!)));
+
+        // Asked for something that is not a conversation here, or is the one already open: told so, and nothing changes.
+        foreach (var (session, why) in new[] { ("..\\elsewhere", "not in this folder"), ("cccccccc-4444-4444-8444-444444444444", "not in this folder"), (Open, "the one open here") })
+        {
+            await viewer.SendFrame(JsonSerializer.Serialize(new { type = "resume", request = "r-no", session }));
+            var refused = await viewer.NextAnswer();
+            Assert.Equal(("resumed", false), (Type(refused), refused.GetProperty("ok").GetBoolean()));
+            Assert.Contains(why, refused.GetProperty("error").GetString());
+        }
+        Assert.Equal(firstChild, Record().ChildPid);
+
+        // Moved, once the CLI has spoken on the conversation picked: every viewer is told to start over, and gets it from its transcript.
+        await viewer.SendFrame(JsonSerializer.Serialize(new { type = "resume", request = "r1", session = Bees }));
+        await viewer.Pump(() => viewer.Snapshots.Count == 2);
+        var moved = viewer.Snapshot;
+        Assert.Equal((1, false, Bees, "Bees"), (moved.GetProperty("epoch").GetInt32(), moved.GetProperty("cut").GetBoolean(), moved.GetProperty("session").GetString(), moved.GetProperty("title").GetString()));
+        Assert.Equal(moved.GetProperty("start").GetInt64(), moved.GetProperty("end").GetInt64());
+        Assert.True(moved.GetProperty("start").GetInt64() > 0);
+        // (What the stand-in prints outside the protocol comes before it introduces itself, and is no part of either conversation.)
+        var after = await viewer.Until(l => Type(l) == "assistant");
+        Assert.Equal(new[] { "tell me about bees", "they hum" }, after.Select(Said));
+        Assert.All(after, l => Assert.True(l.GetProperty("history").GetBoolean()));
+        record = await RecordWhen(r => r.SessionId == Bees && r.Effort == "low" && r.PermissionMode == "plan");
+        Assert.Equal((bees, "Bees", "idle"), (record.TranscriptPath, record.Title, record.AgentStatus));
+        Assert.NotEqual(firstChild, record.ChildPid);
+        // Started on the conversation picked, on the model the chat was on, and back in the mode and effort it was in.
+        Assert.EndsWith(Bees + " --model \"fake-model\"", record.CommandLine);
+        await viewer.Send(ChatStream.UserLine("who"));
+        Assert.Equal("i am " + Bees, Said((await viewer.Until(l => Type(l) == "result"))[1]));
+
+        // A viewer that attaches now sees only this conversation, from a whole line, and can page it.
+        using (var late = await Viewer.Attach(record, after: 0))
+        {
+            Assert.Equal((1, false, Bees), (late.Snapshot.GetProperty("epoch").GetInt32(), late.Snapshot.GetProperty("cut").GetBoolean(), late.Snapshot.GetProperty("session").GetString()));
+            var replay = await late.Until(l => Type(l) == "result");
+            Assert.Equal("tell me about bees", Said(replay[0]));
+            Assert.DoesNotContain(replay, l => Type(l) == "user" && Said(l) == "said in the open one");
+            await late.SendFrame("""{"type":"history","request":"h1","uuid":"b-2"}""");
+            Assert.Equal(new[] { "b-1" }, (await late.NextHistory()).GetProperty("lines").EnumerateArray().Select(l => l.GetProperty("uuid").GetString()));
+        }
+
+        // A pick whose CLI never says a word: no viewer is told to start over, the conversation before it is started again,
+        // and what the CLI said for itself is both the answer to the request and a line in the conversation.
+        int secondChild = record.ChildPid;
+        await viewer.SendFrame(JsonSerializer.Serialize(new { type = "resume", request = "r2", session = Dead }));
+        var failed = await viewer.NextAnswer();
+        Assert.Equal(("resumed", false), (Type(failed), failed.GetProperty("ok").GetBoolean()));
+        Assert.StartsWith("Could not resume that conversation: No conversation found with session ID: " + Dead, failed.GetProperty("error").GetString());
+        var back = await viewer.Until(l => Type(l) == "host" && l.GetProperty("subtype").GetString() == "stderr");
+        Assert.Equal(failed.GetProperty("error").GetString(), back[^1].GetProperty("text").GetString());
+        // Nothing of the conversation that did not come up reached this one: not its transcript, not the error it ended on.
+        Assert.Equal(new[] { "host" }, back.Select(Type));
+        Assert.Equal(2, viewer.Snapshots.Count);
+        record = await RecordWhen(r => r.ChildPid != secondChild && r.PermissionMode == "plan" && r.Effort == "low");
+        Assert.Equal((Bees, bees, (uint?)null), (record.SessionId, record.TranscriptPath, record.ExitCode));
+        await viewer.Send(ChatStream.UserLine("who"));
+        Assert.Equal("i am " + Bees, Said((await viewer.Until(l => Type(l) == "result")).Last(l => Type(l) == "assistant")));
+        // And it can still move: the failed pick did not leave it thinking a move is under way.
+        await viewer.SendFrame(JsonSerializer.Serialize(new { type = "resume", request = "r3", session = Open }));
+        await viewer.Pump(() => viewer.Snapshots.Count == 3);
+        Assert.Equal((2, Open), (viewer.Snapshot.GetProperty("epoch").GetInt32(), viewer.Snapshot.GetProperty("session").GetString()));
+        await viewer.Send(ChatStream.UserLine("who"));
+        Assert.Equal("i am " + Open, Said((await viewer.Until(l => Type(l) == "result")).Last(l => Type(l) == "assistant")));
+
+        // Ending the session is still ending it: the CLI going away is not read as making way for another conversation.
+        // Also when a move was asked for in the same breath: the CLI ending for the move must not start the next conversation.
+        await viewer.SendFrame(JsonSerializer.Serialize(new { type = "resume", request = "r4", session = Bees }));
+        await viewer.SendFrame("""{"type":"kill"}""");
+        await viewer.Exited();
+        Assert.Equal(3, viewer.Snapshots.Count);
+        Assert.True(_host!.WaitForExit(15000), "host did not exit after it was told to end");
+        Assert.NotNull(Record().ExitedAt);
+    }
+
     HostRecord Record() => JsonSerializer.Deserialize<HostRecord>(File.ReadAllText(Path.Combine(_dir, "hosts", "chattest0001.json")))!;
 
     async Task<HostRecord> RecordWhen(Func<HostRecord, bool> ready)
@@ -233,6 +360,15 @@ public class ChatHostTests : IDisposable
         public JsonElement? Catalog { get; private set; }
         public List<JsonElement> Settings { get; } = new();
         readonly Queue<JsonElement> _history = new();
+        readonly Queue<JsonElement> _answers = new();
+        public List<JsonElement> Snapshots { get; } = new();
+
+        /// <summary>The next answer to a request of this viewer's own: a list of conversations, or a refusal to move.</summary>
+        public async Task<JsonElement> NextAnswer()
+        {
+            while (_answers.Count == 0) await Read();
+            return _answers.Dequeue();
+        }
 
         /// <summary>A frame of the viewer's own, not typed input: a request the host answers.</summary>
         public Task SendFrame(string json) => _ws.SendAsync(Encoding.UTF8.GetBytes(json), WebSocketMessageType.Text, true, CancellationToken.None);
@@ -293,7 +429,8 @@ public class ChatHostTests : IDisposable
                 var frame = JsonDocument.Parse(msg.ToArray()).RootElement.Clone();
                 switch (Type(frame))
                 {
-                    case "snapshot": Snapshot = frame; break;
+                    case "snapshot": Snapshot = frame; Snapshots.Add(frame); break;
+                    case "sessions": case "resumed": _answers.Enqueue(frame); break;
                     case "live": Live.Add(frame.GetProperty("line").Clone()); break;
                     case "title": Titles.Add(frame.GetProperty("title").GetString() ?? ""); break;
                     case "catalog": Catalog = frame; break;

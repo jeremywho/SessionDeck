@@ -117,7 +117,9 @@ permission requests, questions and plans appear as cards with buttons (a plan is
 mode you pick; a permission can be allowed for the rest of the session when Claude offers that). Enter sends, Shift+Enter adds a line, Esc or **Stop** interrupts. Typing `/` lists the
 session's commands (arrows to move, Tab to complete, Enter to run); the model, effort and permission
 mode under the message box change the running session; a pasted image is attached and sent with
-the message. A subagent is a line of its own that says what it is doing now and opens to its
+the message. Typing `/resume` lists the other conversations in the session's folder, whether a chat or a
+terminal session had them (type to filter, Enter to open): the chat moves to the one you pick, in
+the same tab. A subagent is a line of its own that says what it is doing now and opens to its
 calls. **Load earlier messages** at the top reads back through the whole conversation, a page at a
 time. A message you have typed and not sent is kept if the session restarts under it, and after an
 update a chat left idle restarts itself onto the new build with its model, mode and effort. It is an ordinary Claude

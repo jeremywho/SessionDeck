@@ -44,6 +44,18 @@ internal sealed class Ring
         }
     }
 
+    /// <summary>Drops everything held. Sequence numbers go on from where they were, so a viewer that asks for what follows the last byte it saw is answered from here; returns that place.</summary>
+    public long Clear()
+    {
+        lock (this)
+        {
+            _base += _count;
+            _count = 0;
+            _head = 0;
+            return _base;
+        }
+    }
+
     /// <summary>Bytes from sequence <paramref name="after"/> to the end, clamped to what is held.</summary>
     public (long Start, byte[] Data) Since(long after)
     {

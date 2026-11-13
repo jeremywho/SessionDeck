@@ -171,6 +171,8 @@ internal static class HostManager
             HistoryPath = chat ? SessionScanner.TranscriptPathFor(sessionId, folder) : "",
             RestoreMode = chat ? restore?.Mode ?? "" : "",
             RestoreEffort = chat ? restore?.Effort ?? "" : "",
+            // Built here, for every chat host however it is started, so none is left unable to switch conversations.
+            ChatResumeCommand = chat ? ResumeClaudeChatCommand(ChatSessions.SessionPlaceholder, Settings.Peek().ResumeFlags) : "",
         };
 
         var psi = new ProcessStartInfo(HostExe())

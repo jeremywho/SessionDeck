@@ -20,8 +20,9 @@ internal sealed class ChatStream
     /// one an update left behind: it still works, and it restarts when idle to catch up.
     /// 3: earlier conversation paged from the transcript, settings carried through a restart, and
     /// scrollback kept free of what no viewer reads. Before 3 the record carries no revision.
+    /// 4: lists the conversations in its folder and moves to the one picked (<see cref="ChatSessions"/>).
     /// </summary>
-    public const int Revision = 3;
+    public const int Revision = 4;
 
     /// <summary>Flags every chat launch carries; the session flags and the hook settings follow them.</summary>
     public const string ProtocolFlags = "-p --input-format stream-json --output-format stream-json --verbose --include-partial-messages --replay-user-messages --permission-prompt-tool stdio";
@@ -37,6 +38,9 @@ internal sealed class ChatStream
     string _catalog = "";
     string _mode = "", _model = "", _effort = "";
     string _modeOutsidePlan = "";
+
+    /// <summary>The CLI was started again on another conversation: nothing it was asked before is still open. The settings stay, since the host puts them back.</summary>
+    public void NewConversation() => _openRequests.Clear();
 
     /// <summary>What <see cref="Apply"/> changed: the host record, the lists the CLI offers, the settings in force; and whether to ask the CLI for its settings again.</summary>
     public readonly record struct Change(bool Record, bool Catalog, bool Settings, bool Refresh);
@@ -221,6 +225,16 @@ internal sealed class ChatStream
     public static bool AnswersTheHost(JsonElement line) =>
         Text(line, "type") == "control_response" && line.TryGetProperty("response", out var response)
         && Text(response, "request_id") is InitializeId or SettingsId;
+
+    /// <summary>
+    /// The CLI's answer to the host's <c>initialize</c>: the sign that it came up on the session it was
+    /// started on. One that cannot (no such conversation) says a single
+    /// <c>result error_during_execution</c> instead and exits, so its first word proves nothing
+    /// (measured, Claude Code 2.1.323).
+    /// </summary>
+    public static bool Introduces(JsonElement line) =>
+        Text(line, "type") == "control_response" && line.TryGetProperty("response", out var response)
+        && Text(response, "request_id") == InitializeId && Text(response, "subtype") == "success";
 
     public static string InitializeLine() => ControlLine(InitializeId, "initialize");
 
