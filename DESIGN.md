@@ -29,5 +29,15 @@ Rules that follow from the roles:
 - A border means "this is a control" or "this waits for you". Your own messages and code blocks have a fill and no border; a plan or a permission request has both.
 - Only a decision is a card. A tool call is a line that opens.
 - Radii: 14 px for a message and a card, 16 px for the message box, 10 px for a block, 8 px for a button and anything inside the message box, 6 px for a row in a menu.
-- Type: Segoe UI Variable Text at the terminal's size setting (16 px at the default), 1.65 line height; code in the terminal's font at 0.875em. Prose lines stop at 74 characters unless the reader has dragged the column wider.
+- Type: Segoe UI Variable Text at the terminal's size setting (16 px at the default), 1.65 line height; code in the terminal's font at 0.875em. Prose lines stop at 74 characters unless the reader has dragged the column wider. Where there is no Segoe (a phone, a Mac) the face is the system's own, never the browser's default sans.
 - States: hover lightens a fill (`--chat-tint-strong`), focus is a 2 px accent outline, a pending message has a dashed edge, a control that no longer applies is removed or disabled with `--fg3` text.
+
+### On a phone
+
+The phone shows the same pane (`.pane.chat.touch`), with these differences, each because of the hand and the screen:
+
+- Type is the system face at 17 px with 1.5 line height, the size iOS sets its own body text in. Nothing typed into or pressed is below 16 px.
+- The message box keeps its plain edge while typing. On a desktop the accent edge says which of several panes has the keyboard; a phone has one pane and the keyboard itself says it.
+- What is pressed in the message box is at least 36 px tall and has a fill (`--chat-tint`), so it reads as pressable without an edge: attach, the three pickers, send (40 px). They sit in one row that never wraps; a picker shortens with an ellipsis before the row breaks.
+- A model an agent lists as `provider/Name` shows as the name alone, with the provider as a heading in the list (this one applies on the desktop too).
+- The app shows no bar over the keyboard (WebKit's previous/next/done). A tap on the conversation puts the keyboard away.

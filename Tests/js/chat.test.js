@@ -2,7 +2,7 @@
 // The lines here are shaped like the ones Claude Code 2.1.322 wrote in stream-json mode, cut down to the fields the pane reads.
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { ChatModel, LineReader, Wire, toolBrief, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText, renameAsked, liveStep, taskRunning, asks: asksPerson, offeredCommands, filterSessions, ago, startsOver, clampWide, diffKind } = require('../../wwwroot/chat.js');
+const { ChatModel, LineReader, Wire, toolBrief, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText, renameAsked, modelLabel, liveStep, taskRunning, asks: asksPerson, offeredCommands, filterSessions, ago, startsOver, clampWide, diffKind } = require('../../wwwroot/chat.js');
 
 const init = { type: 'system', subtype: 'init', session_id: 's1', model: 'claude-haiku-5-5' };
 const echo = text => ({ type: 'user', isReplay: true, message: { role: 'user', content: text }, parent_tool_use_id: null });
@@ -744,4 +744,18 @@ test('what /rename asks for is the name on one line, and only /rename asks for i
   assert.equal(renameAsked('/rename   '), '');
   assert.equal(renameAsked('/rename /resume'), '/resume');
   for (const other of ['/renamed it', '/renameship', 'please /rename this', '/resume', 'rename this', '/Rename x', '']) assert.equal(renameAsked(other), null, other);
+});
+
+test('a model listed as provider/Name shows as the name under its provider, and any other name as it is', () => {
+  assert.deepEqual(modelLabel('swift/swift-1.5', 'swift/Swift 1.5 (ultimac)'), { group: 'swift', label: 'Swift 1.5 (ultimac)' });
+  assert.deepEqual(modelLabel('opencode-go/kimi-k3', 'opencode-go/Kimi K3'), { group: 'opencode-go', label: 'Kimi K3' });
+  // No provider in the id, or a name that does not repeat it: nothing is cut.
+  assert.deepEqual(modelLabel('fable', 'Claude Fable 5.2'), { group: '', label: 'Claude Fable 5.2' });
+  assert.deepEqual(modelLabel('gemini-4-carbon', 'Gemini 4 Carbon'), { group: '', label: 'Gemini 4 Carbon' });
+  assert.deepEqual(modelLabel('swift/swift-1.5', 'Swift 1.5'), { group: '', label: 'Swift 1.5' });
+  assert.deepEqual(modelLabel('swift/swift-1.5', 'swift/'), { group: '', label: 'swift/' });
+  assert.deepEqual(modelLabel('/odd', '/odd'), { group: '', label: '/odd' });
+  // A model the catalog has no name for is shown by its id, whole.
+  assert.deepEqual(modelLabel('opencode/big-pickle', ''), { group: 'opencode', label: 'big-pickle' });
+  assert.deepEqual(modelLabel('haiku', undefined), { group: '', label: 'haiku' });
 });

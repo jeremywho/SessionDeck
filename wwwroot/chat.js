@@ -475,6 +475,16 @@
     return own.concat(commands.filter(c => !own.some(o => o.name === c.name)));
   }
 
+  // An agent that serves several providers lists each model as "provider/Name" under the id "provider/model"
+  // (OpenCode). The provider is a heading in the list, so the choice shows as the model alone.
+  function modelLabel(value, name) {
+    const id = String(value || ''), text = String(name || id);
+    const cut = id.indexOf('/');
+    const provider = cut > 0 ? id.slice(0, cut) : '';
+    return provider && text.startsWith(provider + '/') && text.length > provider.length + 1
+      ? { group: provider, label: text.slice(provider.length + 1) } : { group: '', label: text };
+  }
+
   // The name `/rename …` asks for, on one line ('' when none was typed); null when the message is anything else.
   function renameAsked(message) {
     const m = /^\/rename(?:\s+([\s\S]*))?$/.exec(message.trim());
@@ -653,7 +663,7 @@
     return modes;
   }
 
-  const api = { ChatModel, LineReader, Wire, toolBrief, textOf, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText, liveStep, taskRunning, asks, offeredCommands, renameAsked, filterSessions, ago, startsOver, clampWide, diffKind };
+  const api = { ChatModel, LineReader, Wire, toolBrief, textOf, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText, liveStep, taskRunning, asks, offeredCommands, renameAsked, modelLabel, filterSessions, ago, startsOver, clampWide, diffKind };
   if (typeof module !== 'undefined' && module.exports) { module.exports = api; return; }
 
   // ================= the page side =================
@@ -783,6 +793,14 @@
     const sendLine = line => { if (ws && ws.readyState === WebSocket.OPEN) { ws.send(JSON.stringify({ type: 'input', data: line + '\n' })); return true; } return false; };
 
     function nearBottom() { return scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 60; }
+
+    // On a phone a tap on the conversation puts the keyboard away, as it does in any chat: the app shows no
+    // bar over the keyboard to do it with. A tap on something that answers to taps is left to it.
+    if (opts.touch) scroll.addEventListener('click', ev => {
+      if (ev.target.closest('a, button, summary, select, input, textarea, label')) return;
+      if (String(getSelection() || '')) return;
+      if (document.activeElement === input) input.blur();
+    });
 
     // A keyboard coming up (or a window made shorter) shrinks the conversation under a reader who was at the
     // latest message: they stay there, rather than being left looking at whatever is now at the top.
@@ -916,12 +934,18 @@
       if (select.dataset.options !== want) {
         select.dataset.options = want;
         select.textContent = '';
-        for (const [v, label, title] of pairs) {
+        let under = select, heading = '';
+        for (const [v, label, title, group] of pairs) {
+          if ((group || '') !== heading) {
+            heading = group || '';
+            under = select;
+            if (heading) { under = document.createElement('optgroup'); under.label = heading; select.appendChild(under); }
+          }
           const o = document.createElement('option');
           o.value = v;
           o.textContent = label;
           if (title) o.title = title;
-          select.appendChild(o);
+          under.appendChild(o);
         }
       }
       if (document.activeElement !== select) select.value = value;
@@ -934,7 +958,10 @@
     function fit(select) {
       const shown = select.selectedOptions[0];
       ruler.textContent = shown ? shown.textContent : '';
-      select.style.width = Math.ceil(ruler.getBoundingClientRect().width) + 26 + 'px';
+      // Its padding and edge differ between a desktop and a phone: read, not assumed.
+      const box = getComputedStyle(select);
+      const around = ['paddingLeft', 'paddingRight', 'borderLeftWidth', 'borderRightWidth'].reduce((sum, side) => sum + (parseFloat(box[side]) || 0), 0);
+      select.style.width = Math.ceil(ruler.getBoundingClientRect().width) + Math.ceil(around) + 'px';
     }
 
     // The session's model, effort and permission mode, as the CLI lists and reports them. Nothing shows until it has:
@@ -952,7 +979,10 @@
       if (!live) return;
       // Three full labels do not fit across a phone: there the model drops its "Claude" and the mode is one word.
       const narrow = !!opts.touch && el.clientWidth < 600;
-      const modelPairs = models.map(m => [m.value, narrow ? shortModel(m.name || m.value) : m.name || m.value, m.description || '']);
+      const modelPairs = models.map(m => {
+        const { group, label } = modelLabel(m.value, m.name);
+        return [m.value, narrow ? shortModel(label) : label, m.description || '', group];
+      });
       if (!inForce && s.model) modelPairs.push([s.model, s.model, '']);
       options(modelPick, modelPairs, inForce ? inForce.value : s.model);
       const levels = inForce && inForce.efforts && inForce.efforts.length ? inForce.efforts.slice() : EFFORTS.slice();

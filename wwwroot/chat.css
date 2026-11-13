@@ -18,7 +18,7 @@
   --pr-blue: #1f5fd1; --chat-onaccent: #ffffff;
   --pr-red: #b3261e; --pr-amber: #8a5a00; --pr-green: #1f7a35;
 }
-.pane.chat { display: flex; flex-direction: column; font: var(--chat-size, 16px)/1.65 "Segoe UI Variable Text", "Segoe UI", sans-serif; color: var(--fg); --chat-mono: "Cascadia Code", Consolas, monospace; --chat-wide: 880px; --chat-side: 28px;
+.pane.chat { display: flex; flex-direction: column; font: var(--chat-size, 16px)/1.65 "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif; color: var(--fg); --chat-mono: "Cascadia Code", Consolas, monospace; --chat-wide: 880px; --chat-side: 28px;
   background: color-mix(in srgb, var(--chat-bg) calc(var(--chat-alpha, 1) * 100%), transparent); }
 .pane.chat ::selection { background: color-mix(in srgb, var(--pr-blue) 38%, transparent); }
 .chat-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; user-select: text; }
@@ -128,7 +128,7 @@
 .chat .pick-ruler { position: absolute; visibility: hidden; pointer-events: none; white-space: pre; font-size: 0.875em; }
 .chat select.pick:hover:not(:disabled) { color: var(--fg); background-color: var(--chat-tint); }
 .chat select.pick:disabled { color: var(--fg3); cursor: default; }
-.chat select.pick option { background: var(--bg-solid); color: var(--fg); }
+.chat select.pick option, .chat select.pick optgroup { background: var(--bg-solid); color: var(--fg); }
 .chat .composer-state { margin-left: auto; padding: 0 10px; color: var(--fg3); font-size: 0.8125em; white-space: nowrap; user-select: none; }
 .pane.chat[data-state="waiting"] .composer-state, .pane.chat[data-state="offline"] .composer-state { color: var(--pr-amber); }
 .chat button.chat-send { flex: none; display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border-radius: 8px; background: var(--pr-blue); border-color: var(--pr-blue); color: var(--chat-onaccent); }
@@ -171,7 +171,6 @@
 .pane.chat.touch .msg.user { max-width: 90%; }
 .pane.chat.touch .chat-compose { padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
 .pane.chat.touch .composer { padding: 10px 10px 6px 12px; }
-.pane.chat.touch select.pick { max-width: 34vw; }
 .pane.chat.touch .md pre, .pane.chat.touch .tool-body pre { font-size: 0.8em; }
 .pane.chat.touch button.slash-option { grid-template-columns: minmax(0, 1fr); row-gap: 2px; padding: 8px 10px; }
 .pane.chat.touch .slash-description { grid-column: 1; }
@@ -227,8 +226,20 @@
 .chat .hljs-title, .chat .hljs-section { color: var(--fg); font-weight: 600; }
 .chat .hljs-deletion { color: var(--pr-red); }
 .chat .hljs-addition { color: var(--pr-green); }
-/* A phone has no room for the pickers and a status beside them: the status takes its own line above. */
-.pane.chat.touch .composer-row { flex-wrap: wrap; }
-.pane.chat.touch .composer-state { order: -1; flex: 0 0 100%; box-sizing: border-box; margin: 0; padding: 0 6px 6px; }
+/* A phone reads at the system's body size, and what is pressed there is sized for a thumb and looks pressable. */
+.pane.chat.touch { font-size: 17px; line-height: 1.5; }
+.pane.chat.touch .composer textarea { min-height: 1.5em; }
+/* The keyboard already says where typing goes: the box keeps its own edge. */
+.pane.chat.touch .composer:focus-within { border-color: var(--pr-line-strong); }
+/* One row that never wraps: attach, the pickers (each gives way before the row does), room, send. There is no
+   room for a status beside them, so it takes a line of its own above. */
+.pane.chat.touch .composer-row { display: grid; grid-template-columns: auto minmax(0, auto) minmax(0, auto) minmax(0, auto) 1fr auto; column-gap: 6px; align-items: center; margin-left: 0; }
+.pane.chat.touch .composer-row > * { grid-row: 2; }
+.pane.chat.touch .composer-state { grid-row: 1; grid-column: 1 / -1; margin: 0; padding: 0 2px 6px; font-size: 0.9375em; }
 .pane.chat.touch .composer-state:empty { display: none; }
-.pane.chat.touch button.chat-send { margin-left: auto; }
+.pane.chat.touch button.chat-attach { width: 36px; height: 36px; margin: 0; background: var(--chat-tint); }
+.pane.chat.touch select.pick { max-width: 100%; min-height: 36px; font-size: 16px; padding: 6px 24px 6px 10px; border-radius: 8px; background-color: var(--chat-tint); background-position: right 8px center; }
+.pane.chat.touch .pick-ruler { font-size: 16px; }
+.pane.chat.touch button.chat-send { grid-column: 6; width: 40px; height: 40px; }
+/* A phone's code block is narrow enough that its first line runs under the copy button: the button hides it, not half of it. */
+.pane.chat.touch .md pre .copy { background: var(--chat-over); }

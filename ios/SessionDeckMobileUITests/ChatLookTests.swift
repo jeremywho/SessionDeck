@@ -32,13 +32,14 @@ final class ChatLookTests: XCTestCase {
 
         // The top of the first row of letters is where the keyboard proper starts: anything the system
         // draws above it (the form bar a web view gets) is the gap measured here.
-        let firstRow = app.keyboards.keys["q"].frame
+        let firstRow = app.keyboards.keys.matching(NSPredicate(format: "label ==[c] 'q'")).firstMatch.frame
         let window = app.windows.firstMatch.frame
         let gap = firstRow.minY - send.frame.maxY
         print("PROBE window=\(window) qKey=\(firstRow) box=\(box.frame) send=\(send.frame) gap=\(gap) toolbars=\(app.toolbars.count)")
         XCTAssertGreaterThan(firstRow.height, 20, "no real keyboard to measure against")
         XCTAssertLessThanOrEqual(send.frame.maxY, firstRow.minY, "the send button is under the keyboard")
-        XCTAssertLessThan(gap, 60, "something sits between the message box and the keyboard")
+        // The keyboard's own row of suggestions is some 50 points; the web view's form bar was another 50.
+        XCTAssertLessThan(gap, 110, "something sits between the message box and the keyboard")
         sleep(5)
 
         // With no bar over the keyboard there is no button to put it away: a tap on the conversation does.

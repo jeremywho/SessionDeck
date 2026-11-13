@@ -80,6 +80,29 @@ final class ChatBridge: NSObject, ObservableObject, WKScriptMessageHandler {
     }
 }
 
+/// A web view puts a bar of its own over the keyboard (previous field, next field, done). The chat
+/// page has one field and a send button, so the bar is a strip of dead space between the message
+/// box and the keys. WebKit offers no switch for it: the view that takes the typing is private, and
+/// answers `inputAccessoryView` itself. That one view is given a subclass that answers nil. The page
+/// puts the keyboard away on a tap in the conversation, which is what the bar's "done" was for.
+enum FormBar {
+    static func remove(from webView: WKWebView) {
+        guard let content = webView.scrollView.subviews.first(where: { String(describing: type(of: $0)).hasPrefix("WKContent") }),
+              let original: AnyClass = object_getClass(content) else { return }
+        let name = "\(NSStringFromClass(original))_SessionDeckNoFormBar"
+        var barless: AnyClass? = NSClassFromString(name)
+        if barless == nil, let made = objc_allocateClassPair(original, name, 0) {
+            let selector = #selector(getter: UIResponder.inputAccessoryView)
+            guard let method = class_getInstanceMethod(original, selector) else { return }
+            let none: @convention(block) (AnyObject) -> UIView? = { _ in nil }
+            class_addMethod(made, selector, imp_implementationWithBlock(none), method_getTypeEncoding(method))
+            objc_registerClassPair(made)
+            barless = made
+        }
+        if let barless { object_setClass(content, barless) }
+    }
+}
+
 struct ChatWebView: UIViewRepresentable {
     @ObservedObject var bridge: ChatBridge
     let pairing: Pairing
@@ -99,6 +122,7 @@ struct ChatWebView: UIViewRepresentable {
         view.scrollView.bounces = false
         view.scrollView.contentInsetAdjustmentBehavior = .never
         view.accessibilityIdentifier = "chat-page"
+        FormBar.remove(from: view)
         bridge.pageBase = pairing.baseURL
         bridge.webView = view
         view.load(URLRequest(url: Self.pageURL(pairing)))
