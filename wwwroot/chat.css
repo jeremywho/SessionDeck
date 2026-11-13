@@ -233,12 +233,12 @@
 .pane.chat.touch .composer:focus-within { border-color: var(--pr-line-strong); }
 /* One row that never wraps: attach, the pickers (each gives way before the row does), room, send. There is no
    room for a status beside them, so it takes a line of its own above. */
-.pane.chat.touch .composer-row { display: grid; grid-template-columns: auto minmax(0, auto) minmax(0, auto) minmax(0, auto) 1fr auto; column-gap: 6px; align-items: center; margin-left: 0; }
+.pane.chat.touch .composer-row { display: grid; grid-template-columns: auto minmax(0, auto) minmax(0, auto) minmax(0, auto) 1fr auto; column-gap: 4px; align-items: center; margin-left: 0; }
 .pane.chat.touch .composer-row > * { grid-row: 2; }
 .pane.chat.touch .composer-state { grid-row: 1; grid-column: 1 / -1; margin: 0; padding: 0 2px 6px; font-size: 0.9375em; }
 .pane.chat.touch .composer-state:empty { display: none; }
 .pane.chat.touch button.chat-attach { width: 36px; height: 36px; margin: 0; background: var(--chat-tint); }
-.pane.chat.touch select.pick { max-width: 100%; min-height: 36px; font-size: 16px; padding: 6px 24px 6px 10px; border-radius: 8px; background-color: var(--chat-tint); background-position: right 8px center; }
+.pane.chat.touch select.pick { max-width: 100%; min-height: 36px; font-size: 16px; padding: 6px 20px 6px 8px; border-radius: 8px; background-color: var(--chat-tint); background-position: right 6px center; }
 .pane.chat.touch .pick-ruler { font-size: 16px; }
 .pane.chat.touch button.chat-send { grid-column: 6; width: 40px; height: 40px; }
 /* A phone's code block is narrow enough that its first line runs under the copy button: the button hides it, not half of it. */
