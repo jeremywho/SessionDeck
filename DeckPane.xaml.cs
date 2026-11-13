@@ -22,7 +22,7 @@ internal partial class DeckPane : UserControl
         public DeckTab(TerminalView v) { View = v; }
 
         public string Title => StripMark(View.Title);
-        public string Glyph => View.Host.Provider switch { "Codex" => "◆", "Shell" => ">", "Agy" => "◈", _ => "✳" };
+        public string Glyph => View.Host.Provider switch { "Codex" => "◆", "Shell" => ">", "Agy" => "◈", "OpenCode" => "◇", _ => "✳" };
 
         /// <summary>Claude titles its own window "✳ …" (a spinner while it works); the tab already leads with a mark.</summary>
         internal static string StripMark(string t) => TitleMarks.Strip(t);
@@ -108,6 +108,8 @@ internal partial class DeckPane : UserControl
     void NewCodexChatMenu_Click(object sender, RoutedEventArgs e) => RequestNew(sender, "codex-chat");
     void NewShellMenu_Click(object sender, RoutedEventArgs e) => RequestNew(sender, "shell");
     void NewAgyMenu_Click(object sender, RoutedEventArgs e) => RequestNew(sender, "agy");
+    void NewAgyChatMenu_Click(object sender, RoutedEventArgs e) => RequestNew(sender, "agy-chat");
+    void NewOpenCodeChatMenu_Click(object sender, RoutedEventArgs e) => RequestNew(sender, "opencode-chat");
 
     public DeckPane()
     {

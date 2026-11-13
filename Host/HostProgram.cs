@@ -152,8 +152,8 @@ internal static class HostProgram
     /// <summary>Whether the transcript held more conversation than the scrollback was started with. (A scrollback that has since dropped its oldest lines has more behind it too.)</summary>
     static bool _chatEarlier;
     static readonly ChatStream _chat = new();
-    /// <summary>Set for a Codex chat: the child is <c>codex app-server</c>, and this turns its protocol into the lines a viewer reads.</summary>
-    static CodexChat? _codex;
+    /// <summary>Set for a chat whose agent has no stream-json mode (Codex's app server, an ACP agent): this turns its protocol into the lines a viewer reads.</summary>
+    static IChatAgent? _agent;
     static readonly object ChatInputLock = new();
     static readonly StringBuilder _chatErrors = new();
     /// <summary>The conversation the CLI was last started on, its transcript, and the command that started it. The record's session id can run ahead of this: the CLI names its session at each turn.</summary>
@@ -248,8 +248,9 @@ internal static class HostProgram
         var ready = Console.Out;
         bool chat = spec.Kind == ChatStream.Kind;
         if (chat) _pipe = new PipeChild(commandLine, spec.Cwd);
-        if (chat && spec.Provider == "Codex")
-            _codex = new CodexChat(spec.Cwd, spec.SessionId, spec.RestoreModel, spec.RestoreEffort, spec.RestoreMode, Math.Max(spec.RingBytes, 64 * 1024) / 2);
+        int seedBytes = Math.Max(spec.RingBytes, 64 * 1024) / 2;
+        if (chat && spec.Provider == "Codex") _agent = new CodexChat(spec.Cwd, spec.SessionId, spec.RestoreModel, spec.RestoreEffort, spec.RestoreMode, seedBytes);
+        else if (chat && AcpChat.Speaks(spec.Provider)) _agent = new AcpChat(spec.Provider, spec.Cwd, spec.SessionId, spec.RestoreModel, spec.RestoreEffort, spec.RestoreMode, seedBytes);
         else
         {
             DetachStdHandles();
@@ -448,10 +449,10 @@ internal static class HostProgram
             var errors = new Thread(() => DrainChatErrors(pipe)) { IsBackground = true, Name = "chat-stderr" };
             reader.Start();
             errors.Start();
-            if (_codex != null)
+            if (_agent != null)
             {
-                Codex(c => c.Start());
-                if (prompt.Length > 0) CodexInput(ChatStream.UserLine(prompt));
+                Agent(c => c.Start());
+                if (prompt.Length > 0) AgentInput(ChatStream.UserLine(prompt));
             }
             else
             {
@@ -592,8 +593,8 @@ internal static class HostProgram
         Log($"serving {c.Session} epoch={_chatEpoch}");
     }
 
-    /// <summary>As <see cref="Serve(Conversation)"/>, for a Codex chat: the app server has moved to another conversation and said what it holds.</summary>
-    static void Serve(CodexChat.Seed seed)
+    /// <summary>As <see cref="Serve(Conversation)"/>, for a translated chat: the agent has moved to another conversation and said what it holds.</summary>
+    static void Serve(ChatSeed seed)
     {
         lock (ClientsLock)
         {
@@ -604,29 +605,29 @@ internal static class HostProgram
             foreach (var client in Clients) client.Out.Writer.TryWrite((true, snapshot));
             foreach (var line in seed.Lines) AppendChatLine(line);
         }
-        Log($"serving codex {seed.Session} epoch={_chatEpoch}");
+        Log($"serving {seed.Session} epoch={_chatEpoch}");
     }
 
-    /// <summary>Asks the Codex translator for what follows from something (a line from the app server, a viewer's message) and carries it out.</summary>
-    static void Codex(Func<CodexChat, List<CodexChat.Effect>> what)
+    /// <summary>Asks the translator for what follows from something (a line from the agent, a viewer's message) and carries it out.</summary>
+    static void Agent(Func<IChatAgent, List<ChatEffect>> what)
     {
-        List<CodexChat.Effect> effects;
+        List<ChatEffect> effects;
         bool changed;
         lock (_record)
         {
             string before = ChatStream.Signature(_record);
-            effects = what(_codex!);
+            effects = what(_agent!);
             changed = ChatStream.Signature(_record) != before;
         }
         foreach (var effect in effects)
             switch (effect.Kind)
             {
-                case CodexChat.Kind.ToCli: WriteChatInput(Encoding.UTF8.GetString(effect.Data)); break;
-                case CodexChat.Kind.Durable: AppendChatLine(effect.Data); break;
-                case CodexChat.Kind.Live: Broadcast(true, ChatStream.LiveFrame(effect.Data)); break;
-                case CodexChat.Kind.Frame: Broadcast(true, effect.Data); break;
-                case CodexChat.Kind.Reset: Serve(effect.Seed!); break;
-                case CodexChat.Kind.Reply:
+                case ChatEffectKind.ToCli: WriteChatInput(Encoding.UTF8.GetString(effect.Data)); break;
+                case ChatEffectKind.Durable: AppendChatLine(effect.Data); break;
+                case ChatEffectKind.Live: Broadcast(true, ChatStream.LiveFrame(effect.Data)); break;
+                case ChatEffectKind.Frame: Broadcast(true, effect.Data); break;
+                case ChatEffectKind.Reset: Serve(effect.Seed!); break;
+                case ChatEffectKind.Reply:
                     Client? asker;
                     lock (ClientsLock) asker = Clients.FirstOrDefault(c => c.Tag == effect.Tag);
                     asker?.Out.Writer.TryWrite((true, effect.Data));
@@ -635,11 +636,11 @@ internal static class HostProgram
         if (changed) WriteRecord();
     }
 
-    static void CodexInput(string line)
+    static void AgentInput(string line)
     {
         using var doc = JsonDocument.Parse(line);
         var root = doc.RootElement;
-        Codex(c => c.FromViewer(root, _record, DateTime.UtcNow));
+        Agent(c => c.FromViewer(root, _record, DateTime.UtcNow));
     }
 
     static void ChatReadLoop(PipeChild pipe)
@@ -672,14 +673,14 @@ internal static class HostProgram
         while (length > 0 && (raw[length - 1] == (byte)'\r' || raw[length - 1] == (byte)' ')) length--;
         if (length == 0) return;
         byte[] line = length == raw.Length ? raw : raw[..length];
-        if (_codex != null)
+        if (_agent != null)
         {
-            // The app server speaks only JSON-RPC on this pipe; anything else is noise.
+            // The agent speaks only JSON-RPC on this pipe; anything else is noise.
             try
             {
                 using var said = JsonDocument.Parse(line);
                 var message = said.RootElement;
-                Codex(c => c.FromCli(message, _record, DateTime.UtcNow));
+                Agent(c => c.FromCli(message, _record, DateTime.UtcNow));
             }
             catch (JsonException) { }
             return;
@@ -871,7 +872,7 @@ internal static class HostProgram
                 if (_pipe != null)
                 {
                     string catalog, settings;
-                    lock (_record) { catalog = _codex?.CatalogFrame() ?? _chat.CatalogFrame(); settings = _codex?.SettingsFrame() ?? _chat.SettingsFrame(); }
+                    lock (_record) { catalog = _agent?.CatalogFrame() ?? _chat.CatalogFrame(); settings = _agent?.SettingsFrame() ?? _chat.SettingsFrame(); }
                     if (catalog.Length > 0) client.Out.Writer.TryWrite((true, Encoding.UTF8.GetBytes(catalog)));
                     client.Out.Writer.TryWrite((true, Encoding.UTF8.GetBytes(settings)));
                 }
@@ -928,17 +929,17 @@ internal static class HostProgram
             {
                 case "history":
                     if (_pipe == null) return;
-                    if (_codex != null) { string request = Text(root, "request"), uuid = Text(root, "uuid"); Codex(c => c.History(request, uuid, client.Tag)); }
+                    if (_agent != null) { string request = Text(root, "request"), uuid = Text(root, "uuid"); Agent(c => c.History(request, uuid, client.Tag)); }
                     else SendHistory(client, root);
                     break;
                 case "sessions":
                     if (_pipe == null) return;
-                    if (_codex != null) { string request = Text(root, "request"); Codex(c => c.Sessions(request, client.Tag)); }
+                    if (_agent != null) { string request = Text(root, "request"); Agent(c => c.Sessions(request, client.Tag)); }
                     else SendSessions(client, root);
                     break;
                 case "resume":
                     if (_pipe == null) return;
-                    if (_codex != null) { string request = Text(root, "request"), session = Text(root, "session"); Codex(c => c.Resume(request, session, client.Tag)); }
+                    if (_agent != null) { string request = Text(root, "request"), session = Text(root, "session"); Agent(c => c.Resume(request, session, client.Tag)); }
                     else RequestResume(client, root);
                     break;
                 case "input":
@@ -946,7 +947,7 @@ internal static class HostProgram
                     if (_pipe != null)
                     {
                         foreach (var line in ChatStream.InputLines(root.GetProperty("data").GetString() ?? ""))
-                            if (_codex != null) CodexInput(line); else WriteChatInput(line);
+                            if (_agent != null) AgentInput(line); else WriteChatInput(line);
                         break;
                     }
                     var bytes = Encoding.UTF8.GetBytes(root.GetProperty("data").GetString() ?? "");

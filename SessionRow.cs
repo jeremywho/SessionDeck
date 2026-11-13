@@ -49,6 +49,7 @@ internal sealed class SessionRow : INotifyPropertyChanged
     public static SessionProvider ProviderOf(string hostProvider) =>
         string.Equals(hostProvider, "Codex", StringComparison.OrdinalIgnoreCase) ? SessionProvider.Codex
         : string.Equals(hostProvider, "Agy", StringComparison.OrdinalIgnoreCase) ? SessionProvider.Agy
+        : string.Equals(hostProvider, "OpenCode", StringComparison.OrdinalIgnoreCase) ? SessionProvider.OpenCode
         : SessionProvider.Claude;
 
     /// <summary>Take the latest scan and the host record as it is on disk now: the host follows the
@@ -412,10 +413,10 @@ internal sealed class SessionRow : INotifyPropertyChanged
     // --- provider ---
     public SessionProvider Provider => _s.Provider;
     public bool IsCodex => _s.Provider == SessionProvider.Codex;
-    public string ProviderName => _s.Provider switch { SessionProvider.Codex => "Codex", SessionProvider.Agy => "Antigravity", _ => "Claude Code" };
+    public string ProviderName => _s.Provider switch { SessionProvider.Codex => "Codex", SessionProvider.Agy => "Antigravity", SessionProvider.OpenCode => "OpenCode", _ => "Claude Code" };
     /// <summary>Marker inside the model pill. Shapes rather than letters — two of the CLIs start
     /// with a C, so a glyph tells them apart faster than initials do.</summary>
-    public string ProviderGlyph => _s.Provider switch { SessionProvider.Codex => "◆", SessionProvider.Agy => "◈", _ => "✳" };
+    public string ProviderGlyph => _s.Provider switch { SessionProvider.Codex => "◆", SessionProvider.Agy => "◈", SessionProvider.OpenCode => "◇", _ => "✳" };
 
     /// <summary>This session's context size — the model's own when we know it (Codex reports it per
     /// turn), otherwise the app-wide default.</summary>

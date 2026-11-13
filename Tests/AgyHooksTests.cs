@@ -100,6 +100,13 @@ public class AgyHooksTests
         Assert.Equal(SessionProvider.Claude, SessionRow.ProviderOf("Shell"));
     }
 
+    [Fact]
+    public void An_opencode_host_is_an_opencode_row()
+    {
+        Assert.Equal(SessionProvider.OpenCode, SessionRow.ProviderOf("OpenCode"));
+        Assert.Equal(SessionProvider.OpenCode, SessionRow.ProviderOf("opencode"));
+    }
+
     /// <summary>The pane's shell is 50; its agy is 51; a hook's curl runs under cmd under the agy that fired it.</summary>
     static readonly Dictionary<int, (int Parent, string Name)> Tree = new()
     {

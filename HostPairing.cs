@@ -48,5 +48,6 @@ internal static class HostPairing
     /// </summary>
     public static bool CanDescend(SessionInfo s, HostRecord h) =>
         !string.Equals(h.Provider, "Agy", StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(h.Provider, "OpenCode", StringComparison.OrdinalIgnoreCase)
         && !(s.Provider == SessionProvider.Codex && s.Kind != "tui");
 }

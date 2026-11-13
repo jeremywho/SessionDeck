@@ -11,7 +11,7 @@ internal sealed record StartPlan(string SessionId, string Provider, string Comma
 
 internal static class SessionStarter
 {
-    public static readonly string[] Providers = { "Claude", "Codex", "Agy", "Shell" };
+    public static readonly string[] Providers = { "Claude", "Codex", "Agy", "OpenCode", "Shell" };
 
     public static StartPlan? Plan(StartRequest r, Settings settings)
     {
@@ -33,7 +33,12 @@ internal static class SessionStarter
                     return new StartPlan("", "Codex", HostManager.CodexChatCommand(), cwd, null, r.Prompt, ChatStream.Kind, new HostManager.ChatRestore(HostManager.CodexChatMode(settings.CodexFlags), r.Effort.Trim(), r.Model.Trim()));
                 return new StartPlan("", "Codex", HostManager.NewCodexCommand(settings.CodexFlags, r.Model, r.Effort), cwd, null, r.Prompt);
             case "agy":
+                if (r.Chat)
+                    return new StartPlan("", "Agy", HostManager.AgyChatCommand(HostManager.AgyDefaultFlags), cwd, null, r.Prompt, ChatStream.Kind, new HostManager.ChatRestore("", r.Effort.Trim(), r.Model.Trim()));
                 return new StartPlan("", "Agy", HostManager.NewAgyCommand(HostManager.AgyDefaultFlags), cwd, "AGY", r.Prompt);
+            case "opencode":
+                // The deck has OpenCode as a chat only: there is no terminal session of it to start.
+                return new StartPlan("", "OpenCode", HostManager.OpenCodeChatCommand(), cwd, null, r.Prompt, ChatStream.Kind, new HostManager.ChatRestore("", r.Effort.Trim(), r.Model.Trim()));
             case "shell":
             case "terminal":
                 return new StartPlan("", "Shell", "", cwd, "Terminal", "");

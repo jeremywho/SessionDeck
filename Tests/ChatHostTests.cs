@@ -440,6 +440,60 @@ public class ChatHostTests : IDisposable
         Assert.True(_host!.WaitForExit(15000), "host did not exit after it was told to end");
     }
 
+    const string FakeAcp = """
+        [Console]::InputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+        $out = [Console]::Out
+        function Say($o) { $out.WriteLine(($o | ConvertTo-Json -Compress -Depth 12)) }
+        $session = 'ses_fakeacp00000000000000001'
+        while ($null -ne ($line = [Console]::In.ReadLine())) {
+            $m = $line | ConvertFrom-Json
+            if ($null -eq $m.id) { continue }
+            switch ($m.method) {
+                'initialize' { Say @{ jsonrpc = '2.0'; id = $m.id; result = @{ protocolVersion = 1; agentCapabilities = @{ loadSession = $true; sessionCapabilities = @{ list = @{} } }; agentInfo = @{ name = 'Fake ACP'; version = '1' } } } }
+                'session/new' { Say @{ jsonrpc = '2.0'; id = $m.id; result = @{ sessionId = $session; configOptions = @(@{ id = 'model'; name = 'Model'; category = 'model'; type = 'select'; currentValue = 'fake-model'; options = @(@{ value = 'fake-model'; name = 'Fake Model' }) }, @{ id = 'effort'; name = 'Effort'; category = 'thought_level'; type = 'select'; currentValue = 'low'; options = @(@{ value = 'low'; name = 'Low' }) }) } } }
+                'session/prompt' {
+                    $text = $m.params.prompt[0].text
+                    Say @{ jsonrpc = '2.0'; method = 'session/update'; params = @{ sessionId = $session; update = @{ sessionUpdate = 'agent_message_chunk'; messageId = 'msg_fake_1'; content = @{ type = 'text'; text = "echo: $text in $($m.params.sessionId)" } } } }
+                    Say @{ jsonrpc = '2.0'; id = $m.id; result = @{ stopReason = 'end_turn' } }
+                }
+            }
+        }
+        """;
+
+    [Fact]
+    public async Task An_acp_chat_host_sends_what_a_viewer_types_as_a_prompt_and_the_agents_reply_reaches_the_viewer()
+    {
+        string script = Path.Combine(_dir, "fake-acp.ps1");
+        File.WriteAllText(script, FakeAcp);
+        await Start(new HostSpec
+        {
+            Id = "chattest0001", SessionId = "", Provider = "OpenCode", Kind = ChatStream.Kind,
+            CommandLine = $"\"{SessionLauncher.ResolvePowerShell()}\" -NoLogo -NoProfile -File \"{script}\"",
+            Cwd = _dir, HostsDir = Path.Combine(_dir, "hosts"), RingBytes = 256 * 1024,
+        });
+        const string Session = "ses_fakeacp00000000000000001";
+        var record = await RecordWhen(r => r.SessionId == Session && r.Model == "fake-model");
+        Assert.Equal((ChatStream.Kind, "OpenCode", "low"), (record.Kind, record.Provider, record.Effort));
+
+        using var viewer = await Viewer.Attach(record, after: 0);
+        await viewer.Pump(() => viewer.Catalog.HasValue && viewer.Settings.Count > 0);
+        Assert.Equal(("OpenCode", "fake-model"), (viewer.Catalog!.Value.GetProperty("agent").GetString(), viewer.Catalog.Value.GetProperty("models")[0].GetProperty("value").GetString()));
+        Assert.Equal(("", "fake-model", "low"), SettingsOf(viewer));
+
+        await viewer.Send(ChatStream.UserLine("héllo"));
+        var turn = await viewer.Until(l => Type(l) == "result");
+        Assert.Equal(new[] { "user", "assistant", "result" }, turn.Select(Type));
+        Assert.Equal(("héllo", "echo: héllo in " + Session), (Said(turn[0]), Said(turn[1])));
+        Assert.Equal("success", turn[2].GetProperty("subtype").GetString());
+        Assert.Equal(new[] { "system", "stream_event", "stream_event" }, viewer.Live.Select(Type));
+        record = await RecordWhen(r => r.AgentStatus == "idle" && r.LastEvent == "Stop");
+        Assert.Equal("héllo", record.Title);
+
+        await viewer.SendFrame("""{"type":"kill"}""");
+        await viewer.Exited();
+        Assert.True(_host!.WaitForExit(15000), "host did not exit after it was told to end");
+    }
+
     HostRecord Record() => JsonSerializer.Deserialize<HostRecord>(File.ReadAllText(Path.Combine(_dir, "hosts", "chattest0001.json")))!;
 
     async Task<HostRecord> RecordWhen(Func<HostRecord, bool> ready)

@@ -7,6 +7,7 @@ using Xunit;
 namespace SessionDeck.Tests;
 
 /// <summary>What a chat host reads out of the CLI's stream-json lines. The lines are shaped like Claude Code 2.1.322's, cut to the fields that matter.</summary>
+[Collection("HostManager exe locators")]
 public class ChatStreamTests : IDisposable
 {
     readonly string _dir = Path.Combine(Path.GetTempPath(), "sd-chatstream-" + Guid.NewGuid().ToString("N"));

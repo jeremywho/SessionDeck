@@ -312,9 +312,9 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
   `thread/turns/list`, `model/list`; `codex app-server generate-ts --out <dir>` prints every
   type). `CodexChat` turns its notifications into the lines a viewer already reads from Claude
   (user, assistant, `tool_use`/`tool_result`, `control_request`, `result`) and a viewer's lines
-  into requests, as a list of effects the host carries out (`HostProgram.Codex`). It is pure and
-  tested on its own; `ChatHostTests` runs the real host against a script standing in for the app
-  server.
+  into requests, as a list of effects the host carries out (`HostProgram.Agent`; the translators
+  share `IChatAgent` in `Host/ChatAgent.cs`). It is pure and tested on its own; `ChatHostTests`
+  runs the real host against a script standing in for the app server.
 - **What differs from Claude, by measurement:** the thread id is the app server's to name, so
   the record's `SessionId` is empty until the thread is open; one process starts, resumes and
   lists threads, so `/resume` and earlier history are requests and never a restart
@@ -329,6 +329,32 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
   restricted-token sandbox refuses to run any command in `workspace-write`. A new chat takes its
   mode from `Settings.CodexFlags` (`HostManager.CodexChatMode`). The catalog frame carries
   `agent` and `modes`, which the pane uses for its placeholder and mode picker.
+- **Antigravity and OpenCode chats are one more translator** (`Host/AcpChat.cs`, measured
+  against agy 1.5.8 and opencode 2.2.6). Both have an `acp` subcommand: the Agent Client
+  Protocol, JSON-RPC 2.0 on pipes (`initialize`, `session/new|load|list|prompt|cancel`,
+  `session/set_config_option`, `session/update` notifications, `session/request_permission`
+  from the agent). The model, effort and mode pickers are the agent's own `configOptions` by
+  category (`model`, `thought_level`, `mode`), so nothing about either agent's models is in
+  this repo. The deck starts `"<agy.exe>" acp --dangerously-skip-permissions` and
+  `"<opencode.exe>" acp` (`HostManager.AgyChatCommand`/`OpenCodeChatCommand`; the npm
+  `opencode.cmd` shim is followed to the exe behind it). The same command starts a conversation and comes back to one: the session id goes in
+  `HostSpec.SessionId` and the translator loads it.
+- **What ACP does not have, by measurement:** no earlier page (`session/load` replays the whole
+  conversation, trimmed to half the ring, and `History` always answers empty); no adding to a
+  running turn (a message typed meanwhile is the next `session/prompt`); no transcript path, so
+  an ACP chat is not restarted onto a new build by itself. A loaded conversation comes without
+  its name, which is then read from `session/list`.
+- **Quirks each agent has, each with a test in `AcpChatTests`:** Antigravity lists every
+  folder's conversations whatever folder is asked for, writes a real folder as `/C:/…`, and
+  gives the ones it has no folder for its own working folder, so where any folder is written
+  that way only those are listed; it wraps a command's output in a "Created At… Command
+  output:" header. OpenCode lists a hundred at a time and names a next page after the last;
+  announces a call before it knows what the call is; ends the turn as `cancelled` when a call
+  is declined (not shown as interrupted); runs a call it was waiting to ask about once an
+  "always" given meanwhile covers it, without taking the question back (the card is closed
+  when the call ends); keeps an "always" for the folder past the session (the button says "in
+  this folder"); and can fail `session/new` once (the next message asks again). OpenCode's
+  default model is a paid one: test with a free model set through `RestoreModel`.
 - **A record write is retried past a reader** (`RecordGate.Write`). The deck reads
   `hosts/<id>.json` whenever it scans, and a replace is refused while a reader has the file
   open; a write that still fails is forgotten as written, so the next change carries it. Before

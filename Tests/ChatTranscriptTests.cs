@@ -7,6 +7,7 @@ using Xunit;
 namespace SessionDeck.Tests;
 
 /// <summary>Earlier conversation paged out of a transcript from its end, and what the scrollback is spared.</summary>
+[Collection("HostManager exe locators")]
 public class ChatTranscriptTests : IDisposable
 {
     readonly string _dir = Path.Combine(Path.GetTempPath(), "sd-chattranscript-" + Guid.NewGuid().ToString("N"));

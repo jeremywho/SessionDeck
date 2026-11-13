@@ -1,6 +1,9 @@
 using System.IO;
 using System.Text;
 using System.Text.Json;
+using Effect = SessionDeck.Host.ChatEffect;
+using Kind = SessionDeck.Host.ChatEffectKind;
+using Seed = SessionDeck.Host.ChatSeed;
 
 namespace SessionDeck.Host;
 
@@ -14,29 +17,8 @@ namespace SessionDeck.Host;
 /// ("threads") itself, so moving to another conversation and reading earlier turns are requests
 /// here and never a restart.</para>
 /// </summary>
-internal sealed class CodexChat
+internal sealed class CodexChat : IChatAgent
 {
-    public enum Kind
-    {
-        /// <summary>A line to write to the app server.</summary>
-        ToCli,
-        /// <summary>A line of the conversation: into the scrollback and to every viewer.</summary>
-        Durable,
-        /// <summary>A line only the viewers attached now get (token deltas, the start of a turn).</summary>
-        Live,
-        /// <summary>A text frame for every viewer (the catalog, the settings, the title).</summary>
-        Frame,
-        /// <summary>A text frame for the one viewer named by <see cref="Effect.Tag"/>.</summary>
-        Reply,
-        /// <summary>The host now serves another conversation: empty the scrollback and fill it with <see cref="Effect.Seed"/>.</summary>
-        Reset,
-    }
-
-    /// <summary>What the scrollback is started with when the conversation changes.</summary>
-    public sealed record Seed(string Session, string Title, string Path, List<byte[]> Lines, bool Earlier);
-
-    public readonly record struct Effect(Kind Kind, byte[] Data, string Tag = "", Seed? Seed = null);
-
     /// <summary>The two ways a Codex chat runs: asking before each command and file change, or not asking. Named as the pane names Claude's modes, so a restart and the picker need no second vocabulary.</summary>
     public const string Ask = "default", Full = "bypassPermissions";
 

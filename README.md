@@ -131,8 +131,14 @@ back after a reboot with its conversation. The phone app opens a chat as the sam
 `+` menu. Codex has a chat too (**New Codex chat** in the same menu, or **Chat view** with Codex picked): the
 same pane over Codex's app server, with its models and efforts, approvals as cards, file changes as
 diffs, and `/resume` over the folder's Codex conversations. A Codex chat either asks before each
-command and file change or has full access, as your Codex flags say; it has no sandbox mode. Claude
-chats need the native `claude.exe` and use the default login; Codex chats need `codex.exe`.
+command and file change or has full access, as your Codex flags say; it has no sandbox mode.
+Antigravity and OpenCode have chats as well (**New AGY chat** and **New OpenCode chat**), over each
+agent's own Agent Client Protocol server: the pickers show that agent's models, efforts and modes,
+and approvals, diffs and `/resume` work the same. Two things differ there: a message sent while the
+agent is working waits for the turn to end, and the whole conversation is loaded at once rather than
+a page at a time. OpenCode's "always allow" lasts for the folder, not just the session. Claude
+chats need the native `claude.exe` and use the default login; Codex chats need `codex.exe`, AGY
+chats `agy.exe`, and OpenCode chats `opencode` on the path.
 
 ## Docking
 Right-click the tray icon → **Dock to** → an edge or corner, and the window **snaps there on the

@@ -137,6 +137,8 @@
                 <MenuItem Header="New Codex session" Click="NewCodexMenu_Click" Tag="{Binding}"/>
                 <MenuItem Header="New Codex chat" Click="NewCodexChatMenu_Click" Tag="{Binding}"/>
                 <MenuItem Header="New AGY session" Click="NewAgyMenu_Click" Tag="{Binding}"/>
+                <MenuItem Header="New AGY chat" Click="NewAgyChatMenu_Click" Tag="{Binding}"/>
+                <MenuItem Header="New OpenCode chat" Click="NewOpenCodeChatMenu_Click" Tag="{Binding}"/>
                 <MenuItem Header="New terminal" Click="NewShellMenu_Click" Tag="{Binding}"/>
                 <Separator/>
                 <MenuItem Header="Add spacer column to the left" Click="AddSpacerLeftMenu_Click" Tag="{Binding}"/>

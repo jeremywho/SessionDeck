@@ -149,6 +149,8 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
                 case "agy": SpawnAgyIntoDeck(); break;
                 case "chat": NewChatSession(); break;
                 case "codex-chat": NewCodexChatSession(); break;
+                case "agy-chat": NewTranslatedChat(SessionProvider.Agy); break;
+                case "opencode-chat": NewTranslatedChat(SessionProvider.OpenCode); break;
                 case var p when p.StartsWith("profile:", StringComparison.Ordinal): NewProfileSession(p["profile:".Length..]); break;
                 default: NewSessionButton_Click(this, new RoutedEventArgs()); break;
             }
@@ -667,6 +669,17 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         SpawnIntoDeck(sessionId, SessionProvider.Claude, HostManager.NewClaudeCommand(sessionId, null, _app.Settings.ResumeFlags, launcher: launcher), HomeDir, null, profile: profile);
     }
 
+    /// <summary>A new conversation with an agent the host translates for (Antigravity, OpenCode), in a chat pane in the home folder.</summary>
+    void NewTranslatedChat(SessionProvider provider)
+    {
+        try { Deck.Open(HostManager.Spawn("", provider, HostManager.TranslatedChatCommand(provider), HomeDir, null, kind: Host.ChatStream.Kind)); }
+        catch (Exception ex)
+        {
+            App.LogError(ex);
+            LiveLabel.Text = "Could not start the chat: " + ex.Message;
+        }
+    }
+
     /// <summary>A new Codex conversation in a chat pane: the app server in the home folder, asking or not as the deck's Codex terminals do.</summary>
     void NewCodexChatSession()
     {
@@ -776,17 +789,19 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     {
         string cwd = string.IsNullOrWhiteSpace(s.Cwd) ? HomeDir : s.Cwd;
         string launcher = ClaudeProfiles.CommandFor(s.Profile);
-        bool chat = s.Kind == Host.ChatStream.Kind && s.Provider is SessionProvider.Claude or SessionProvider.Codex;
+        bool chat = s.Kind == Host.ChatStream.Kind, translated = chat && s.Provider != SessionProvider.Claude;
         try
         {
             string cmd = s.Provider switch
             {
-                SessionProvider.Codex => chat ? HostManager.CodexChatCommand() : HostManager.ResumeCodexCommand(s.Id, _app.Settings.CodexFlags),
+                _ when translated => HostManager.TranslatedChatCommand(s.Provider),
+                SessionProvider.Codex => HostManager.ResumeCodexCommand(s.Id, _app.Settings.CodexFlags),
                 SessionProvider.Agy => HostManager.ResumeAgyCommand(s.Id, HostManager.AgyDefaultFlags),
                 _ => ClaudeCommandFor(s.Id, s.Name, SessionScanner.HasTranscript(s.Id, cwd, chat), launcher, chat),
             };
-            // A Codex chat after a reboot asks or not as the deck's Codex terminals do: what it was set to is not saved with the session.
-            var restore = chat && s.Provider == SessionProvider.Codex ? new HostManager.ChatRestore(HostManager.CodexChatMode(_app.Settings.CodexFlags), "", s.Model) : null;
+            // What a translated chat was set to is not saved with the session, only its model: a Codex chat asks or not as the
+            // deck's Codex terminals do, and an ACP agent comes back in the mode it starts in.
+            var restore = translated ? new HostManager.ChatRestore(s.Provider == SessionProvider.Codex ? HostManager.CodexChatMode(_app.Settings.CodexFlags) : "", "", s.Model) : null;
             return HostManager.Spawn(s.Id, s.Provider, cmd, cwd, s.Name, profile: s.Profile, kind: chat ? Host.ChatStream.Kind : "", restore: restore);
         }
         catch (Exception ex)
@@ -1718,7 +1733,8 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             string launcher = ClaudeProfiles.CommandFor(host.Profile);
             string cmd = provider switch
             {
-                SessionProvider.Codex => host.IsChat ? HostManager.CodexChatCommand() : HostManager.ResumeCodexCommand(sessionId, _app.Settings.CodexFlags),
+                _ when host.IsChat && provider != SessionProvider.Claude => HostManager.TranslatedChatCommand(provider),
+                SessionProvider.Codex => HostManager.ResumeCodexCommand(sessionId, _app.Settings.CodexFlags),
                 SessionProvider.Agy => HostManager.ResumeAgyCommand(sessionId, HostManager.AgyDefaultFlags),
                 _ => ClaudeCommandFor(sessionId, null, hasTranscript, launcher, host.IsChat, host.IsChat ? host.Model : ""),
             };

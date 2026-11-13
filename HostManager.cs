@@ -148,6 +148,63 @@ internal static class HostManager
 
     public const string AgyDefaultFlags = "--dangerously-skip-permissions";
 
+    /// <summary>
+    /// An Antigravity chat: its Agent Client Protocol server on plain pipes (<see cref="AcpChat"/>).
+    /// The flags are the CLI's own, and the one that skips permission prompts holds in this mode too
+    /// (measured, agy 1.5.8: no <c>session/request_permission</c> with it).
+    /// </summary>
+    public static string AgyChatCommand(string extraFlags) =>
+        AgyExeLocator() is { } exe
+            ? $"\"{exe}\" acp" + (string.IsNullOrWhiteSpace(extraFlags) ? "" : " " + extraFlags.Trim())
+            : throw new InvalidOperationException("AGY chat sessions need agy.exe on PATH");
+
+    /// <summary>An OpenCode chat: its Agent Client Protocol server on plain pipes (<see cref="AcpChat"/>).</summary>
+    public static string OpenCodeChatCommand() =>
+        OpenCodeExeLocator() is { } exe
+            ? $"\"{exe}\" acp"
+            : throw new InvalidOperationException("OpenCode chat sessions need opencode on PATH");
+
+    /// <summary>The command that runs a chat whose agent the host translates for (<see cref="IChatAgent"/>): the same one starts a conversation and comes back to one.</summary>
+    public static string TranslatedChatCommand(SessionProvider provider) => provider switch
+    {
+        SessionProvider.Codex => CodexChatCommand(),
+        SessionProvider.Agy => AgyChatCommand(AgyDefaultFlags),
+        SessionProvider.OpenCode => OpenCodeChatCommand(),
+        _ => throw new InvalidOperationException($"{provider} has no translated chat"),
+    };
+
+    /// <summary>Test seams: where each agent's executable is, without depending on what the machine has installed.</summary>
+    internal static Func<string?> AgyExeLocator { get; set; } = () =>
+        FindOnPath("agy.exe", Environment.GetEnvironmentVariable("PATH") ?? "", File.Exists, Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "agy", "bin"));
+
+    internal static Func<string?> OpenCodeExeLocator { get; set; } = () =>
+        FindOpenCodeExe(Environment.GetEnvironmentVariable("PATH") ?? "", File.Exists);
+
+    /// <summary>The first folder on the path (then any given after it) that holds the file.</summary>
+    internal static string? FindOnPath(string file, string path, Func<string, bool> exists, params string[] alsoIn)
+    {
+        foreach (var dir in path.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(d => d.Trim('"')).Concat(alsoIn))
+        {
+            string candidate;
+            try { candidate = Path.Combine(dir, file); }
+            catch (ArgumentException) { continue; }
+            if (exists(candidate)) return candidate;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// OpenCode installs through npm: what is on the path is a <c>.cmd</c> shim, and a chat host starts
+    /// its child without a shell, so the executable the shim runs is found beside it.
+    /// </summary>
+    internal static string? FindOpenCodeExe(string path, Func<string, bool> exists)
+    {
+        if (FindOnPath("opencode.exe", path, exists) is { } exe) return exe;
+        if (FindOnPath("opencode.cmd", path, exists) is not { } shim) return null;
+        string native = Path.Combine(Path.GetDirectoryName(shim)!, "node_modules", "@opencode", "cli", "bin", "opencode.exe");
+        return exists(native) ? native : null;
+    }
+
     public static string NewAgyCommand(string extraFlags)
     {
         string cmd = "agy";
@@ -186,7 +243,8 @@ internal static class HostManager
     {
         Directory.CreateDirectory(HostsDir);
         string id = Guid.NewGuid().ToString("N")[..12];
-        bool chat = kind == ChatStream.Kind, codexChat = chat && provider == "Codex";
+        // A chat the host translates for (Codex, an ACP agent) has no Claude transcript to read and no Claude command to switch with.
+        bool chat = kind == ChatStream.Kind, codexChat = chat && provider != "Claude";
         string folder = string.IsNullOrWhiteSpace(cwd) ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) : cwd;
         var spec = new HostSpec
         {

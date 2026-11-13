@@ -84,6 +84,8 @@ struct SessionsView: View {
                         Button { start("Codex") } label: { Label("New Codex session", systemImage: "diamond") }
                         Button { start("Codex", chat: true) } label: { Label("New Codex chat", systemImage: "bubble.left") }
                         Button { start("Agy") } label: { Label("New AGY session", systemImage: "diamond.inset.filled") }
+                        Button { start("Agy", chat: true) } label: { Label("New AGY chat", systemImage: "bubble.left") }
+                        Button { start("OpenCode", chat: true) } label: { Label("New OpenCode chat", systemImage: "bubble.left") }
                         Button { start("Shell") } label: { Label("New terminal", systemImage: "terminal") }
                     } label: { Image(systemName: "plus") }
                         .disabled(!gateway.connected)

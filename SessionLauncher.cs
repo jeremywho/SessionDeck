@@ -43,6 +43,7 @@ internal static class SessionLauncher
         {
             SessionProvider.Codex => $"codex resume {s.Id}",
             SessionProvider.Agy => $"agy --conversation {s.Id}",
+            SessionProvider.OpenCode => $"opencode --session {s.Id}",
             _ => ClaudeResumeCommand(s),
         };
 

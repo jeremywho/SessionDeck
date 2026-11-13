@@ -9,19 +9,20 @@ namespace SessionDeck.Tests;
 /// The Codex translator on its own: app-server messages in the shapes codex-cli 0.167.2 sent
 /// (cut down to the fields read), and what a viewer and the app server are then told.
 /// </summary>
+[Collection("HostManager exe locators")]
 public class CodexChatTests
 {
     const string Thread = "01a1d346-0f38-74b1-9d27-2413232a9b1e", Other = "01a1d33c-2727-70f0-b24f-116fd1536c2a";
     static readonly DateTime T0 = new(2026, 11, 12, 12, 0, 0, DateTimeKind.Utc);
 
     static JsonElement J(string json) => JsonDocument.Parse(json).RootElement.Clone();
-    static JsonElement Of(CodexChat.Effect e) => J(Encoding.UTF8.GetString(e.Data));
+    static JsonElement Of(ChatEffect e) => J(Encoding.UTF8.GetString(e.Data));
     static string Type(JsonElement e) => e.TryGetProperty("type", out var t) ? t.GetString() ?? "" : "";
-    static string Raw(CodexChat.Effect e) => Encoding.UTF8.GetString(e.Data);
+    static string Raw(ChatEffect e) => Encoding.UTF8.GetString(e.Data);
 
-    static List<JsonElement> Sent(List<CodexChat.Effect> effects) => effects.Where(e => e.Kind == CodexChat.Kind.ToCli).Select(Of).ToList();
-    static List<JsonElement> Kept(List<CodexChat.Effect> effects) => effects.Where(e => e.Kind == CodexChat.Kind.Durable).Select(Of).ToList();
-    static List<JsonElement> Passed(List<CodexChat.Effect> effects) => effects.Where(e => e.Kind == CodexChat.Kind.Live).Select(Of).ToList();
+    static List<JsonElement> Sent(List<ChatEffect> effects) => effects.Where(e => e.Kind == ChatEffectKind.ToCli).Select(Of).ToList();
+    static List<JsonElement> Kept(List<ChatEffect> effects) => effects.Where(e => e.Kind == ChatEffectKind.Durable).Select(Of).ToList();
+    static List<JsonElement> Passed(List<ChatEffect> effects) => effects.Where(e => e.Kind == ChatEffectKind.Live).Select(Of).ToList();
     static string Method(JsonElement m) => m.GetProperty("method").GetString()!;
     static long Id(JsonElement m) => m.GetProperty("id").GetInt64();
 
@@ -60,7 +61,7 @@ public class CodexChatTests
 
         var models = Sent(next).Single(m => Method(m) == "model/list");
         var told = chat.FromCli(J(Response(Id(models), """{"data":[{"id":"gpt-6-astra","model":"gpt-6-astra","displayName":"GPT-6-Astra","description":"Deep","hidden":false,"supportedReasoningEfforts":[{"reasoningEffort":"low"},{"reasoningEffort":"ultra"}]},{"id":"secret","model":"secret","displayName":"Hidden","hidden":true,"supportedReasoningEfforts":[]}]}""")), record, T0);
-        var catalog = Of(told.Single(e => e.Kind == CodexChat.Kind.Frame));
+        var catalog = Of(told.Single(e => e.Kind == ChatEffectKind.Frame));
         Assert.Equal(("catalog", "Codex"), (Type(catalog), catalog.GetProperty("agent").GetString()));
         var only = catalog.GetProperty("models").EnumerateArray().Single();
         Assert.Equal(("gpt-6-astra", "GPT-6-Astra", "low,ultra"), (only.GetProperty("value").GetString(), only.GetProperty("name").GetString(), string.Join(",", only.GetProperty("efforts").EnumerateArray().Select(e => e.GetString()))));
@@ -70,7 +71,7 @@ public class CodexChatTests
         var opened = chat.FromCli(J(Response(Id(Sent(next).Single(m => Method(m) == "thread/start")), ThreadResult.Replace("THREAD", Thread))), record, T0);
         Assert.Equal((Thread, "gpt-6-astra", "medium", "default"), (record.SessionId, record.Model, record.Effort, record.PermissionMode));
         Assert.EndsWith(Thread + ".jsonl", record.TranscriptPath);
-        var settings = Of(opened.Single(e => e.Kind == CodexChat.Kind.Frame));
+        var settings = Of(opened.Single(e => e.Kind == ChatEffectKind.Frame));
         Assert.Equal(("settings", "default", "gpt-6-astra", "medium"), (Type(settings), settings.GetProperty("mode").GetString(), settings.GetProperty("model").GetString(), settings.GetProperty("effort").GetString()));
     }
 
@@ -136,12 +137,12 @@ public class CodexChatTests
         var blocks = said.GetProperty("message").GetProperty("content");
         Assert.Equal(("text", "image", "", 26), (blocks[0].GetProperty("type").GetString(), blocks[1].GetProperty("type").GetString(), blocks[1].GetProperty("source").GetProperty("data").GetString(), blocks[1].GetProperty("source").GetProperty("omitted").GetInt32()));
         // The conversation is named once, by what was first said, short enough for a tab.
-        var title = Of(user.Single(e => e.Kind == CodexChat.Kind.Frame));
+        var title = Of(user.Single(e => e.Kind == ChatEffectKind.Frame));
         Assert.Equal("title", Type(title));
         Assert.Equal(record.Title, title.GetProperty("title").GetString());
         Assert.StartsWith("Fix the retry loop, please", record.Title);
         Assert.True(record.Title.Length <= 60 && record.Title.EndsWith('…'));
-        Assert.DoesNotContain(chat.FromCli(J(Item("completed", """{"type":"userMessage","id":"u2","content":[{"type":"text","text":"another"}]}""")), record, T0), e => e.Kind == CodexChat.Kind.Frame);
+        Assert.DoesNotContain(chat.FromCli(J(Item("completed", """{"type":"userMessage","id":"u2","content":[{"type":"text","text":"another"}]}""")), record, T0), e => e.Kind == ChatEffectKind.Frame);
 
         // Words stream to whoever is watching and land once, whole.
         var streamed = Passed(chat.FromCli(J(Item("started", """{"type":"agentMessage","id":"m1","text":""}""")), record, T0)).Single();
@@ -266,7 +267,7 @@ public class CodexChatTests
         string Set(string id, string body) => "{\"type\":\"control_request\",\"request_id\":\"" + id + "\",\"request\":" + body + "}";
         var model = chat.FromViewer(J(Set("sd-set-1", "{\"subtype\":\"set_model\",\"model\":\"gpt-6.1-sol\"}")), record, T0);
         Assert.Equal("success", Passed(model).Single().GetProperty("response").GetProperty("subtype").GetString());
-        Assert.Equal("gpt-6.1-sol", Of(model.Single(e => e.Kind == CodexChat.Kind.Frame)).GetProperty("model").GetString());
+        Assert.Equal("gpt-6.1-sol", Of(model.Single(e => e.Kind == ChatEffectKind.Frame)).GetProperty("model").GetString());
         chat.FromViewer(J(Set("sd-set-2", "{\"subtype\":\"apply_flag_settings\",\"settings\":{\"effortLevel\":\"ultra\"}}")), record, T0);
         chat.FromViewer(J(Set("sd-set-3", "{\"subtype\":\"set_permission_mode\",\"mode\":\"default\"}")), record, T0);
         Assert.Equal(("gpt-6.1-sol", "ultra", "default"), (record.Model, record.Effort, record.PermissionMode));
@@ -278,7 +279,7 @@ public class CodexChatTests
         {
             var refused = chat.FromViewer(J(Set("sd-set-9", body)), record, T0);
             Assert.Equal(("error", "sd-set-9"), (Passed(refused).Single().GetProperty("response").GetProperty("subtype").GetString(), Passed(refused).Single().GetProperty("response").GetProperty("request_id").GetString()));
-            Assert.DoesNotContain(refused, e => e.Kind == CodexChat.Kind.Frame);
+            Assert.DoesNotContain(refused, e => e.Kind == ChatEffectKind.Frame);
         }
         Assert.Equal("default", record.PermissionMode);
     }
@@ -306,7 +307,7 @@ public class CodexChatTests
         var served = chat.FromCli(J(Response(Id(seed), Page("cursor-1",
             Turn("t3", "completed", UserItem("u3", "third"), AgentItem("a3", "three")),
             Turn("t2", "interrupted", UserItem("u2", "second"))))), record, T0);
-        var reset = served.Single(e => e.Kind == CodexChat.Kind.Reset).Seed!;
+        var reset = served.Single(e => e.Kind == ChatEffectKind.Reset).Seed!;
         Assert.Equal((Thread, "what was first asked", true), (reset.Session, reset.Title, reset.Earlier));
         var lines = reset.Lines.Select(l => J(Encoding.UTF8.GetString(l))).ToList();
         Assert.Equal(new[] { "second", "[Request interrupted by user]", "third", "three" }, lines.Select(l => l.GetProperty("message").GetProperty("content") is { ValueKind: JsonValueKind.String } s ? s.GetString()! : l.GetProperty("message").GetProperty("content")[0].GetProperty("text").GetString()!));
@@ -317,12 +318,12 @@ public class CodexChatTests
         var ask = chat.History("h1", "u2", "viewer-a");
         Assert.Equal("cursor-1", Sent(ask).Single().GetProperty("params").GetProperty("cursor").GetString());
         var page = chat.FromCli(J(Response(Id(Sent(ask).Single()), Page(null, Turn("t1", "completed", UserItem("u1", "first"), AgentItem("a1", "one"))))), record, T0).Single();
-        Assert.Equal((CodexChat.Kind.Reply, "viewer-a"), (page.Kind, page.Tag));
+        Assert.Equal((ChatEffectKind.Reply, "viewer-a"), (page.Kind, page.Tag));
         Assert.Equal(("history", "h1", JsonValueKind.Null), (Type(Of(page)), Of(page).GetProperty("request").GetString(), Of(page).GetProperty("next").ValueKind));
         Assert.Equal(new[] { "u1", "a1" }, Uuids(Of(page)));
         // And before that there is nothing, which is said without asking again.
         var none = chat.History("h2", "u1", "viewer-a").Single();
-        Assert.Equal((CodexChat.Kind.Reply, 0), (none.Kind, Of(none).GetProperty("lines").GetArrayLength()));
+        Assert.Equal((ChatEffectKind.Reply, 0), (none.Kind, Of(none).GetProperty("lines").GetArrayLength()));
 
         // A viewer whose oldest message is in the middle of a page (its scrollback had dropped lines) is found from the newest turn back.
         var walk = chat.History("h3", "a3", "viewer-b");
@@ -351,7 +352,7 @@ public class CodexChatTests
         var next = Sent(chat.FromCli(J(Response(Id(Sent(chat.Start())[0]), "{}")), record, T0));
         var seed = Sent(chat.FromCli(J(Response(Id(next.Single(m => Method(m) == "thread/resume")), ThreadResult.Replace("THREAD", Thread))), record, T0)).Single();
         var reset = chat.FromCli(J(Response(Id(seed), Page(null, Turn("t1", "completed", UserItem("u1", new string('a', 400)), AgentItem("a1", new string('b', 400)), UserItem("u2", "short"), AgentItem("a2", "tail"))))), record, T0)
-            .Single(e => e.Kind == CodexChat.Kind.Reset).Seed!;
+            .Single(e => e.Kind == ChatEffectKind.Reset).Seed!;
         Assert.True(reset.Earlier);
         Assert.Equal(new[] { "u2", "a2" }, reset.Lines.Select(l => J(Encoding.UTF8.GetString(l)).GetProperty("uuid").GetString()));
         Assert.True(reset.Lines.Sum(l => l.Length + 1) <= 600);
@@ -378,7 +379,7 @@ public class CodexChatTests
         Assert.Equal(("thread/list", @"C:\work", "updated_at", true), (Method(list), list.GetProperty("params").GetProperty("cwd").GetString(), list.GetProperty("params").GetProperty("sortKey").GetString(), list.GetProperty("params").GetProperty("useStateDbOnly").GetBoolean()));
         var listed = chat.FromCli(J(Response(Id(list), "{\"data\":[{\"id\":\"" + Thread + "\",\"name\":null,\"preview\":\"the one open here\",\"updatedAt\":300},{\"id\":\"" + Other + "\",\"name\":\"Named thread\",\"preview\":\"p\",\"updatedAt\":200},"
             + "{\"id\":\"33333333-3333-4333-8333-333333333333\",\"name\":null,\"preview\":\"first   words\\nof it\",\"updatedAt\":100},{\"id\":\"44444444-4444-4444-8444-444444444444\",\"name\":null,\"preview\":\"\",\"updatedAt\":50}]}")), record, T0).Single();
-        Assert.Equal((CodexChat.Kind.Reply, "viewer-a"), (listed.Kind, listed.Tag));
+        Assert.Equal((ChatEffectKind.Reply, "viewer-a"), (listed.Kind, listed.Tag));
         var sessions = Of(listed).GetProperty("sessions").EnumerateArray().ToList();
         Assert.Equal(new[] { (Other, "Named thread", 200000L), ("33333333-3333-4333-8333-333333333333", "first words of it", 100000L) }, sessions.Select(s => (s.GetProperty("id").GetString()!, s.GetProperty("title").GetString()!, s.GetProperty("at").GetInt64())));
         Assert.Equal(Thread, Of(listed).GetProperty("current").GetString());
@@ -387,7 +388,7 @@ public class CodexChatTests
         foreach (var (session, why) in new[] { ("..\\elsewhere", "not in this folder"), (Thread, "the one open here") })
         {
             var refused = chat.Resume("r0", session, "viewer-a").Single();
-            Assert.Equal(CodexChat.Kind.Reply, refused.Kind);
+            Assert.Equal(ChatEffectKind.Reply, refused.Kind);
             Assert.Contains(why, Of(refused).GetProperty("error").GetString());
         }
         chat.FromViewer(J(UserSays("busy now")), record, T0);
@@ -401,7 +402,7 @@ public class CodexChatTests
         // Nothing a viewer sees has changed yet, and the record still names the conversation being left.
         Assert.Equal(Thread, record.SessionId);
         var served = chat.FromCli(J(Response(Id(seed), Page(null, Turn("o1", "completed", UserItem("ou1", "said there"), AgentItem("oa1", "answered there"))))), record, T0);
-        var reset = served.Single(e => e.Kind == CodexChat.Kind.Reset).Seed!;
+        var reset = served.Single(e => e.Kind == ChatEffectKind.Reset).Seed!;
         Assert.Equal((Other, "Named thread", false, 2), (reset.Session, reset.Title, reset.Earlier, reset.Lines.Count));
         // It goes on with the model the conversation was on.
         Assert.Equal((Other, "Named thread", "gpt-6-luna"), (record.SessionId, record.Title, record.Model));
@@ -414,7 +415,7 @@ public class CodexChatTests
         chat.FromCli(J(Note("turn/completed", "{\"threadId\":\"" + Other + "\",\"turn\":{\"id\":\"t\",\"status\":\"completed\"}}")), record, T0);
         var bad = Sent(chat.Resume("r3", "33333333-3333-4333-8333-333333333333", "viewer-b")).Single();
         var told = chat.FromCli(J(Failure(Id(bad), "thread not found")), record, T0).Single();
-        Assert.Equal((CodexChat.Kind.Reply, "viewer-b", "Could not resume that conversation: thread not found"), (told.Kind, told.Tag, Of(told).GetProperty("error").GetString()));
+        Assert.Equal((ChatEffectKind.Reply, "viewer-b", "Could not resume that conversation: thread not found"), (told.Kind, told.Tag, Of(told).GetProperty("error").GetString()));
         Assert.Equal(Other, record.SessionId);
         Assert.Equal("thread/resume", Method(Sent(chat.Resume("r4", Thread, "viewer-b")).Single()));
     }
@@ -426,11 +427,11 @@ public class CodexChatTests
         var named = chat.FromCli(J(Note("thread/name/updated", "{\"threadId\":\"" + Thread + "\",\"threadName\":\"Retry fix\"}")), record, T0);
         Assert.Equal(("Retry fix", "Retry fix"), (record.Title, Of(named.Single()).GetProperty("title").GetString()));
         // Named: what is said next does not rename it.
-        Assert.DoesNotContain(chat.FromCli(J(Item("completed", UserItem("u9", "something else"))), record, T0), e => e.Kind == CodexChat.Kind.Frame);
+        Assert.DoesNotContain(chat.FromCli(J(Item("completed", UserItem("u9", "something else"))), record, T0), e => e.Kind == ChatEffectKind.Frame);
         foreach (string odd in new[] { "[]", "7", "{\"method\":\"turn/started\"}", "{\"method\":\"item/completed\",\"params\":[]}", "{\"id\":999,\"result\":{}}", "{\"method\":\"turn/completed\",\"params\":{\"threadId\":\"" + Thread + "\",\"turn\":null}}" })
             chat.FromCli(J(odd), record, T0);
         foreach (string odd in new[] { "{\"type\":\"user\"}", "{\"type\":\"user\",\"message\":7}", "{\"type\":\"control_response\",\"response\":5}", "{\"type\":\"control_request\",\"request\":[]}", "{}" })
-            Assert.DoesNotContain(chat.FromViewer(J(odd), record, T0), e => e.Kind == CodexChat.Kind.ToCli && Method(Of(e)) != "turn/start");
+            Assert.DoesNotContain(chat.FromViewer(J(odd), record, T0), e => e.Kind == ChatEffectKind.ToCli && Method(Of(e)) != "turn/start");
     }
 
     [Theory]
@@ -453,9 +454,26 @@ public class CodexChatTests
         {
             HostManager.CodexExeLocator = () => @"D:\tools\codex.exe";
             Assert.Equal("\"D:\\tools\\codex.exe\" app-server", HostManager.CodexChatCommand());
+            Assert.Equal("\"D:\\tools\\codex.exe\" app-server", HostManager.TranslatedChatCommand(SessionProvider.Codex));
             HostManager.CodexExeLocator = () => null;
             Assert.Throws<InvalidOperationException>(() => HostManager.CodexChatCommand());
         }
         finally { HostManager.CodexExeLocator = found; }
+    }
+
+    [Fact]
+    public void Agy_is_found_on_the_path_or_in_its_own_folder_and_OpenCode_through_its_npm_shim()
+    {
+        var exists = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { @"D:\tools\agy.exe", @"C:\Users\x\AppData\Local\agy\bin\agy.exe" };
+        Assert.Equal(@"D:\tools\agy.exe", HostManager.FindOnPath("agy.exe", @"C:\Windows;""D:\tools"";C:\other", exists.Contains, @"C:\Users\x\AppData\Local\agy\bin"));
+        Assert.Equal(@"C:\Users\x\AppData\Local\agy\bin\agy.exe", HostManager.FindOnPath("agy.exe", @"C:\Windows; ;", exists.Contains, @"C:\Users\x\AppData\Local\agy\bin"));
+        Assert.Null(HostManager.FindOnPath("agy.exe", @"C:\Windows", exists.Contains));
+
+        var npm = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { @"C:\nvm4w\nodejs\opencode.cmd", @"C:\nvm4w\nodejs\node_modules\@opencode\cli\bin\opencode.exe" };
+        Assert.Equal(@"C:\nvm4w\nodejs\node_modules\@opencode\cli\bin\opencode.exe", HostManager.FindOpenCodeExe(@"C:\Windows;C:\nvm4w\nodejs", npm.Contains));
+        Assert.Null(HostManager.FindOpenCodeExe(@"C:\Windows;C:\nvm4w\nodejs", p => p.EndsWith("opencode.cmd", StringComparison.OrdinalIgnoreCase)));
+        Assert.Null(HostManager.FindOpenCodeExe(@"C:\Windows", npm.Contains));
+        var native = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { @"D:\bin\opencode.exe" };
+        Assert.Equal(@"D:\bin\opencode.exe", HostManager.FindOpenCodeExe(@"C:\Windows;D:\bin", native.Contains));
     }
 }

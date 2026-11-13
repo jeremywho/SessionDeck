@@ -44,6 +44,7 @@ struct CatalogEntry: Codable, Identifiable, Hashable {
         switch provider {
         case "Codex": return "◆"
         case "Agy": return "◈"
+        case "OpenCode": return "◇"
         case "Shell": return ">"
         default: return "✳"
         }
