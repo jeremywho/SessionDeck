@@ -374,6 +374,13 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
   restart that starts it fresh hands the name on with `--name` (`HostManager.NameCarried`). An AGY
   chat's row is named by its host, not by a `/rename` once typed into an AGY terminal
   (`SessionPipeline.ApplyAgyNames` leaves chats alone).
+- **A Claude chat whose turn ends with background agents still running is "scheduled", not idle**
+  (`ChatStream`, measured on 2.1.325). The CLI says the whole set of running background tasks in
+  `system background_tasks_changed` (replace, not delta); agents are `local_agent`, `remote_agent`,
+  `in_process_teammate` and `local_workflow`, and anything `ambient` is left out. A background shell
+  alone does not hold the session, as for terminals. Lines with a `parent_tool_use_id` are a
+  subagent's work and never set busy or the last tool. The set starts empty when the CLI answers
+  `initialize`, since it says nothing at startup.
 - **A phone ends a session through the gateway, and the deck finishes it.** `POST
   /sessions/<hostId>/end` makes the gateway write `phone-ended.json` (it is the only writer; the deck
   only reads, as with `phone-read.json`) and end the host. On each refresh the deck forgets that

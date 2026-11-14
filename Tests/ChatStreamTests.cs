@@ -496,4 +496,65 @@ public class ChatStreamTests : IDisposable
         bool is_answer = ChatStream.RenameAnswer(JsonDocument.Parse(line).RootElement, out string got, out string why);
         Assert.Equal((answers, answers ? id : "", error), (is_answer, is_answer ? got : "", why));
     }
+
+    // Shaped as Claude Code 2.1.325 said them in a chat whose turn started a background subagent (C:/Temp/chatlab/bg1.jsonl).
+    const string BgAgent = """{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"ae6a03bbd520cfd00","run_id":"0mwfukfuz-b42d5d49","task_type":"local_agent","subagent_type":"general-purpose","description":"Sleep 40 seconds"}],"session_id":"s"}""";
+    const string BgAgentAndShell = """{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"ae6a03bbd520cfd00","task_type":"local_agent","subagent_type":"general-purpose","description":"Sleep 40 seconds"},{"task_id":"bb4v8y8zb","task_type":"local_bash","description":"Sleep for 40 seconds in background","parent_task_id":"ae6a03bbd520cfd00"}],"session_id":"s"}""";
+    const string BgShellOnly = """{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"bb4v8y8zb","task_type":"local_bash","description":"Sleep for 40 seconds in background","parent_task_id":"ae6a03bbd520cfd00"}],"session_id":"s"}""";
+    const string BgAmbientAgent = """{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"x1","task_type":"local_agent","ambient":true,"description":"memory"}],"session_id":"s"}""";
+    const string BgNone = """{"type":"system","subtype":"background_tasks_changed","tasks":[],"session_id":"s"}""";
+    const string SubagentTool = """{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t2","name":"Bash","input":{"command":"sleep 40"}}]},"parent_tool_use_id":"toolu_01FffDatGoBgtU2m8GPNTjKK","session_id":"s"}""";
+    const string TurnOver = """{"type":"result","subtype":"success","is_error":false,"result":"launched","session_id":"s"}""";
+
+    [Fact]
+    public void A_turn_that_leaves_a_background_agent_running_is_scheduled_until_the_agent_is_done()
+    {
+        var chat = new ChatStream();
+        var record = new HostRecord();
+        chat.Apply(Line(Init), record, T0);
+        Assert.Equal("busy", record.AgentStatus);
+        chat.Apply(Line(BgAgent), record, T0.AddSeconds(1));
+        chat.Apply(Line(TurnOver), record, T0.AddSeconds(2));
+        Assert.Equal("scheduled", record.AgentStatus);
+
+        // The subagent's own lines are its work, not a turn of the conversation.
+        chat.Apply(Line(SubagentTool), record, T0.AddSeconds(3));
+        Assert.Equal("scheduled", record.AgentStatus);
+        chat.Apply(Line(BgAgentAndShell), record, T0.AddSeconds(4));
+        Assert.Equal("scheduled", record.AgentStatus);
+
+        // A background shell alone does not hold the session: it can outlive the turn by hours.
+        chat.Apply(Line(BgShellOnly), record, T0.AddSeconds(5));
+        Assert.Equal("idle", record.AgentStatus);
+        chat.Apply(Line(BgAgent), record, T0.AddSeconds(6));
+        Assert.Equal("scheduled", record.AgentStatus);
+        chat.Apply(Line(BgNone), record, T0.AddSeconds(7));
+        Assert.Equal("idle", record.AgentStatus);
+
+        // An agent's end wakes the conversation: a new turn is busy, and the set changing mid-turn leaves it busy.
+        chat.Apply(Line(BgAgent), record, T0.AddSeconds(8));
+        chat.Apply(Line(Init), record, T0.AddSeconds(9));
+        Assert.Equal("busy", record.AgentStatus);
+        chat.Apply(Line(BgNone), record, T0.AddSeconds(10));
+        Assert.Equal("busy", record.AgentStatus);
+        chat.Apply(Line(TurnOver), record, T0.AddSeconds(11));
+        Assert.Equal("idle", record.AgentStatus);
+
+        // Work the CLI marks ambient is not shown as activity.
+        chat.Apply(Line(BgAmbientAgent), record, T0.AddSeconds(12));
+        Assert.Equal("idle", record.AgentStatus);
+    }
+
+    [Fact]
+    public void A_cli_that_starts_again_has_no_background_agents_until_it_says_so()
+    {
+        var chat = new ChatStream();
+        var record = new HostRecord();
+        chat.Apply(Line(Init), record, T0);
+        chat.Apply(Line(BgAgent), record, T0.AddSeconds(1));
+        chat.Apply(Line("""{"type":"control_response","response":{"subtype":"success","request_id":"sd-initialize","response":{"current_permission_mode":"default"}}}"""), record, T0.AddSeconds(2));
+        chat.Apply(Line(Init), record, T0.AddSeconds(3));
+        chat.Apply(Line(TurnOver), record, T0.AddSeconds(4));
+        Assert.Equal("idle", record.AgentStatus);
+    }
 }

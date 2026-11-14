@@ -63,6 +63,10 @@ internal sealed class ChatStream
     }
 
     readonly HashSet<string> _openRequests = new(StringComparer.Ordinal);
+    /// <summary>Background agents the CLI says are still running: while there are any, a finished turn is not the end.</summary>
+    int _agentsRunning;
+    /// <summary>The kinds of background task that are an agent at work (measured, 2.1.325); a shell, a monitor or a memory job is not.</summary>
+    static readonly HashSet<string> AgentTasks = new(StringComparer.Ordinal) { "local_agent", "remote_agent", "in_process_teammate", "local_workflow" };
     string _catalog = "";
     string _mode = "", _model = "", _effort = "";
     string _modeOutsidePlan = "";
@@ -112,6 +116,16 @@ internal sealed class ChatStream
                     Status(record, "busy", now);
                 }
                 else if (Text(line, "subtype") == "session_title_changed" && Text(line, "title") is { Length: > 0 } named) record.Title = named;
+                else if (Text(line, "subtype") == "background_tasks_changed")
+                {
+                    // The whole set each time, not a change to it: what it lists is what runs.
+                    _agentsRunning = 0;
+                    if (line.TryGetProperty("tasks", out var tasks) && tasks.ValueKind == JsonValueKind.Array)
+                        foreach (var task in tasks.EnumerateArray())
+                            if (AgentTasks.Contains(Text(task, "task_type")) && !(task.TryGetProperty("ambient", out var ambient) && ambient.ValueKind == JsonValueKind.True))
+                                _agentsRunning++;
+                    if (record.AgentStatus is "idle" or "scheduled") Status(record, TurnOver, now);
+                }
                 break;
             case "user":
                 // The CLI replays what a local command printed ("Set model to …") as if it were typed; that starts no turn.
@@ -122,6 +136,8 @@ internal sealed class ChatStream
                 }
                 break;
             case "assistant":
+                // A subagent's own lines are its work, not a turn of the conversation: they neither start one nor name its tool.
+                if (line.TryGetProperty("parent_tool_use_id", out var parent) && parent.ValueKind == JsonValueKind.String) break;
                 if (ToolName(line) is { Length: > 0 } tool) record.LastTool = tool;
                 if (_openRequests.Count == 0) Status(record, "busy", now);
                 break;
@@ -160,7 +176,7 @@ internal sealed class ChatStream
             case "result":
                 _openRequests.Clear();
                 record.LastEvent = "Stop";
-                Status(record, "idle", now);
+                Status(record, TurnOver, now);
                 // A typed /model or /effort changes them with no answer of its own; the end of a turn is when to look.
                 refresh = true;
                 break;
@@ -172,8 +188,13 @@ internal sealed class ChatStream
     }
 
     /// <summary>The CLI's answer to <c>initialize</c>: the models and commands it offers, cut to what a picker and a menu show.</summary>
+    /// <summary>What a session whose turn is over is: scheduled while background agents run (their end brings it back), else idle.</summary>
+    string TurnOver => _agentsRunning > 0 ? "scheduled" : "idle";
+
     void Introduced(JsonElement answer)
     {
+        // A CLI that has just come up runs no background agents, and does not say so until something starts.
+        _agentsRunning = 0;
         if (answer.ValueKind != JsonValueKind.Object) return;
         if (Text(answer, "current_permission_mode") is { Length: > 0 } mode) Mode(mode);
         var buffer = new ArrayBufferWriter<byte>();
