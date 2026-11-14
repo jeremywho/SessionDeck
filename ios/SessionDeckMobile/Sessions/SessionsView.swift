@@ -7,6 +7,8 @@ struct SessionsView: View {
     @State private var autoOpened = false
     @State private var awaitingHost: String?
     @State private var startError: String?
+    @State private var confirmEnd: CatalogEntry?
+    @State private var endError: String?
 
     /// "0.1.0 (57) 905e217": marketing version, commit count, commit, as build.sh stamps them.
     static var buildLabel: String {
@@ -21,6 +23,13 @@ struct SessionsView: View {
         Task {
             do { awaitingHost = try await gateway.startSession(provider: provider, cwd: "", name: "", prompt: "", chat: chat) }
             catch { startError = error.localizedDescription }
+        }
+    }
+
+    private func end(_ entry: CatalogEntry) {
+        Task {
+            do { try await gateway.endSession(entry) }
+            catch { endError = error.localizedDescription }
         }
     }
 
@@ -55,15 +64,25 @@ struct SessionsView: View {
                 ForEach(grouped, id: \.name) { group in
                     Section(group.name.isEmpty ? "" : group.name) {
                         ForEach(group.entries) { entry in
-                            if entry.opens {
-                                NavigationLink(value: entry) { SessionRowView(entry: entry, unread: gateway.isUnread(entry)) }
-                            } else {
-                                SessionRowView(entry: entry, unread: false)
-                                    .opacity(0.45)
-                                    .overlay(alignment: .bottomTrailing) {
-                                        Text(entry.closedReason ?? "")
-                                            .font(.caption2).foregroundStyle(.secondary)
-                                    }
+                            Group {
+                                if entry.opens {
+                                    NavigationLink(value: entry) { SessionRowView(entry: entry, unread: gateway.isUnread(entry)) }
+                                } else {
+                                    SessionRowView(entry: entry, unread: false)
+                                        .opacity(0.45)
+                                        .overlay(alignment: .bottomTrailing) {
+                                            Text(entry.closedReason ?? "")
+                                                .font(.caption2).foregroundStyle(.secondary)
+                                        }
+                                }
+                            }
+                            // Close and end the session. Something still at work is asked about first; anything else just goes.
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button {
+                                    if entry.endNeedsConfirmation { confirmEnd = entry } else { end(entry) }
+                                } label: { Label("End", systemImage: "xmark") }
+                                .tint(.red)
+                                .accessibilityLabel("Close and end session")
                             }
                         }
                     }
@@ -109,6 +128,14 @@ struct SessionsView: View {
             .confirmationDialog("Forget this deck?", isPresented: $showForget, titleVisibility: .visible) {
                 Button("Forget", role: .destructive) { gateway.forgetPairing() }
             }
+            .confirmationDialog(confirmEnd.map { $0.state == "Awaiting" ? "It is waiting for an answer. End it anyway?" : "It is still working. End it anyway?" } ?? "",
+                                isPresented: Binding(get: { confirmEnd != nil }, set: { if !$0 { confirmEnd = nil } }), titleVisibility: .visible) {
+                Button("Close and end session", role: .destructive) { if let entry = confirmEnd { end(entry) }; confirmEnd = nil }
+                Button("Cancel", role: .cancel) { confirmEnd = nil }
+            } message: { Text(confirmEnd.map { $0.name.isEmpty ? $0.provider : $0.name } ?? "") }
+            .alert("Could not end the session", isPresented: Binding(get: { endError != nil }, set: { if !$0 { endError = nil } })) {
+                Button("OK") { endError = nil }
+            } message: { Text(endError ?? "") }
             .alert("Could not start the session", isPresented: Binding(get: { startError != nil }, set: { if !$0 { startError = nil } })) {
                 Button("OK") { startError = nil }
             } message: { Text(startError ?? "") }

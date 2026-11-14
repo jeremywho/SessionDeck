@@ -96,6 +96,22 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(try entry(#","hostExited":false,"mobileReady":false"#).closedReason, "restart from the desktop to open here")
     }
 
+    func testEndingASessionAsksFirstOnlyWhenSomethingIsStillAtWork() throws {
+        func entry(_ state: String, subagents: Int = 0, exited: Bool = false) throws -> CatalogEntry {
+            let json = """
+            {"hostId":"h","sessionId":"s","provider":"Claude","name":"n","modelChip":"","effort":"","state":"\(state)","stateSinceMs":0,"subagents":\(subagents),"group":"","groupOrder":0,"sortPriority":0,"cwd":"","hostExited":\(exited),"mobileReady":true}
+            """
+            return try JSONDecoder().decode(CatalogEntry.self, from: Data(json.utf8))
+        }
+        XCTAssertTrue(try entry("Working").endNeedsConfirmation)
+        XCTAssertTrue(try entry("Awaiting").endNeedsConfirmation)
+        XCTAssertTrue(try entry("Completed", subagents: 2).endNeedsConfirmation)
+        XCTAssertFalse(try entry("Completed").endNeedsConfirmation)
+        XCTAssertFalse(try entry("Idle").endNeedsConfirmation)
+        XCTAssertFalse(try entry("Error").endNeedsConfirmation)
+        XCTAssertFalse(try entry("Working", exited: true).endNeedsConfirmation)
+    }
+
     func testAChatSessionOpensAsAConversationWhenTheGatewayCanRelayIt() throws {
         func entry(_ rest: String) throws -> CatalogEntry {
             let json = """

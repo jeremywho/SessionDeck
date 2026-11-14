@@ -511,6 +511,31 @@
 
   // Whether a snapshot means "drop what is shown": the scrollback no longer continues from the last byte seen,
   // or the host has moved to another conversation (its epoch changed) and may be answering from that same byte.
+  // What Up and Down bring back into the message box, as a terminal's history does: the conversation's earlier
+  // messages, then what was sent from here (commands too, which the conversation does not keep), oldest first.
+  class Recall {
+    constructor() { this.list = []; this.at = -1; this.draft = ''; }
+    seed(texts) { this.list = []; for (const t of texts) this.push(t); }
+    push(text) {
+      const t = String(text || '').trim();
+      if (t && this.list[this.list.length - 1] !== t) this.list.push(t);
+      this.at = -1;
+    }
+    // The message before the one shown, or null when there is none; what was being typed is kept for the way back.
+    older(current) {
+      if (!this.list.length || this.at === 0) return null;
+      if (this.at === -1) { this.draft = current; this.at = this.list.length; }
+      return this.list[--this.at];
+    }
+    // The message after the one shown; past the newest, what was being typed. Null when nothing was recalled.
+    newer() {
+      if (this.at === -1) return null;
+      if (++this.at < this.list.length) return this.list[this.at];
+      this.at = -1;
+      return this.draft;
+    }
+  }
+
   function startsOver(seq, epoch, snapshot) {
     return snapshot.start !== seq || (snapshot.epoch || 0) !== epoch;
   }
@@ -663,7 +688,7 @@
     return modes;
   }
 
-  const api = { ChatModel, LineReader, Wire, toolBrief, textOf, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText, liveStep, taskRunning, asks, offeredCommands, renameAsked, modelLabel, filterSessions, ago, startsOver, clampWide, diffKind };
+  const api = { ChatModel, LineReader, Wire, toolBrief, textOf, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText, liveStep, taskRunning, asks, offeredCommands, renameAsked, modelLabel, Recall, filterSessions, ago, startsOver, clampWide, diffKind };
   if (typeof module !== 'undefined' && module.exports) { module.exports = api; return; }
 
   // ================= the page side =================
@@ -800,6 +825,13 @@
       if (ev.target.closest('a, button, summary, select, input, textarea, label')) return;
       if (String(getSelection() || '')) return;
       if (document.activeElement === input) input.blur();
+    });
+    // On a desktop a click anywhere in the chat that is not on a control, and not the end of selecting text,
+    // puts the cursor in the message box, so what is typed next goes there.
+    if (!opts.touch) el.addEventListener('click', ev => {
+      if (ev.target.closest('a, button, summary, select, input, textarea, label, .slash-menu, .chat-grip')) return;
+      if (String(getSelection() || '')) return;
+      if (!input.disabled) input.focus({ preventScroll: true });
     });
 
     // A keyboard coming up (or a window made shorter) shrinks the conversation under a reader who was at the
@@ -1397,10 +1429,45 @@
 
     earlier.addEventListener('click', askEarlier);
 
+    let recall = new Recall(), recallSeeded = false;
+    function seedRecall() {
+      if (recallSeeded) return;
+      recallSeeded = true;
+      recall.seed(model.items.filter(i => i.kind === 'user' && !i.pending && typeof i.text === 'string').map(i => i.text));
+    }
+    function showRecalled(text) {
+      if (text === null) return false;
+      input.value = text;
+      input.setSelectionRange(text.length, text.length);
+      menuClosedFor = input.value;
+      keepDraft();
+      paintMenu();
+      grow();
+      paintStatus();
+      return true;
+    }
+    // Up on the first line of the box brings back the message before; Down on its last line, the one after.
+    function recallKey(ev) {
+      if ((ev.key !== 'ArrowUp' && ev.key !== 'ArrowDown') || ev.shiftKey || ev.altKey || ev.ctrlKey || ev.metaKey || ev.isComposing) return false;
+      const start = input.selectionStart, end = input.selectionEnd;
+      if (start !== end) return false;
+      if (ev.key === 'ArrowUp') {
+        if (input.value.slice(0, start).includes('\n')) return false;
+        seedRecall();
+        if (!showRecalled(recall.older(input.value))) return false;
+      } else {
+        if (input.value.slice(end).includes('\n')) return false;
+        if (!showRecalled(recall.newer())) return false;
+      }
+      ev.preventDefault();
+      return true;
+    }
+
     async function submit() {
       const text = input.value.trim();
       const taken = shots.filter(s => !s.error);
       if ((!text && !taken.length) || preparing || resuming) return;
+      if (text) { seedRecall(); recall.push(text); }
       if (text === '/' + RESUME.name && !taken.length && hostRevision >= 4) { openPicker(); return; }
       const naming = taken.length || hostRevision < 5 ? null : renameAsked(text);
       if (naming !== null) { rename(naming); return; }
@@ -1691,6 +1758,7 @@
     input.addEventListener('keydown', ev => {
       if (pickerKey(ev)) return;
       if (menuKey(ev)) return;
+      if (recallKey(ev)) return;
       // On a touch keyboard Return is a new line, as in any message box there; the button sends.
       if (ev.key === 'Enter' && !opts.touch && !ev.shiftKey && !ev.ctrlKey && !ev.altKey && !ev.isComposing) { ev.preventDefault(); submit(); }
       else if (ev.key === 'Escape') { ev.preventDefault(); interrupt(); }
@@ -1724,7 +1792,7 @@
           if (msg.type === 'snapshot') {
             // A host that can move between conversations says whether what follows begins mid-line; before that, a
             // scrollback that did not start at its first byte always might.
-            if (startsOver(seq, epoch, msg)) { model.reset(); reader = new LineReader(msg.cut !== undefined ? !!msg.cut : msg.start > 0); paged = false; }
+            if (startsOver(seq, epoch, msg)) { recall = new Recall(); recallSeeded = false; model.reset(); reader = new LineReader(msg.cut !== undefined ? !!msg.cut : msg.start > 0); paged = false; }
             if ((msg.epoch || 0) !== epoch) resuming = '';
             epoch = msg.epoch || 0;
             hostRevision = msg.chat || 0;

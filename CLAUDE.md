@@ -374,6 +374,11 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
   restart that starts it fresh hands the name on with `--name` (`HostManager.NameCarried`). An AGY
   chat's row is named by its host, not by a `/rename` once typed into an AGY terminal
   (`SessionPipeline.ApplyAgyNames` leaves chats alone).
+- **A phone ends a session through the gateway, and the deck finishes it.** `POST
+  /sessions/<hostId>/end` makes the gateway write `phone-ended.json` (it is the only writer; the deck
+  only reads, as with `phone-read.json`) and end the host. On each refresh the deck forgets that
+  session (or a reboot would bring it back), closes its tab, ends the host again if it still runs,
+  and removes the row once it has stopped (`PhoneEndStore.Plan`, `SessionsWindow.ApplyPhoneEnds`).
 - **A record write is retried past a reader** (`RecordGate.Write`). The deck reads
   `hosts/<id>.json` whenever it scans, and a replace is refused while a reader has the file
   open; a write that still fails is forgotten as written, so the next change carries it. Before

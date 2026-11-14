@@ -223,6 +223,17 @@ final class GatewayStore: ObservableObject {
         return try JSONDecoder().decode(StartResponse.self, from: data).hostId
     }
 
+    /// Close the session and end it on the deck, as its "Close & end session" does. It leaves the list here at once.
+    func endSession(_ entry: CatalogEntry) async throws {
+        guard let request = authorized("sessions/\(entry.hostId)/end", method: "POST") else { throw GatewayError.badResponse }
+        let (_, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw GatewayError.badResponse }
+        if http.statusCode == 401 { rejected("This phone is no longer paired."); throw GatewayError.status(401) }
+        // Already gone from the deck is what was wanted.
+        guard http.statusCode == 204 || http.statusCode == 404 else { throw GatewayError.status(http.statusCode) }
+        sessions.removeAll { $0.hostId == entry.hostId }
+    }
+
     func markViewed(_ sessionId: String) {
         guard !sessionId.isEmpty else { return }
         let now = Date()

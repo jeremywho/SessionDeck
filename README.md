@@ -111,10 +111,12 @@ from any column's `+` menu. It needs the GitHub CLI signed in (`gh auth login`) 
 
 ## Chat sessions
 A Claude session can open as a conversation instead of a terminal: right-click a column's `+` and
-pick **New Claude chat**, or tick **Chat view** in the New session dialog. Replies render as
+pick **New Claude** (the first group is chats; the group under **Terminal** opens the same agents in a
+terminal), or tick **Chat view** in the New session dialog. A click anywhere in a chat, or on its
+tab or its row in the list, puts the cursor in its message box. Replies render as
 markdown with coloured code, a run of tool calls folds to one line, an edit shows as a diff, and
 permission requests, questions and plans appear as cards with buttons (a plan is approved into the
-mode you pick; a permission can be allowed for the rest of the session when Claude offers that). Enter sends, Shift+Enter adds a line, Esc or **Stop** interrupts. Typing `/` lists the
+mode you pick; a permission can be allowed for the rest of the session when Claude offers that). Enter sends, Shift+Enter adds a line, Esc or **Stop** interrupts, and Up on the first line brings back earlier messages (Down goes forward again). Typing `/` lists the
 session's commands (arrows to move, Tab to complete, Enter to run); the model, effort and permission
 mode under the message box change the running session; a pasted image is attached and sent with
 the message. Typing `/resume` lists the other conversations in the session's folder, whether a chat or a
@@ -128,11 +130,12 @@ update a chat left idle restarts itself onto the new build with its model, mode 
 session underneath: it shows in the list with the same states, survives a deck restart, and comes
 back after a reboot with its conversation. The phone app opens a chat as the same conversation
 (Return adds a line there and the button sends; `+` attaches an image) and can start one from its
-`+` menu. Codex has a chat too (**New Codex chat** in the same menu, or **Chat view** with Codex picked): the
+`+` menu. Swiping a session left in the phone's list closes and ends it, as **Close & end session**
+does on the desktop; one that is still working or waiting for an answer is asked about first. Codex has a chat too (**New Codex** in the same menu, or **Chat view** with Codex picked): the
 same pane over Codex's app server, with its models and efforts, approvals as cards, file changes as
 diffs, and `/resume` over the folder's Codex conversations. A Codex chat either asks before each
 command and file change or has full access, as your Codex flags say; it has no sandbox mode.
-Antigravity and OpenCode have chats as well (**New AGY chat** and **New OpenCode chat**), over each
+Antigravity and OpenCode have chats as well (**New AGY** and **New OpenCode**), over each
 agent's own Agent Client Protocol server: the pickers show that agent's models, efforts and modes,
 and diffs and `/resume` work the same. An OpenCode chat asks when OpenCode's own permission settings
 say to, as cards, and its "always allow" lasts for the folder, not just the session. An AGY chat

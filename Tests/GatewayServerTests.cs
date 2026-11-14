@@ -256,6 +256,26 @@ public class GatewayServerTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task A_phone_can_close_and_end_a_session_by_its_host_id()
+    {
+        string token = await PairAsync();
+        using var c = Client(token);
+        Assert.Equal(HttpStatusCode.NotImplemented, (await c.PostAsync("/sessions/abc123def456/end", null)).StatusCode);
+
+        var ended = new List<string>();
+        _server.EndSession = id => { ended.Add(id); return id == "abc123def456"; };
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PostAsync("/sessions/abc123def456/end", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await c.PostAsync("/sessions/nosuchhost000/end", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await c.PostAsync("/sessions/..%2Fx/end", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await c.GetAsync("/sessions/abc123def456/end")).StatusCode);
+        Assert.Equal(new[] { "abc123def456", "nosuchhost000" }, ended);
+
+        using var anon = Client();
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anon.PostAsync("/sessions/abc123def456/end", null)).StatusCode);
+        Assert.Equal(2, ended.Count);
+    }
+
+    [Fact]
     public async Task A_phone_can_start_a_session_and_read_folders_and_machine_load()
     {
         string token = await PairAsync();

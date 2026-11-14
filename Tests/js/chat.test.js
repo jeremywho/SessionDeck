@@ -2,7 +2,7 @@
 // The lines here are shaped like the ones Claude Code 2.1.322 wrote in stream-json mode, cut down to the fields the pane reads.
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { ChatModel, LineReader, Wire, toolBrief, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText, renameAsked, modelLabel, liveStep, taskRunning, asks: asksPerson, offeredCommands, filterSessions, ago, startsOver, clampWide, diffKind } = require('../../wwwroot/chat.js');
+const { ChatModel, LineReader, Wire, toolBrief, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText, renameAsked, modelLabel, Recall, liveStep, taskRunning, asks: asksPerson, offeredCommands, filterSessions, ago, startsOver, clampWide, diffKind } = require('../../wwwroot/chat.js');
 
 const init = { type: 'system', subtype: 'init', session_id: 's1', model: 'claude-haiku-5-5' };
 const echo = text => ({ type: 'user', isReplay: true, message: { role: 'user', content: text }, parent_tool_use_id: null });
@@ -758,4 +758,29 @@ test('a model listed as provider/Name shows as the name under its provider, and 
   // A model the catalog has no name for is shown by its id, whole.
   assert.deepEqual(modelLabel('opencode/big-pickle', ''), { group: 'opencode', label: 'big-pickle' });
   assert.deepEqual(modelLabel('haiku', undefined), { group: '', label: 'haiku' });
+});
+
+test('Up brings back earlier messages newest first, Down returns, and past the newest gives back what was being typed', () => {
+  const r = new Recall();
+  assert.equal(r.older('typing'), null);
+  assert.equal(r.newer(), null);
+  r.seed(['first', '  second  ', '', 'second', 'third']);
+  assert.deepEqual(r.list, ['first', 'second', 'third']);
+  assert.equal(r.older('half typed'), 'third');
+  assert.equal(r.older('third'), 'second');
+  assert.equal(r.older('second'), 'first');
+  assert.equal(r.older('first'), null);
+  assert.equal(r.newer(), 'second');
+  assert.equal(r.newer(), 'third');
+  assert.equal(r.newer(), 'half typed');
+  assert.equal(r.newer(), null);
+  // Sending ends the recall, and what was sent is the newest; the same message twice in a row is kept once.
+  r.older('');
+  r.push('/rename ship it');
+  r.push('/rename ship it');
+  assert.deepEqual(r.list.slice(-2), ['third', '/rename ship it']);
+  assert.equal(r.older(''), '/rename ship it');
+  r.push('   ');
+  assert.equal(r.at, -1);
+  assert.equal(r.older(''), '/rename ship it');
 });

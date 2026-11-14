@@ -43,6 +43,8 @@ internal sealed class GatewayServer : IAsyncDisposable
     public Func<StartRequest, string?>? StartSession;
     /// <summary>A phone has a session in view; false when the id means nothing. Set by the process.</summary>
     public Func<string, bool>? MarkRead;
+    /// <summary>A phone closed a session and ended it, by host id; false when there is no such host. Set by the process.</summary>
+    public Func<string, bool>? EndSession;
     /// <summary>Folders a phone may start a session in.</summary>
     public Func<List<string>> Folders = () => new();
     /// <summary>The latest machine load sample, or null before the first.</summary>
@@ -190,6 +192,14 @@ internal sealed class GatewayServer : IAsyncDisposable
             case ("GET", "/devices"):
                 await MiniHttp.WriteJson(s, 200, "OK", JsonSerializer.Serialize(_devices.Devices.Select(d => new { d.Id, d.Name, d.PairedAtUtc, d.LastSeenUtc }), Json));
                 return;
+        }
+        var end = Regex.Match(r.Path, @"^/sessions/([A-Za-z0-9]+)/end$");
+        if (r.Method == "POST" && end.Success)
+        {
+            if (EndSession == null) { await MiniHttp.WriteStatus(s, 501, "Not Implemented"); return; }
+            bool ended = EndSession(end.Groups[1].Value);
+            await MiniHttp.WriteStatus(s, ended ? 204 : 404, ended ? "No Content" : "Not Found");
+            return;
         }
         var del = Regex.Match(r.Path, @"^/devices/([A-Za-z0-9]+)$");
         if (r.Method == "DELETE" && del.Success)

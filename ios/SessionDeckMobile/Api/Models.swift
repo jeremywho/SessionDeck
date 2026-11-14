@@ -32,6 +32,9 @@ struct CatalogEntry: Codable, Identifiable, Hashable {
     /// Whether tapping the row opens the session.
     var opens: Bool { mobileReady || opensAsChat }
 
+    /// Ending it would stop work in progress (a turn, a question waiting for an answer, subagents): asked first.
+    var endNeedsConfirmation: Bool { !hostExited && (state == "Working" || state == "Awaiting" || subagents > 0) }
+
     /// Why the session cannot be opened on this device; nil when it can.
     var closedReason: String? {
         if opens { return nil }

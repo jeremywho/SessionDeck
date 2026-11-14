@@ -115,6 +115,7 @@ internal static class GatewayProcess
         string adminToken = Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
         var catalog = new SessionCatalog();
         var phoneRead = new PhoneReadStore(Path.Combine(Settings.DataDir, PhoneReadStore.FileName));
+        var phoneEnded = new PhoneEndStore(Path.Combine(Settings.DataDir, PhoneEndStore.FileName));
         var hosts = new Dictionary<string, HostRecord>(StringComparer.OrdinalIgnoreCase);
         var gate = new object();
         List<CatalogEntry> current = new();
@@ -154,6 +155,18 @@ internal static class GatewayProcess
             return true;
         };
         server.Machine = () => machine.Latest;
+        server.EndSession = hostId =>
+        {
+            HostRecord? host;
+            lock (gate) host = hosts.GetValueOrDefault(hostId);
+            if (host == null) return false;
+            // Written before the host is told: the deck forgets the session even if the gateway goes away now.
+            phoneEnded.Mark(host.Id, host.SessionId, DateTime.UtcNow);
+            if (!host.HasExited) HostManager.Kill(host);
+            Log($"a phone ended host {host.Id}");
+            Task.Run(() => { Thread.Sleep(1500); try { loop.Tick(); } catch (Exception ex) { App.LogError(ex); } });
+            return true;
+        };
         server.StartSession = request =>
         {
             StartPlan? plan;

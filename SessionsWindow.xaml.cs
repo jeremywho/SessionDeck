@@ -1124,6 +1124,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         _chatSessions = chats;
         SaveLayoutIfSessionsMoved();
         ApplyReadLedger();
+        ApplyPhoneEnds();
         SyncFrontRow();
 
         int hostsLive = hosts.Count(h => !h.HasExited);
@@ -1552,8 +1553,6 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         }
         else
         {
-            _rowMenu.Items.Add(Item(tab != null ? "Show tab" : "Open tab", () => Deck.Open(row.Host)));
-            if (tab != null) _rowMenu.Items.Add(Item("Close tab (keep running)", () => Deck.Close(tab)));
             _rowMenu.Items.Add(Item("End session", () => { SessionRegistry.Forget(row.LiveSessionId); HostManager.Kill(row.Host); if (tab != null) Deck.Close(tab); }));
             var restart = Item(row.UpdatePending
                     ? $"Restart to update (v{row.Version} → v{InstalledVersions.For(row.Provider)})"
@@ -1602,6 +1601,30 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             _read = new ReadLedger(_app.Settings.ReadAt);
             return _read;
         }
+    }
+
+    readonly HashSet<string> _phoneEndsDone = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// A session a phone closed is ended here as "Close &amp; end session" ends it: forgotten, so a reboot
+    /// does not bring it back, its tab closed, and once its host has stopped, its row removed.
+    /// </summary>
+    void ApplyPhoneEnds()
+    {
+        var ended = Gateway.PhoneEndStore.Read(System.IO.Path.Combine(Settings.DataDir, Gateway.PhoneEndStore.FileName));
+        if (ended.Count == 0) return;
+        bool removed = false;
+        foreach (var step in Gateway.PhoneEndStore.Plan(ended, Rows.Select(r => r.Host).ToList(), _phoneEndsDone))
+        {
+            SessionRegistry.Forget(step.SessionId);
+            if (Deck.FindByHost(step.Host.Id) is { } tab) Deck.Close(tab);
+            if (step.Kill) HostManager.Kill(step.Host);
+            if (!step.Remove) continue;
+            HostManager.Forget(step.Host);
+            _phoneEndsDone.Add(step.Host.Id);
+            removed = true;
+        }
+        if (removed) RequestRefresh();
     }
 
     /// <summary>A session whose tab is showing in a visible window is being looked at.</summary>
