@@ -1145,13 +1145,18 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         // A CLI that has exited leaves its host alive (the shell wrapper stays open), so hook status is
         // what says the session is really over; otherwise it would be offered for restore next launch.
         var rowOf = new Dictionary<SessionInfo, SessionRow>();
+        // The profile and kind are the host's own, read from it: a row missing for a moment must not save a wrapper's session as plain Claude.
+        var hostOf = new Dictionary<SessionInfo, Host.HostRecord>();
         foreach (var x in byHost)
+        {
+            hostOf.TryAdd(x.Info, x.Host);
             if (_rowsById.TryGetValue(x.Host.Id, out var r)) rowOf.TryAdd(x.Info, r);
+        }
         SessionRegistry.Snapshot(
             byHost.Where(x => (!x.Host.HasExited || x.Host.WasKilled) && x.Host.AgentStatus != "ended" && x.Info.SessionId.Length > 0 && (x.Host.IsChat || IsRestorable(x.Info))).Select(x => x.Info).ToList(),
             s => rowOf.TryGetValue(s, out var r) && r.State is SessionState.Completed or SessionState.Idle ? r.LastChanged : null,
-            s => rowOf.TryGetValue(s, out var r) ? r.Host.Profile : "",
-            s => rowOf.TryGetValue(s, out var r) ? r.Host.Kind : "");
+            s => hostOf.TryGetValue(s, out var h) ? h.Profile : "",
+            s => hostOf.TryGetValue(s, out var h) ? h.Kind : "");
         // A chat moved to another conversation has left the one before it: that one is no longer a session of
         // this deck, and must not come back with it after a reboot.
         var chats = Rows.Where(r => r.Host.IsChat && !r.Host.HasExited).ToDictionary(r => r.Host.Id, r => r.LiveSessionId);
@@ -1875,7 +1880,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             LiveLabel.Text = "Could not stop the external session: " + ex.Message;
             return;
         }
-        ResumeInDeck(new SavedSession { Id = s.SessionId, Cwd = s.Cwd, Name = s.Name, Provider = s.Provider });
+        ResumeInDeck(SavedSession.Adopting(s));
     }
 
     void Grid_MouseDoubleClick(object sender, MouseButtonEventArgs e)

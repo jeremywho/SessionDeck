@@ -105,6 +105,29 @@ public class ClaudeWrapperTests : IDisposable
         Assert.Empty(ClaudeProfiles.WrapperConfigDirs());
     }
 
+    [Fact]
+    public void A_session_found_in_the_wrappers_folder_is_brought_in_on_the_wrapper()
+    {
+        string script = Path.Combine(_dir, "claude-swift.cmd"), config = Path.Combine(_dir, "cfg");
+        File.WriteAllText(script, $"set \"CLAUDE_CONFIG_DIR={config}\"\r\nclaude %*\r\n");
+        ClaudeProfiles.SwiftScriptLocator = () => script;
+        ClaudeProfiles.ForgetWrappers();
+
+        Assert.Equal("swift", ClaudeProfiles.ProfileOfConfigDir(config));
+        Assert.Equal("swift", ClaudeProfiles.ProfileOfConfigDir(config.ToUpperInvariant() + Path.DirectorySeparatorChar));
+        Assert.Equal("", ClaudeProfiles.ProfileOfConfigDir(""));
+        Assert.Equal("", ClaudeProfiles.ProfileOfConfigDir(Path.Combine(_dir, "elsewhere")));
+
+        var outside = new SessionInfo { SessionId = Id, Cwd = @"C:\Work", Name = "running in a terminal", Provider = SessionProvider.Claude, ConfigDir = config };
+        var adopted = SavedSession.Adopting(outside);
+        Assert.Equal((Id, @"C:\Work", "running in a terminal", SessionProvider.Claude, "swift"), (adopted.Id, adopted.Cwd, adopted.Name, adopted.Provider, adopted.Profile));
+        Assert.Equal("", SavedSession.Adopting(new SessionInfo { SessionId = Id, Cwd = @"C:\Work", Provider = SessionProvider.Claude }).Profile);
+
+        ClaudeProfiles.SwiftScriptLocator = () => null;
+        ClaudeProfiles.ForgetWrappers();
+        Assert.Equal("", ClaudeProfiles.ProfileOfConfigDir(config));
+    }
+
     static readonly ClaudeWrapper Swift = new("swift", @"C:\Users\Some One\.local\bin\claude-swift.cmd", @"C:\Users\Some One\.claude-swift");
 
     [Fact]

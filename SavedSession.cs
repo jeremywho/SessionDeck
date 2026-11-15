@@ -5,6 +5,10 @@ namespace SessionDeck;
 /// <summary>A session recorded for possible restore after a crash/reboot.</summary>
 internal sealed class SavedSession
 {
+    /// <summary>What a session running outside the deck is resumed as when it is brought in: under the wrapper it was started through, if any.</summary>
+    internal static SavedSession Adopting(SessionInfo s) =>
+        new() { Id = s.SessionId, Cwd = s.Cwd, Name = s.Name, Provider = s.Provider, Profile = ClaudeProfiles.ProfileOfConfigDir(s.ConfigDir) };
+
     public string Id { get; set; } = "";
     public string Cwd { get; set; } = "";
     public string Name { get; set; } = "";

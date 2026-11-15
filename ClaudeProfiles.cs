@@ -122,6 +122,13 @@ internal static class ClaudeProfiles
     public static IReadOnlyList<string> WrapperConfigDirs() =>
         Wrapper(Swift) is { } w && !SameDir(w.ConfigDir, DefaultConfigDir) ? new[] { w.ConfigDir } : Array.Empty<string>();
 
+    /// <summary>
+    /// The profile of a session found in a config folder: a wrapper's when the folder is its own, else none. A session
+    /// started outside the deck through a wrapper is brought in on that wrapper, never on plain <c>claude</c>.
+    /// </summary>
+    public static string ProfileOfConfigDir(string configDir) =>
+        configDir.Length > 0 && Wrapper(Swift) is { } w && SameDir(w.ConfigDir, configDir) ? w.Profile : "";
+
     /// <summary>The CLI's folder for a profile's sessions: the wrapper's, else the CLI's own.</summary>
     public static string ConfigDirFor(string profile) => Wrapper(profile)?.ConfigDir ?? DefaultConfigDir;
 
