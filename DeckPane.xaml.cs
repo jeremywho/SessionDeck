@@ -91,7 +91,7 @@ internal partial class DeckPane : UserControl
         NewSessionRequested?.Invoke(kind);
     }
 
-    void NewInGroup_Click(object sender, RoutedEventArgs e) => RequestNew(sender, "claude");
+    void NewInGroup_Click(object sender, RoutedEventArgs e) => RequestNew(sender, "chat");
     void NewInGroup_RightClick(object sender, MouseButtonEventArgs e)
     {
         if (sender is FrameworkElement { ContextMenu: { } menu } fe)

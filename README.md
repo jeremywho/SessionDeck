@@ -110,8 +110,8 @@ into one row. It is added once on first launch; remove it from its strip's menu,
 from any column's `+` menu. It needs the GitHub CLI signed in (`gh auth login`) and only reads.
 
 ## Chat sessions
-A Claude session can open as a conversation instead of a terminal: right-click a column's `+` and
-pick **New Claude** (the first group is chats; the group under **Terminal** opens the same agents in a
+A Claude session can open as a conversation instead of a terminal: click a column's `+` (or
+right-click it and pick **New Claude**; the first group is chats; the group under **Terminal** opens the same agents in a
 terminal), or tick **Chat view** in the New session dialog. A click anywhere in a chat, or on its
 tab or its row in the list, puts the cursor in its message box. Replies render as
 markdown with coloured code, a run of tool calls folds to one line, an edit shows as a diff, and
