@@ -66,10 +66,22 @@ internal static class HostManager
     /// </summary>
     internal static string? NameCarried(HostRecord host) => host.IsChat && host.Title.Trim().Length > 0 ? host.Title.Trim() : null;
 
+    /// <summary>
+    /// The model a new chat starts on when none was picked: the CLI's own "Default" entry, by its alias. Without
+    /// it the CLI starts on the <c>model</c> saved in the person's settings, which is whatever <c>/model</c> last
+    /// chose in any session, so new chats followed the last terminal. The alias is for the session only (measured,
+    /// 2.1.325: it resolves to the account's default and leaves the settings file as it was).
+    /// </summary>
+    public const string DefaultChatModel = "default";
+
+    /// <summary>Whether flags name a model themselves: then that is the choice, and none is added.</summary>
+    internal static bool NamesModel(string flags) => System.Text.RegularExpressions.Regex.IsMatch(flags ?? "", @"(^|\s)--model(\s|=|$)");
+
     public static string NewClaudeChatCommand(string sessionId, string? name, string extraFlags, string model = "", string effort = "")
     {
         string cmd = $"{ClaudeBinaryForChat()} {ChatStream.ProtocolFlags} --session-id {sessionId}";
         if (!string.IsNullOrWhiteSpace(name)) cmd += $" --name \"{name.Replace("\"", "\\\"")}\"";
+        if (string.IsNullOrWhiteSpace(model) && !NamesModel(extraFlags)) model = DefaultChatModel;
         if (!string.IsNullOrWhiteSpace(model)) cmd += $" --model \"{model.Trim()}\"";
         if (!string.IsNullOrWhiteSpace(effort)) cmd += $" --effort {effort.Trim()}";
         if (!string.IsNullOrWhiteSpace(extraFlags)) cmd += " " + extraFlags.Trim();

@@ -398,6 +398,19 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
   started the same command in a ConPTY nobody saw (a dangling `else` when Codex chats arrived): a second
   idle CLI per chat, holding the same session id, and still holding the old conversation after `/resume`.
   `ChatHostTests.A_claude_chat_host_runs_its_cli_once` counts the host's children.
+- **A new Claude chat starts on `--model default`** (`HostManager.DefaultChatModel`), unless a model was
+  picked or the deck's flags name one (`NamesModel`). Without it the CLI starts on `model` from the
+  person's settings, which `/model` rewrites in whatever session it was last used, so new chats followed
+  the last terminal. Measured on 2.1.325: the alias resolves to the account default, shows as "Default
+  (recommended)" in the picker, and leaves the settings file alone. Only new chats: a resume carries the
+  chat's own model, and terminal sessions follow the CLI's settings as before.
+- **The advisor works in a chat as the CLI has it** (settings `advisorModel`, or `--advisor`): a server-side
+  tool, so it arrives as blocks in the model's own message, `server_tool_use` named `advisor` and then
+  `advisor_tool_result` whose content is `advisor_result` (text), `advisor_redacted_result` (sealed) or
+  `advisor_tool_result_error` (`error_code`). The pane shows the consult as a tool line of its own
+  ("Advisor"), running until the result block comes (`serverResult` in `chat.js`); any other
+  `server_tool_use` gets the same treatment under its own name. The host passes these lines through
+  untouched.
 - **A phone ends a session through the gateway, and the deck finishes it.** `POST
   /sessions/<hostId>/end` makes the gateway write `phone-ended.json` (it is the only writer; the deck
   only reads, as with `phone-read.json`) and end the host. On each refresh the deck forgets that

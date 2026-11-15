@@ -5,7 +5,23 @@
   'use strict';
 
   const INTERRUPTED = '[Request interrupted by user';
-  const SOLO_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode', 'Agent', 'Task']);
+  const SOLO_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode', 'Agent', 'Task', 'Advisor']);
+  // Tools the service runs for the model, by the name the pane shows: the advisor is a second model asked for a
+  // review, and reads as a step of its own. Any other keeps the name it came with.
+  const SERVER_TOOLS = { advisor: 'Advisor' };
+
+  // What a tool the service ran came back with. It arrives in the model's own message, not as a reply to it. The
+  // advisor's advice is the model's to read: the pane is mostly handed a sealed copy, and says that it was given.
+  function serverResult(block) {
+    const c = block.content;
+    if (c && typeof c === 'object' && !Array.isArray(c)) {
+      const kind = String(c.type || '');
+      if (kind.endsWith('_error')) return { text: (block.type === 'advisor_tool_result' ? 'Advisor unavailable' : 'Failed') + (c.error_code ? ' (' + c.error_code + ')' : ''), error: true };
+      if (typeof c.text === 'string') return { text: c.text, error: false };
+      if (kind === 'advisor_redacted_result') return { text: 'Reviewed the conversation. Its advice went to the model and is not shown here.', error: false };
+    }
+    return { text: resultText(c), error: false };
+  }
   const SET_PREFIX = 'sd-set-';
   const DRAFT_PREFIX = 'sd.chat.draft:';
   // How wide the conversation column is. The person sets it by dragging the column's edge; it is one width for every
@@ -265,8 +281,12 @@
             draft.text = text || draft.text;
             this.settle(draft);
           } else if (text) this.add({ kind, text });
-        } else if (b.type === 'tool_use') {
-          const tool = { kind: 'tool', id: b.id, name: b.name || 'tool', input: b.input || {}, result: null, request: null };
+        } else if (typeof b.type === 'string' && b.type.endsWith('_tool_result') && b.tool_use_id) {
+          const ran = this.tools.get(b.tool_use_id);
+          if (ran) { ran.result = serverResult(b); this.touch(ran); }
+        } else if (b.type === 'tool_use' || b.type === 'server_tool_use') {
+          const named = b.type === 'server_tool_use' ? SERVER_TOOLS[b.name] || b.name : b.name;
+          const tool = { kind: 'tool', id: b.id, name: named || 'tool', input: b.input || {}, result: null, request: null };
           // A call read back from the transcript was made by a process that is gone: with no result there, it never finished.
           if (line.history) tool.stopped = true;
           this.tools.set(b.id, tool);
@@ -1217,6 +1237,8 @@
       if (typeof input.command === 'string') return toolBrief(item.name, input) === input.command.trim() ? null : h('pre', 'tool-input', clip(input.command, 6000));
       // A subagent's job is prose written for it.
       if (typeof input.prompt === 'string' && input.prompt) return h('div', 'tool-prose', clip(input.prompt, 6000));
+      // A call that was given nothing (the advisor reads the conversation itself) has nothing to show here.
+      if (Object.keys(input).length === 0) return null;
       return h('pre', 'tool-input', clip(JSON.stringify(input, null, 2), 6000));
     }
 

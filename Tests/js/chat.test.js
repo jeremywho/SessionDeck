@@ -784,3 +784,56 @@ test('Up brings back earlier messages newest first, Down returns, and past the n
   assert.equal(r.at, -1);
   assert.equal(r.older(''), '/rename ship it');
 });
+
+// Shaped as Claude Code 2.1.325 said them in a chat on Opus 5.5 with an advisor model set (C:/Temp/chatlab/adv1.jsonl).
+const ADVISOR_CALL = { type: 'assistant', message: { id: 'msg_1', role: 'assistant', content: [{ type: 'server_tool_use', id: 'srvtoolu_014aFH', name: 'advisor', input: {} }] }, parent_tool_use_id: null };
+const advisorResult = content => ({ type: 'assistant', message: { id: 'msg_1', role: 'assistant', content: [{ type: 'advisor_tool_result', tool_use_id: 'srvtoolu_014aFH', content }] }, parent_tool_use_id: null });
+
+test('a consult of the advisor is a call of its own that runs until its result comes in the model\'s message', () => {
+  const m = new ChatModel();
+  m.durable({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 't1', name: 'Read', input: { file_path: 'a.txt' } }] }, parent_tool_use_id: null });
+  m.durable(ADVISOR_CALL);
+  const advisor = m.items[m.items.length - 1];
+  assert.deepEqual([advisor.kind, advisor.name, advisor.result, m.items.length], ['tool', 'Advisor', null, 2]);
+  assert.equal(m.items[0].kind, 'tools');
+
+  // What it said is the model's to read: the service hands the pane a sealed copy.
+  m.durable(advisorResult({ type: 'advisor_redacted_result', encrypted_content: 'EswDCioIFRgC' }));
+  assert.deepEqual(advisor.result, { text: 'Reviewed the conversation. Its advice went to the model and is not shown here.', error: false });
+  m.durable({ type: 'assistant', message: { id: 'msg_1', role: 'assistant', content: [{ type: 'text', text: 'advisor said yes' }] }, parent_tool_use_id: null });
+  assert.deepEqual(m.items.map(i => i.kind), ['tools', 'tool', 'assistant']);
+});
+
+test('advice given in the open is shown, and an advisor that could not be reached says so', () => {
+  const open = new ChatModel();
+  open.durable(ADVISOR_CALL);
+  open.durable(advisorResult({ type: 'advisor_result', text: 'Check the empty case first.' }));
+  assert.deepEqual(open.items[0].result, { text: 'Check the empty case first.', error: false });
+
+  const down = new ChatModel();
+  down.durable(ADVISOR_CALL);
+  down.durable(advisorResult({ type: 'advisor_tool_result_error', error_code: 'overloaded' }));
+  assert.deepEqual(down.items[0].result, { text: 'Advisor unavailable (overloaded)', error: true });
+
+  // A result for a call this pane never saw (it attached later) changes nothing.
+  const late = new ChatModel();
+  late.durable(advisorResult({ type: 'advisor_result', text: 'x' }));
+  assert.equal(late.items.length, 0);
+});
+
+test('a conversation read back shows a finished consult as done and one cut short as stopped', () => {
+  const m = new ChatModel();
+  m.durable({ ...ADVISOR_CALL, history: true });
+  assert.equal(m.items[0].stopped, true);
+  m.durable({ ...advisorResult({ type: 'advisor_redacted_result', encrypted_content: 'x' }), history: true });
+  assert.equal(m.items[0].result.error, false);
+});
+
+test('another tool the service runs is shown under its own name with what it returned', () => {
+  const m = new ChatModel();
+  m.durable({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'server_tool_use', id: 's1', name: 'web_search', input: { query: 'windows conpty' } }] }, parent_tool_use_id: null });
+  assert.deepEqual([m.items[0].kind, m.items[0].tools[0].name, m.items[0].tools[0].input.query], ['tools', 'web_search', 'windows conpty']);
+  m.durable({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'web_search_tool_result', tool_use_id: 's1', content: [{ type: 'text', text: 'three results' }] }] }, parent_tool_use_id: null });
+  assert.deepEqual(m.items[0].tools[0].result, { text: 'three results', error: false });
+});
+

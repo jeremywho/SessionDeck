@@ -372,6 +372,42 @@ public class ChatStreamTests : IDisposable
     }
 
     [Fact]
+    public void A_new_chat_with_no_model_picked_starts_on_the_clis_default_unless_the_flags_name_one()
+    {
+        var found = HostManager.ClaudeExeLocator;
+        try
+        {
+            HostManager.ClaudeExeLocator = () => @"C:\Tools\claude.exe";
+            const string Skip = "--dangerously-skip-permissions";
+            Assert.EndsWith(" --session-id abc-123 --model \"default\" " + Skip, HostManager.NewClaudeChatCommand("abc-123", null, Skip));
+            Assert.EndsWith(" --session-id abc-123 --model \"default\"", HostManager.NewClaudeChatCommand("abc-123", null, ""));
+
+            // A model that was picked is the one, and so is one the deck's own flags name.
+            string picked = HostManager.NewClaudeChatCommand("abc-123", null, Skip, "claude-haiku-5-5");
+            Assert.Contains("--model \"claude-haiku-5-5\"", picked);
+            Assert.DoesNotContain("default", picked);
+            foreach (string flags in new[] { Skip + " --model opus", "--model=opus " + Skip, "--model sonnet" })
+                Assert.DoesNotContain("\"default\"", HostManager.NewClaudeChatCommand("abc-123", null, flags));
+            Assert.Contains("--model \"default\"", HostManager.NewClaudeChatCommand("abc-123", null, "--fallback-model sonnet --model-ish"));
+            Assert.True(HostManager.NamesModel("--model opus") && HostManager.NamesModel("-x --model") && HostManager.NamesModel("--model=opus"));
+            Assert.False(HostManager.NamesModel("") || HostManager.NamesModel("--fallback-model sonnet") || HostManager.NamesModel("--models x"));
+
+            // Only a new chat: a conversation come back to goes on as it was, and a terminal session follows the CLI's own settings.
+            Assert.DoesNotContain("--model", HostManager.ResumeClaudeChatCommand("abc-123", Skip));
+            Assert.DoesNotContain("--model", HostManager.NewClaudeCommand("abc-123", null, Skip));
+
+            var settings = new Settings { ResumeFlags = Skip };
+            string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            Assert.Contains("--model \"default\"", SessionStarter.Plan(new StartRequest("claude", home, Chat: true), settings)!.Command);
+            string asked = SessionStarter.Plan(new StartRequest("claude", home, Model: "sonnet", Chat: true), settings)!.Command;
+            Assert.Contains("--model \"sonnet\"", asked);
+            Assert.DoesNotContain("\"default\"", asked);
+            Assert.DoesNotContain("--model", SessionStarter.Plan(new StartRequest("claude", home), settings)!.Command);
+        }
+        finally { HostManager.ClaudeExeLocator = found; }
+    }
+
+    [Fact]
     public void A_chat_is_launched_on_the_protocol_flags_with_the_deck_flags_and_no_hook_settings()
     {
         var found = HostManager.ClaudeExeLocator;
