@@ -151,6 +151,8 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
                 case "codex-chat": NewCodexChatSession(); break;
                 case "agy-chat": NewTranslatedChat(SessionProvider.Agy); break;
                 case "opencode-chat": NewTranslatedChat(SessionProvider.OpenCode); break;
+                case "swift-chat": NewWrapperSession(ClaudeProfiles.Swift, chat: true); break;
+                case "swift": NewWrapperSession(ClaudeProfiles.Swift, chat: false); break;
                 case var p when p.StartsWith("profile:", StringComparison.Ordinal): NewProfileSession(p["profile:".Length..]); break;
                 default: NewSessionButton_Click(this, new RoutedEventArgs()); break;
             }
@@ -250,6 +252,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     }
 
     FileSystemWatcher? _registryWatcher;
+    readonly List<FileSystemWatcher> _wrapperWatchers = new();
     FileSystemWatcher? _hostsWatcher;
     DispatcherTimer? _registryDebounce;
     DateTime _lastWatchedRefresh;
@@ -291,6 +294,18 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             _registryWatcher.Deleted += kick;
             _registryWatcher.Renamed += (_, _) => Dispatcher.BeginInvoke(() => { _registryDebounce.Stop(); _registryDebounce.Start(); });
             _registryWatcher.EnableRaisingEvents = true;
+            // A wrapper's CLI records its sessions in a folder of its own: watched the same way.
+            foreach (string other in ClaudeProfiles.WrapperConfigDirs())
+            {
+                string sessions = Path.Combine(other, "sessions");
+                if (!Directory.Exists(sessions)) continue;
+                var watcher = new FileSystemWatcher(sessions, "*.json") { NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size };
+                watcher.Changed += kick;
+                watcher.Created += kick;
+                watcher.Deleted += kick;
+                watcher.EnableRaisingEvents = true;
+                _wrapperWatchers.Add(watcher);
+            }
             _hostsWatcher = new FileSystemWatcher(HostManager.HostsDir, "*.json")
             {
                 NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size,
@@ -669,6 +684,23 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         SpawnIntoDeck(sessionId, SessionProvider.Claude, HostManager.NewClaudeCommand(sessionId, null, _app.Settings.ResumeFlags, launcher: launcher), HomeDir, null, profile: profile);
     }
 
+    /// <summary>A new Claude session run through a wrapper script (<c>claude-swift</c>), as a chat or in a terminal, in the home folder.</summary>
+    void NewWrapperSession(string profile, bool chat)
+    {
+        try
+        {
+            var wrapper = ClaudeProfiles.Require(profile);
+            string sessionId = Guid.NewGuid().ToString();
+            string cmd = HostManager.WrapperCommand(wrapper, sessionId, resume: false, chat);
+            Deck.Open(HostManager.Spawn(sessionId, SessionProvider.Claude, cmd, HomeDir, null, profile: profile, kind: chat ? Host.ChatStream.Kind : ""));
+        }
+        catch (Exception ex)
+        {
+            App.LogError(ex);
+            LiveLabel.Text = "Could not start the session: " + ex.Message;
+        }
+    }
+
     /// <summary>A new conversation with an agent the host translates for (Antigravity, OpenCode), in a chat pane in the home folder.</summary>
     void NewTranslatedChat(SessionProvider provider)
     {
@@ -788,7 +820,6 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     Host.HostRecord? SpawnResumed(SavedSession s)
     {
         string cwd = string.IsNullOrWhiteSpace(s.Cwd) ? HomeDir : s.Cwd;
-        string launcher = ClaudeProfiles.CommandFor(s.Profile);
         bool chat = s.Kind == Host.ChatStream.Kind, translated = chat && s.Provider != SessionProvider.Claude;
         try
         {
@@ -797,7 +828,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
                 _ when translated => HostManager.TranslatedChatCommand(s.Provider),
                 SessionProvider.Codex => HostManager.ResumeCodexCommand(s.Id, _app.Settings.CodexFlags),
                 SessionProvider.Agy => HostManager.ResumeAgyCommand(s.Id, HostManager.AgyDefaultFlags),
-                _ => ClaudeCommandFor(s.Id, s.Name, SessionScanner.HasTranscript(s.Id, cwd, chat), launcher, chat),
+                _ => ClaudeCommandFor(s.Id, s.Name, SessionScanner.HasTranscript(s.Id, cwd, chat, ClaudeProfiles.ConfigDirFor(s.Profile)), s.Profile, chat),
             };
             // What a translated chat was set to is not saved with the session, only its model: a Codex chat asks or not as the
             // deck's Codex terminals do, and an ACP agent comes back in the mode it starts in.
@@ -816,8 +847,12 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     /// The launch that brings a Claude conversation back: resumed when it has a transcript, started
     /// fresh under its own id when nothing was ever said, and as a chat when that is what it was.
     /// </summary>
-    string ClaudeCommandFor(string sessionId, string? name, bool hasTranscript, string launcher, bool chat, string model = "")
+    string ClaudeCommandFor(string sessionId, string? name, bool hasTranscript, string profile, bool chat, string model = "")
     {
+        // A wrapper's session comes back on the wrapper or not at all: plain claude would be another account and model.
+        if (ClaudeProfiles.IsWrapper(profile))
+            return HostManager.WrapperCommand(ClaudeProfiles.Require(profile), sessionId, resume: hasTranscript, chat, name);
+        string launcher = ClaudeProfiles.CommandFor(profile);
         string flags = _app.Settings.ResumeFlags;
         if (chat) return hasTranscript ? HostManager.ResumeClaudeChatCommand(sessionId, flags, model) : HostManager.NewClaudeChatCommand(sessionId, name, flags, model);
         return hasTranscript ? HostManager.ResumeClaudeCommand(sessionId, flags, launcher) : HostManager.NewClaudeCommand(sessionId, name, flags, launcher: launcher);
@@ -1753,13 +1788,12 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             if (provider == SessionProvider.Codex && !await CodexUpdater.EnsureCurrentAsync())
                 PerformanceLog.Write($"restart host={host.Id}: codex update did not complete; resuming on v{InstalledVersions.Codex}");
             bool hasTranscript = SessionScanner.CanResume(row.TranscriptPath, host.IsChat);
-            string launcher = ClaudeProfiles.CommandFor(host.Profile);
             string cmd = provider switch
             {
                 _ when host.IsChat && provider != SessionProvider.Claude => HostManager.TranslatedChatCommand(provider),
                 SessionProvider.Codex => HostManager.ResumeCodexCommand(sessionId, _app.Settings.CodexFlags),
                 SessionProvider.Agy => HostManager.ResumeAgyCommand(sessionId, HostManager.AgyDefaultFlags),
-                _ => ClaudeCommandFor(sessionId, HostManager.NameCarried(host), hasTranscript, launcher, host.IsChat, host.IsChat ? host.Model : ""),
+                _ => ClaudeCommandFor(sessionId, HostManager.NameCarried(host), hasTranscript, host.Profile, host.IsChat, host.IsChat ? host.Model : ""),
             };
 
             if (!host.HasExited)

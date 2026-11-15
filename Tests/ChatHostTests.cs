@@ -52,7 +52,7 @@ public class ChatHostTests : IDisposable
                 if ($text -eq 'ask') { $out.WriteLine('{"type":"control_request","request_id":"r1","request":{"subtype":"can_use_tool","tool_name":"Write","input":{},"tool_use_id":"t1"}}'); continue }
                 if ($text -eq 'mcp') { $out.WriteLine('{"type":"control_request","request_id":"m1","request":{"subtype":"mcp_message"}}'); continue }
                 $out.WriteLine('{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"echo"}}}')
-                $said = if ($text -eq 'who') { "i am $session" } else { "echo: $text" }
+                $said = if ($text -eq 'who') { "i am $session" } elseif ($text -eq 'args') { "args: $($args -join ' ')" } else { "echo: $text" }
                 $out.WriteLine((@{ type = 'assistant'; message = @{ role = 'assistant'; content = @(@{ type = 'text'; text = $said }) } } | ConvertTo-Json -Compress -Depth 6))
                 $out.WriteLine('{"type":"result","subtype":"success","is_error":false}')
             }
@@ -247,6 +247,67 @@ public class ChatHostTests : IDisposable
         var turn = await viewer.Until(l => Type(l) == "result");
         Assert.Equal(new[] { "user", "assistant", "result" }, turn.Select(Type));
         Assert.Equal(("after the rename", "echo: after the rename"), (Said(turn[0]), Said(turn[1])));
+
+        await viewer.SendFrame("""{"type":"kill"}""");
+        await viewer.Exited();
+        Assert.True(_host!.WaitForExit(15000), "host did not exit after it was told to end");
+    }
+
+    [Fact]
+    public async Task A_claude_chat_host_runs_its_cli_once()
+    {
+        string script = Path.Combine(_dir, "fake-cli.ps1");
+        File.WriteAllText(script, FakeCli);
+        string transcript = Path.Combine(_dir, "transcript.jsonl");
+        File.WriteAllText(transcript, """{"type":"user","uuid":"u-1","message":{"role":"user","content":"said before"}}""" + "\n");
+        await Start(new HostSpec
+        {
+            Id = "chattest0001", SessionId = "planned-session", Provider = "Claude", Kind = ChatStream.Kind, HistoryPath = transcript,
+            CommandLine = $"\"{SessionLauncher.ResolvePowerShell()}\" -NoLogo -NoProfile -File \"{script}\"",
+            Cwd = _dir, HostsDir = Path.Combine(_dir, "hosts"), RingBytes = 256 * 1024,
+        });
+        var record = Record();
+        using var viewer = await Viewer.Attach(record, after: 0);
+        await viewer.Until(l => Type(l) == "host");
+
+        // Everything the host started, but the console windows Windows gives a console program.
+        var started = Native.BuildProcessTable().Where(p => p.Value.Parent == _host!.Id && !p.Value.Name.StartsWith("conhost", StringComparison.OrdinalIgnoreCase)).ToList();
+        Assert.Equal(new[] { record.ChildPid }, started.Select(p => p.Key));
+
+        await viewer.SendFrame("""{"type":"kill"}""");
+        await viewer.Exited();
+        Assert.True(_host!.WaitForExit(15000), "host did not exit after it was told to end");
+    }
+
+    [Theory]
+    [InlineData(false, " --model fake-model")]
+    [InlineData(true, "")]
+    public async Task Moving_to_another_conversation_names_the_model_unless_the_launcher_does(bool launcherNamesTheModel, string added)
+    {
+        string script = Path.Combine(_dir, "fake-cli.ps1");
+        File.WriteAllText(script, FakeCli);
+        string open = Path.Combine(_dir, Open + ".jsonl"), bees = Path.Combine(_dir, Bees + ".jsonl");
+        File.WriteAllText(open, """{"type":"user","uuid":"a-1","message":{"role":"user","content":"said in the open one"}}""" + "\n");
+        File.WriteAllText(bees, """{"type":"user","uuid":"b-1","message":{"role":"user","content":"tell me about bees"}}""" + "\n");
+        string cli = $"\"{SessionLauncher.ResolvePowerShell()}\" -NoLogo -NoProfile -File \"{script}\"";
+        await Start(new HostSpec
+        {
+            Id = "chattest0001", SessionId = Open, Provider = "Claude", Kind = ChatStream.Kind, HistoryPath = open,
+            CommandLine = cli + " " + Open, ChatResumeCommand = cli + " " + ChatSessions.SessionPlaceholder, ChatModelFixed = launcherNamesTheModel,
+            Cwd = _dir, HostsDir = Path.Combine(_dir, "hosts"), RingBytes = 256 * 1024,
+        });
+        using var viewer = await Viewer.Attach(Record(), after: 0);
+        await viewer.Until(l => Type(l) == "host");
+        await viewer.Send(ChatStream.UserLine("hello"));
+        await viewer.Until(l => Type(l) == "result");
+        await RecordWhen(r => r.Model == "fake-model" && r.AgentStatus == "idle");
+
+        await viewer.SendFrame("{\"type\":\"resume\",\"request\":\"r1\",\"session\":\"" + Bees + "\"}");
+        await viewer.Pump(() => viewer.Snapshots.Count > 1);
+        await RecordWhen(r => r.SessionId == Bees);
+        await viewer.Send(ChatStream.UserLine("args"));
+        var told = await viewer.Until(l => Type(l) == "assistant");
+        Assert.Equal("args: " + Bees + added, Said(told.Last(l => Type(l) == "assistant")));
 
         await viewer.SendFrame("""{"type":"kill"}""");
         await viewer.Exited();

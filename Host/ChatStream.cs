@@ -22,8 +22,10 @@ internal sealed class ChatStream
     /// scrollback kept free of what no viewer reads. Before 3 the record carries no revision.
     /// 4: lists the conversations in its folder and moves to the one picked (<see cref="ChatSessions"/>).
     /// 5: names the session when a viewer asks (<c>rename</c>), without a turn.
+    /// 6: runs the CLI once. From the build that brought Codex chats, a Claude chat host also started a second
+    /// copy of it in a console nobody saw; a host from before this is restarted when idle to be rid of it.
     /// </summary>
-    public const int Revision = 5;
+    public const int Revision = 6;
 
     /// <summary>Flags every chat launch carries; the session flags and the hook settings follow them.</summary>
     public const string ProtocolFlags = "-p --input-format stream-json --output-format stream-json --verbose --include-partial-messages --replay-user-messages --permission-prompt-tool stdio";

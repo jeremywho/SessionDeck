@@ -26,6 +26,26 @@ internal static class HostManager
         return cmd + ClaudeHookArgs;
     }
 
+    /// <summary>
+    /// A session run through a wrapper script: new or resumed, in a terminal or as a chat. A chat's child is a
+    /// process on pipes, and a script is not one, so it is run by <c>cmd</c>; a terminal runs it in its pwsh, which
+    /// also hands a <c>.cmd</c> to <c>cmd</c>. Either way <c>cmd</c> reads the line again, so nothing a person typed
+    /// goes on it: a name is passed only when it is plain (<see cref="CmdSafe"/>), and the id must be one.
+    /// The model is the wrapper's and none is passed.
+    /// </summary>
+    public static string WrapperCommand(ClaudeWrapper wrapper, string sessionId, bool resume, bool chat, string? name = null)
+    {
+        if (sessionId != ChatSessions.SessionPlaceholder && !ChatSessions.IsSessionId(sessionId)) throw new ArgumentException("not a session id", nameof(sessionId));
+        string session = resume ? $"--resume {sessionId}" : $"--session-id {sessionId}";
+        if (!resume && name != null && CmdSafe(name.Trim())) session += $" --name \"{name.Trim()}\"";
+        if (!chat) return $"{wrapper.ShellCommand} {session} {ClaudeWrapper.Flags}" + ClaudeHookArgs;
+        string cmd = Path.Combine(Environment.SystemDirectory, "cmd.exe");
+        return $"\"{cmd}\" /d /s /c \"\"{wrapper.ScriptPath}\" {ChatStream.ProtocolFlags} {session} {ClaudeWrapper.Flags}\"";
+    }
+
+    /// <summary>Text <c>cmd</c> reads as it is written inside double quotes: letters, digits, spaces and a few marks. Anything else (a quote, <c>&amp;</c>, <c>%</c>, <c>^</c>, <c>!</c>) can end the quoting or be expanded.</summary>
+    internal static bool CmdSafe(string text) => text.Length > 0 && text.All(c => char.IsLetterOrDigit(c) || c is ' ' or '-' or '_' or '.' or ',' or ':' or '#' or '+' or '@');
+
     public static string ResumeClaudeCommand(string sessionId, string extraFlags, string launcher = "")
     {
         string cmd = $"{ClaudeExe(launcher)} --resume {sessionId}";
@@ -253,6 +273,8 @@ internal static class HostManager
         string id = Guid.NewGuid().ToString("N")[..12];
         // A chat the host translates for (Codex, an ACP agent) has no Claude transcript to read and no Claude command to switch with.
         bool chat = kind == ChatStream.Kind, codexChat = chat && provider != "Claude";
+        // A session of a wrapper keeps its files in the wrapper's folder, and moves between conversations on the wrapper.
+        var wrapper = ClaudeProfiles.IsWrapper(profile ?? "") ? ClaudeProfiles.Require(profile!) : null;
         string folder = string.IsNullOrWhiteSpace(cwd) ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) : cwd;
         var spec = new HostSpec
         {
@@ -266,13 +288,17 @@ internal static class HostManager
             Title = title ?? "",
             Profile = profile ?? "",
             Kind = kind ?? "",
-            HistoryPath = chat && !codexChat ? SessionScanner.TranscriptPathFor(sessionId, folder) : "",
+            HistoryPath = chat && !codexChat ? SessionScanner.TranscriptPathFor(sessionId, folder, Path.Combine(wrapper?.ConfigDir ?? ClaudeProfiles.DefaultConfigDir, "projects")) : "",
+            ClaudeSessionsDir = wrapper?.SessionsDir ?? "",
+            ChatModelFixed = wrapper != null,
             RestoreMode = chat ? restore?.Mode ?? "" : "",
             RestoreEffort = chat ? restore?.Effort ?? "" : "",
             RestoreModel = codexChat ? restore?.Model ?? "" : "",
             // Built here, for every chat host however it is started, so none is left unable to switch conversations.
             // (A Codex chat switches inside its app server and needs no command for it.)
-            ChatResumeCommand = chat && !codexChat ? ResumeClaudeChatCommand(ChatSessions.SessionPlaceholder, Settings.Peek().ResumeFlags) : "",
+            ChatResumeCommand = !chat || codexChat ? ""
+                : wrapper != null ? WrapperCommand(wrapper, ChatSessions.SessionPlaceholder, resume: true, chat: true)
+                : ResumeClaudeChatCommand(ChatSessions.SessionPlaceholder, Settings.Peek().ResumeFlags),
         };
 
         var psi = new ProcessStartInfo(HostExe())

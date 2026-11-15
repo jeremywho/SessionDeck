@@ -38,20 +38,31 @@ internal static class SessionScanner
 
     public static IReadOnlyDictionary<int, (int Parent, string Name)> ProcessTable => _procs;
 
+    /// <summary>Config folders beside the CLI's own that sessions are recorded in: a wrapper's (<see cref="ClaudeProfiles.WrapperConfigDirs"/>).</summary>
+    internal static Func<IReadOnlyList<string>> OtherConfigDirs { get; set; } = ClaudeProfiles.WrapperConfigDirs;
+
+    static string ProjectsOf(SessionInfo s) => s.ConfigDir.Length > 0 ? Path.Combine(s.ConfigDir, "projects") : ProjectsDir;
+
     public static List<SessionInfo> Scan()
     {
         try { _procs = Native.BuildProcessTable(); } catch { _procs = new(); }
         var list = new List<SessionInfo>();
-        if (!Directory.Exists(SessionsDir)) return list;
+        var roots = new List<(string Sessions, string ConfigDir)> { (SessionsDir, "") };
+        try { foreach (string dir in OtherConfigDirs()) roots.Add((Path.Combine(dir, "sessions"), dir)); } catch { }
 
-        foreach (var file in Directory.EnumerateFiles(SessionsDir, "*.json"))
+        foreach (var (sessions, configDir) in roots)
         {
-            var s = TryReadSession(file);
-            if (s == null || !IsAlive(s.Pid)) continue;   // skip dead/stale registry files
-            Enrich(s);
-            CountSubagents(s);
-            CountBackgroundWork(s);
-            list.Add(s);
+            if (!Directory.Exists(sessions)) continue;
+            foreach (var file in Directory.EnumerateFiles(sessions, "*.json"))
+            {
+                var s = TryReadSession(file);
+                if (s == null || !IsAlive(s.Pid)) continue;   // skip dead/stale registry files
+                s.ConfigDir = configDir;
+                Enrich(s);
+                CountSubagents(s);
+                CountBackgroundWork(s);
+                list.Add(s);
+            }
         }
 
         list.Sort((a, b) => a.IdleSeconds.CompareTo(b.IdleSeconds));
@@ -191,8 +202,11 @@ internal static class SessionScanner
     static readonly TimeSpan FallbackRetry = TimeSpan.FromSeconds(30);
 
     /// <summary>Whether the session is brought back with <c>--resume</c> (see <see cref="CanResume"/>), looked up by id and folder.</summary>
-    public static bool HasTranscript(string sessionId, string cwd, bool chat = false) =>
-        CanResume(TranscriptPath(new SessionInfo { SessionId = sessionId, Cwd = cwd }), chat);
+    public static bool HasTranscript(string sessionId, string cwd, bool chat = false, string configDir = "") =>
+        CanResume(TranscriptPath(new SessionInfo { SessionId = sessionId, Cwd = cwd, ConfigDir = SameAsHome(configDir) ? "" : configDir }), chat);
+
+    static bool SameAsHome(string configDir) =>
+        configDir.Length == 0 || string.Equals(configDir.TrimEnd('\\', '/'), Home, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Whether to bring a session back with <c>--resume</c> rather than start it fresh under its id.
@@ -247,7 +261,7 @@ internal static class SessionScanner
     {
         // cwd -> slug: every non-alphanumeric char becomes '-'  (C:\Users\Jeremy -> C--Users-Jeremy)
         string slug = Regex.Replace(s.Cwd, "[^a-zA-Z0-9]", "-");
-        string p = Path.Combine(ProjectsDir, slug, s.SessionId + ".jsonl");
+        string p = Path.Combine(ProjectsOf(s), slug, s.SessionId + ".jsonl");
         if (File.Exists(p)) return p;
 
         FallbackProbe? prev;
@@ -262,7 +276,7 @@ internal static class SessionScanner
         string found = "";
         try
         {
-            found = Directory.EnumerateFiles(ProjectsDir, s.SessionId + ".jsonl", SearchOption.AllDirectories)
+            found = Directory.EnumerateFiles(ProjectsOf(s), s.SessionId + ".jsonl", SearchOption.AllDirectories)
                              .FirstOrDefault() ?? "";
         }
         catch { }
@@ -321,7 +335,7 @@ internal static class SessionScanner
     {
         string baseDir = s.TranscriptPath.Length > 0
             ? Path.GetDirectoryName(s.TranscriptPath) ?? ""
-            : Path.Combine(ProjectsDir, Regex.Replace(s.Cwd, "[^a-zA-Z0-9]", "-"));
+            : Path.Combine(ProjectsOf(s), Regex.Replace(s.Cwd, "[^a-zA-Z0-9]", "-"));
         return baseDir.Length > 0 ? Path.Combine(baseDir, s.SessionId, "subagents") : "";
     }
 

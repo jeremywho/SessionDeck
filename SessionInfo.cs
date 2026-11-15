@@ -43,6 +43,8 @@ internal sealed class SessionInfo
     public DateTime UpdatedAt;
     public DateTime StatusUpdatedAt;   // when the status field last changed (sessions/<pid>.json)
     public string TranscriptPath = "";
+    /// <summary>The CLI config folder the session was found in, when it is not the usual one (a wrapper's); empty otherwise.</summary>
+    public string ConfigDir = "";
 
     public string ShortId => SessionId.Length >= 8 ? SessionId.Substring(0, 8) : SessionId;
 

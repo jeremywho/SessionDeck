@@ -97,6 +97,9 @@ internal partial class DeckPane : UserControl
         if (sender is FrameworkElement { ContextMenu: { } menu } fe)
         {
             ShowPrPaneItem(menu);
+            // The Swift items are there only when claude-swift is: its script on the path, saying where it keeps its files.
+            var swift = ClaudeProfiles.Wrapper(ClaudeProfiles.Swift) != null ? Visibility.Visible : Visibility.Collapsed;
+            foreach (var item in menu.Items.OfType<MenuItem>().Where(m => m.Uid == "Swift")) item.Visibility = swift;
             menu.PlacementTarget = fe;
             Dispatcher.BeginInvoke(() => menu.IsOpen = true);
         }
@@ -104,6 +107,8 @@ internal partial class DeckPane : UserControl
     }
     void NewClaudeMenu_Click(object sender, RoutedEventArgs e) => RequestNew(sender, "claude");
     void NewChatMenu_Click(object sender, RoutedEventArgs e) => RequestNew(sender, "chat");
+    void NewSwiftChatMenu_Click(object sender, RoutedEventArgs e) => RequestNew(sender, "swift-chat");
+    void NewSwiftMenu_Click(object sender, RoutedEventArgs e) => RequestNew(sender, "swift");
     void NewCodexMenu_Click(object sender, RoutedEventArgs e) => RequestNew(sender, "codex");
     void NewCodexChatMenu_Click(object sender, RoutedEventArgs e) => RequestNew(sender, "codex-chat");
     void NewShellMenu_Click(object sender, RoutedEventArgs e) => RequestNew(sender, "shell");

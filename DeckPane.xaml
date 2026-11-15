@@ -132,6 +132,7 @@
             <ui:Button.ContextMenu>
               <ContextMenu>
                 <MenuItem Header="New Claude" Click="NewChatMenu_Click" Tag="{Binding}"/>
+                <MenuItem Header="New Claude Swift" x:Uid="Swift" Click="NewSwiftChatMenu_Click" Tag="{Binding}"/>
                 <MenuItem Header="New Codex" Click="NewCodexChatMenu_Click" Tag="{Binding}"/>
                 <MenuItem Header="New AGY" Click="NewAgyChatMenu_Click" Tag="{Binding}"/>
                 <MenuItem Header="New OpenCode" Click="NewOpenCodeChatMenu_Click" Tag="{Binding}"/>
@@ -139,6 +140,7 @@
                 <MenuItem Header="Terminal" IsHitTestVisible="False" Focusable="False" FontWeight="SemiBold" Foreground="{DynamicResource Fg2Brush}"
                           AutomationProperties.AutomationId="TerminalHeading"/>
                 <MenuItem Header="New Claude" Click="NewClaudeMenu_Click" Tag="{Binding}" AutomationProperties.Name="New Claude terminal"/>
+                <MenuItem Header="New Claude Swift" x:Uid="Swift" Click="NewSwiftMenu_Click" Tag="{Binding}" AutomationProperties.Name="New Claude Swift terminal"/>
                 <MenuItem Header="New Codex" Click="NewCodexMenu_Click" Tag="{Binding}" AutomationProperties.Name="New Codex terminal"/>
                 <MenuItem Header="New AGY" Click="NewAgyMenu_Click" Tag="{Binding}" AutomationProperties.Name="New AGY terminal"/>
                 <MenuItem Header="New shell" Click="NewShellMenu_Click" Tag="{Binding}"/>

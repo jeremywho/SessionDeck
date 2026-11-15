@@ -381,6 +381,23 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
   alone does not hold the session, as for terminals. Lines with a `parent_tool_use_id` are a
   subagent's work and never set busy or the last tool. The set starts empty when the CLI answers
   `initialize`, since it says nothing at startup.
+- **`claude-swift` is a built-in Claude profile, `swift`** (`ClaudeWrapper`, `ClaudeProfiles.Wrapper`). The
+  provider stays `Claude`; `Profile = "swift"` rides the host record, the saved session, restart and
+  reboot restore like an account profile. The script owns the pointing (endpoint, token, model); the deck
+  reads from it only `CLAUDE_CONFIG_DIR`, because transcripts and `sessions/<pid>.json` are looked for
+  there (`SessionScanner` scans every wrapper folder, `SessionInfo.ConfigDir`; a chat's `HistoryPath`
+  and `HostSpec.ClaudeSessionsDir` point there). Rules that keep a Swift session on Swift:
+  a wrapper that cannot be resolved is an error, never a fall back to plain `claude` (another account and
+  model); its flags are fixed (`--dangerously-skip-permissions`) and the deck's Claude flags are not
+  added, since a `--model` there would win; no model is passed on resume (`HostSpec.ChatModelFixed`).
+  A chat's child must be a process, so the script runs through `cmd /d /s /c`; a terminal runs it in
+  pwsh, which also hands a `.cmd` to `cmd`. Either way `cmd` re-reads the line, so nothing typed goes on
+  it: a name only when `HostManager.CmdSafe`, an id only when it is one. A folder the wrapper's config
+  has not trusted shows the CLI's own trust prompt in a terminal; that is the CLI's to ask.
+- **A chat host runs its CLI once** (chat revision 6). From v0.5.85 to v0.5.91 a Claude chat host also
+  started the same command in a ConPTY nobody saw (a dangling `else` when Codex chats arrived): a second
+  idle CLI per chat, holding the same session id, and still holding the old conversation after `/resume`.
+  `ChatHostTests.A_claude_chat_host_runs_its_cli_once` counts the host's children.
 - **A phone ends a session through the gateway, and the deck finishes it.** `POST
   /sessions/<hostId>/end` makes the gateway write `phone-ended.json` (it is the only writer; the deck
   only reads, as with `phone-read.json`) and end the host. On each refresh the deck forgets that

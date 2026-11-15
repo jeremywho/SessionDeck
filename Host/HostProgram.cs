@@ -49,6 +49,10 @@ internal sealed class HostSpec
 
     /// <summary>The command that starts the CLI on another conversation in the same folder, with <see cref="ChatSessions.SessionPlaceholder"/> where its id goes; empty for a session that cannot switch.</summary>
     public string ChatResumeCommand { get; set; } = "";
+    /// <summary>Where the CLI of this session records its live processes, when that is not its usual folder (a wrapper with a config folder of its own).</summary>
+    public string ClaudeSessionsDir { get; set; } = "";
+    /// <summary>The launcher names the model (a wrapper): none is added to the command that moves to another conversation.</summary>
+    public bool ChatModelFixed { get; set; }
 }
 
 /// <summary>
@@ -251,7 +255,8 @@ internal static class HostProgram
         int seedBytes = Math.Max(spec.RingBytes, 64 * 1024) / 2;
         if (chat && spec.Provider == "Codex") _agent = new CodexChat(spec.Cwd, spec.SessionId, spec.RestoreModel, spec.RestoreEffort, spec.RestoreMode, seedBytes);
         else if (chat && AcpChat.Speaks(spec.Provider)) _agent = new AcpChat(spec.Provider, spec.Cwd, spec.SessionId, spec.RestoreModel, spec.RestoreEffort, spec.RestoreMode, seedBytes, new ChatNames(Path.GetDirectoryName(spec.HostsDir)!, spec.Provider));
-        else
+        // A terminal only: a chat's CLI is the one on the pipes, whoever speaks its protocol.
+        if (!chat)
         {
             DetachStdHandles();
             _pty = new ConPty(commandLine, spec.Cwd, spec.Cols, spec.Rows);
@@ -511,7 +516,7 @@ internal static class HostProgram
         lock (_record) { session = _record.SessionId; title = _record.Title; model = _record.Model; }
         string path = ChatTranscriptPath();
         bool resumable = _spec.ChatResumeCommand.Length > 0 && ChatSessions.IsSessionId(session) && File.Exists(path);
-        return new Conversation(session, resumable ? ChatSessions.Command(_spec.ChatResumeCommand, session, model) : _chatCommand, path, title);
+        return new Conversation(session, resumable ? ResumeCommand(session, model) : _chatCommand, path, title);
     }
 
     static Conversation For(string session)
@@ -519,7 +524,7 @@ internal static class HostProgram
         string model;
         lock (_record) model = _record.Model;
         string path = ChatSessions.TranscriptOf(Path.GetDirectoryName(_chatHistoryPath) ?? "", session);
-        return new Conversation(session, ChatSessions.Command(_spec.ChatResumeCommand, session, model), path, path.Length > 0 ? ChatSessions.Title(path) ?? "" : "");
+        return new Conversation(session, ResumeCommand(session, model), path, path.Length > 0 ? ChatSessions.Title(path) ?? "" : "");
     }
 
     /// <summary>
@@ -1065,7 +1070,7 @@ internal static class HostProgram
         _ = Task.Run(() =>
         {
             var entries = new List<ChatSessions.Entry>();
-            try { entries = ChatSessions.List(dir, current, ChatSessions.LiveElsewhere(SessionScanner.SessionsDirectory, child)); }
+            try { entries = ChatSessions.List(dir, current, ChatSessions.LiveElsewhere(_spec.ClaudeSessionsDir.Length > 0 ? _spec.ClaudeSessionsDir : SessionScanner.SessionsDirectory, child)); }
             catch (Exception ex) { Log($"sessions: {ex.Message}"); }
             client.Out.Writer.TryWrite((true, ChatSessions.ListFrame(request, current, entries)));
         });
@@ -1081,6 +1086,9 @@ internal static class HostProgram
     /// has for it, and a translator whose agent has none keeps the name itself. Every viewer hears
     /// the new name as a <c>title</c> frame.
     /// </summary>
+    /// <summary>The command that brings the CLI up on a conversation: the spawner's, with the model the chat is on unless the launcher names its own.</summary>
+    static string ResumeCommand(string session, string model) => ChatSessions.Command(_spec.ChatResumeCommand, session, _spec.ChatModelFixed ? "" : model);
+
     static void Rename(Client client, JsonElement ask)
     {
         string request = Text(ask, "request"), name = ChatNames.Clean(Text(ask, "name"));

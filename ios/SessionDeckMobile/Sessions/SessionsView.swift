@@ -100,6 +100,8 @@ struct SessionsView: View {
                     Menu {
                         Button { start("Claude") } label: { Label("New Claude session", systemImage: "sparkle") }
                         Button { start("Claude", chat: true) } label: { Label("New Claude chat", systemImage: "bubble.left") }
+                        Button { start("Swift") } label: { Label("New Claude Swift session", systemImage: "sparkle") }
+                        Button { start("Swift", chat: true) } label: { Label("New Claude Swift chat", systemImage: "bubble.left") }
                         Button { start("Codex") } label: { Label("New Codex session", systemImage: "diamond") }
                         Button { start("Codex", chat: true) } label: { Label("New Codex chat", systemImage: "bubble.left") }
                         Button { start("Agy") } label: { Label("New AGY session", systemImage: "diamond.inset.filled") }

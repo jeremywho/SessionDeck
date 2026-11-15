@@ -143,7 +143,10 @@ does not ask: it is started with `--dangerously-skip-permissions`, as AGY termin
 more things differ in both: a message sent while the agent is working waits for the turn to end,
 and the whole conversation is loaded at once rather than a page at a time. Claude
 chats need the native `claude.exe` and use the default login; Codex chats need `codex.exe`, AGY
-chats `agy.exe`, and OpenCode chats `opencode` on the path. In any chat `/rename a name` names
+chats `agy.exe`, and OpenCode chats `opencode` on the path. When a `claude-swift` wrapper script is on the path (Claude Code pointed at another endpoint and
+model, with a config folder of its own), the `+` menu also has **New Claude Swift** as a chat and
+under **Terminal**. Those sessions always run with `--dangerously-skip-permissions`, keep to the
+wrapper through restarts, reboots and `/resume`, and show as "Claude as swift". In any chat `/rename a name` names
 the session at once without a turn: the name goes to the agent where it keeps names (Claude,
 Codex) and is kept by Session Deck where it does not (AGY, OpenCode).
 
