@@ -199,6 +199,47 @@
       }).observe({ entryTypes: ['longtask'] });
     } catch { }
   }
+  // Frames this thread took long over, split into what ran before the frame, the frame's own callbacks, and style and
+  // layout. A slow switch with no such frame beside it waited somewhere past this thread (drawing, or the next frame
+  // not being asked for).
+  const FRAME_MS = 100, FRAMES_A_MINUTE = 20;
+  let framesFrom = 0, frames = 0;
+  if (window.PerformanceObserver) {
+    try {
+      new PerformanceObserver(list => {
+        for (const e of list.getEntries()) {
+          if (e.duration < FRAME_MS) continue;
+          if (e.startTime - framesFrom > 60000) { framesFrom = e.startTime; frames = 0; }
+          if (++frames > FRAMES_A_MINUTE) continue;
+          const end = e.startTime + e.duration, render = e.renderStart || end, layoutAt = e.styleAndLayoutStart || end;
+          const scripts = Array.from(e.scripts || []).sort((a, b) => b.duration - a.duration).slice(0, 3)
+            .map(s => `${String(s.invoker || s.invokerType || 'script').slice(0, 60)}=${Math.round(s.duration)}ms`
+              + (s.forcedStyleAndLayoutDuration >= 1 ? `(forced ${Math.round(s.forcedStyleAndLayoutDuration)}ms)` : '')).join(' ');
+          post({ type: 'frame', ms: Math.round(e.duration), work: Math.round(render - e.startTime), raf: Math.round(layoutAt - render),
+                 layout: Math.round(end - layoutAt), blocked: Math.round(e.blockingDuration || 0), scripts, hidden: document.hidden });
+        }
+      }).observe({ type: 'long-animation-frame' });
+    } catch { }
+  }
+  // How fast frames are coming at all, measured over eight of them after a switch that was slow to draw: frames that
+  // stay far apart with this thread idle are being held back past it.
+  let pacing = false;
+  function pace(pane) {
+    if (pacing) return;
+    pacing = true;
+    const gaps = [];
+    let last = performance.now();
+    const step = () => {
+      const now = performance.now();
+      gaps.push(now - last); last = now;
+      if (gaps.length < 8) { requestAnimationFrame(step); return; }
+      pacing = false;
+      gaps.sort((a, b) => a - b);
+      post({ type: 'pace', median: Math.round(gaps[4]), max: Math.round(gaps[7]), pane });
+    };
+    requestAnimationFrame(step);
+  }
+  const PACE_FROM_MS = 60;
   // A window that is minimised or covered gets no frames, and what its panes were sent meanwhile is drawn when it is back.
   document.addEventListener('visibilitychange', () => post({ type: 'visibility', hidden: document.hidden }));
 
@@ -795,7 +836,11 @@
                                    pane: f ? f.id : '', kind: f ? (f.chat ? 'chat' : 'terminal') : '', hidden: document.hidden });
     // A page nobody can see is given no frames; there is nothing to wait for.
     if (document.hidden) { report(-1); return; }
-    requestAnimationFrame(() => requestAnimationFrame(() => report(Math.round(performance.now() - began))));
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const frame = Math.round(performance.now() - began);
+      report(frame);
+      if (frame - handler >= PACE_FROM_MS) pace(f ? f.id : '');
+    }));
   }
 
   if (window.chrome && window.chrome.webview) {
@@ -804,7 +849,11 @@
       if (!m || !m.type) return;
       const got = Date.now(), began = performance.now(), shown = shownNow();
       timed('msg-' + m.type, typeof m.id === 'string' ? m.id : '', () => take(m));
-      if (m.type === 'layout' && m.at) switched(m.at, got, began, Math.round(performance.now() - began), shownNow() !== shown);
+      if (m.type === 'layout' && m.at) {
+        // Said at once, before any frame: the app then knows this thread took the layout, whatever comes of drawing it.
+        post({ type: 'took', at: m.at, hidden: document.hidden });
+        switched(m.at, got, began, Math.round(performance.now() - began), shownNow() !== shown);
+      }
     });
   }
 

@@ -87,6 +87,116 @@ public class PageWatchTests
         Assert.InRange(_watch.Lost, 1, 500);
     }
 
+    const string Drawn = """{"type":"switched","at":1000,"queued":0,"handler":0,"frame":9,"changed":true,"pane":"a","kind":"chat"}""";
+
+    [Fact]
+    public void A_layout_the_page_never_answers_is_said_at_3_s_and_once_more_at_15_s()
+    {
+        Assert.Null(_watch.Silent(50_000, pageReady: true));
+        _watch.Posted(1000);
+        Assert.Null(_watch.Silent(3999, pageReady: true));
+        Assert.Equal("page-silent 3000ms waiting-for=page ready=yes post=ok", _watch.Silent(4000, pageReady: true));
+        Assert.Null(_watch.Silent(5000, pageReady: true));
+        Assert.Null(_watch.Silent(15_999, pageReady: true));
+        Assert.Equal("page-silent 15200ms waiting-for=page ready=yes post=ok", _watch.Silent(16_200, pageReady: true));
+        Assert.Null(_watch.Silent(600_000, pageReady: true));
+    }
+
+    [Fact]
+    public void A_page_that_took_the_layout_and_drew_nothing_is_waited_on_for_its_frame()
+    {
+        _watch.Posted(1000);
+        Assert.Null(Line("""{"type":"took","at":1000,"hidden":false}"""));
+        Assert.Equal("page-silent 3100ms waiting-for=frame ready=yes post=ok", _watch.Silent(4100, pageReady: true));
+    }
+
+    [Fact]
+    public void A_layout_that_was_drawn_is_not_waited_on()
+    {
+        _watch.Posted(1000);
+        Assert.NotNull(Line(Drawn, 1020));
+        Assert.Null(_watch.Silent(60_000, pageReady: true));
+    }
+
+    [Fact]
+    public void An_answer_to_an_earlier_layout_does_not_settle_the_newest_one()
+    {
+        _watch.Posted(1000);
+        _watch.Posted(2000);
+        Assert.Null(Line("""{"type":"took","at":1000}"""));
+        Assert.NotNull(Line(Drawn, 2100));
+        Assert.Equal("page-silent 3000ms waiting-for=page ready=yes post=ok", _watch.Silent(5000, pageReady: true));
+    }
+
+    [Fact]
+    public void A_page_that_took_one_layout_has_not_taken_the_next()
+    {
+        _watch.Posted(1000);
+        Assert.Null(Line("""{"type":"took","at":1000}"""));
+        _watch.Posted(2000);
+        Assert.Equal("page-silent 3000ms waiting-for=page ready=yes post=ok", _watch.Silent(5000, pageReady: true));
+    }
+
+    [Fact]
+    public void A_new_layout_starts_the_wait_again()
+    {
+        _watch.Posted(1000);
+        Assert.NotNull(_watch.Silent(4000, pageReady: true));
+        _watch.Posted(10_000);
+        Assert.Null(_watch.Silent(12_000, pageReady: true));
+        Assert.Equal("page-silent 3000ms waiting-for=page ready=yes post=ok", _watch.Silent(13_000, pageReady: true));
+    }
+
+    [Fact]
+    public void Silence_says_what_the_post_threw_and_whether_the_page_was_loaded()
+    {
+        _watch.Posted(1000, "COMException");
+        Assert.Equal("page-silent 3000ms waiting-for=page ready=yes post=COMException", _watch.Silent(4000, pageReady: true));
+        _watch.Posted(10_000, "held-until-ready");
+        Assert.Equal("page-silent 3000ms waiting-for=page ready=no post=held-until-ready", _watch.Silent(13_000, pageReady: false));
+    }
+
+    [Fact]
+    public void A_switch_carries_the_apps_own_share_when_it_is_known()
+    {
+        _watch.AppWorked(7600, 88);
+        Assert.Equal("tab-switch total=2400ms app=88ms queued=2100ms handler=12ms frame=180ms pane=abc kind=chat",
+            Line("""{"type":"switched","at":7600,"queued":2100,"handler":12,"frame":180,"changed":true,"pane":"abc","kind":"chat"}"""));
+        Assert.Equal("tab-switch total=2000ms queued=1ms handler=1ms frame=5ms pane=abc kind=chat",
+            Line("""{"type":"switched","at":8000,"queued":1,"handler":1,"frame":5,"changed":true,"pane":"abc","kind":"chat"}"""));
+    }
+
+    [Fact]
+    public void A_long_frame_says_where_this_thread_spent_it() =>
+        Assert.Equal("page-frame 140ms work=3ms raf=10ms layout=120ms blocked=90ms scripts=FrameRequestCallback=9ms(forced 4ms) WebSocket.onmessage=2ms",
+            Line("""{"type":"frame","ms":140.2,"work":3,"raf":10,"layout":120,"blocked":90,"scripts":"FrameRequestCallback=9ms(forced 4ms) WebSocket.onmessage=2ms","hidden":false}"""));
+
+    [Fact]
+    public void A_long_frame_with_no_script_in_it_says_none() =>
+        Assert.Equal("page-frame 110ms work=0ms raf=0ms layout=108ms blocked=60ms hidden scripts=-",
+            Line("""{"type":"frame","ms":110,"work":0,"raf":0,"layout":108,"blocked":60,"scripts":"","hidden":true}"""));
+
+    [Fact]
+    public void The_pace_of_frames_after_a_slow_switch_is_logged() =>
+        Assert.Equal("page-pace median=62ms max=80ms pane=9410668b6e6b", Line("""{"type":"pace","median":62,"max":80.4,"pane":"9410668b6e6b"}"""));
+
+    [Fact]
+    public void A_browser_process_is_said_to_be_alive_and_how_busy_or_gone()
+    {
+        Assert.Equal("Renderer:1234=alive cpu=98% ws=700MB", PageWatch.ProcessState("Renderer", 1234, 97.6, 700));
+        Assert.Equal("Gpu:55=alive cpu=0% ws=90MB", PageWatch.ProcessState("Gpu", 55, 0.2, 90));
+        Assert.Equal("Renderer:1234=gone", PageWatch.ProcessState("Renderer", 1234, null, 0));
+    }
+
+    [Fact]
+    public void A_failed_browser_process_says_what_failed_and_whether_the_page_is_loaded_again()
+    {
+        Assert.Equal("page-process failed kind=RenderProcessExited reason=Crashed exit=-1073741819 process=Renderer reloading",
+            PageWatch.Failed("RenderProcessExited", "Crashed", -1073741819, "Renderer", reloading: true));
+        Assert.Equal("page-process failed kind=RenderProcessUnresponsive reason=Unresponsive exit=0 process=-",
+            PageWatch.Failed("RenderProcessUnresponsive", "Unresponsive", 0, "", reloading: false));
+    }
+
     [Fact]
     public void What_the_page_says_cannot_start_another_line_or_another_value()
     {

@@ -237,14 +237,18 @@ internal partial class DeckPane : UserControl
 
     // ---------------- layout: model → strips + page ----------------
 
+    // The stamp of the layout posted last; the page hands it back when it has drawn it.
+    long _layoutAt;
+
     void SendLayout()
     {
         var pinned = _model.Pinned;
         var unpinned = _model.Unpinned;
-        _browser.Post(new
+        long at = _layoutAt = _browser.StampLayout();
+        _browser.PostLayout(at, new
         {
             type = "layout",
-            at = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            at,
             groups = pinned.Select(g => new { id = g.Active?.View.Host.Id, frac = g.Fraction, kind = Kind(g) }).ToArray(),
             focused = FocusedGroup is { } f ? pinned.IndexOf(f) : -1,
             edge = unpinned.Count > 0 ? EdgeWidth : 0,
@@ -407,9 +411,12 @@ internal partial class DeckPane : UserControl
     public void Activate(DeckTab tab)
     {
         if (!_model.Activate(tab)) return;
+        var took = System.Diagnostics.Stopwatch.StartNew();
         Changed();
         if (GroupOf(tab) is { IsUnpinned: true } g) _browser.Post(new { type = "flyout", index = Groups.IndexOf(g) });
         tab.View.FocusTerminal();
+        // For the line about this switch: the app's own share of it.
+        _browser.AppWorked(_layoutAt, took.ElapsedMilliseconds);
     }
 
     /// <summary>Move the tab into a new column to the right of its own, taking half that column's width.</summary>

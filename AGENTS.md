@@ -35,6 +35,19 @@ dotnet test Tests\SessionDeck.Tests.csproj
     there. All three small while the pane still looked stuck means the stall was in drawing to the screen, past
     the page; that is why the quick ones are logged too. `page-layout` is the same for a layout that changed
     nothing on show, logged from 300 ms.
+  - `page-silent 3000ms waiting-for=page|frame ready=yes post=ok Renderer:1234=alive cpu=98% ws=700MB ..`: the
+    app's side, for a page that cannot report on itself. The newest layout has gone unanswered for 3 s (and once
+    more at 15 s). `waiting-for=page` means the page's thread never took the message (held, or gone);
+    `waiting-for=frame` means it took it and no frame came. Each browser process follows with its CPU over one
+    second: a renderer at a full core is spinning, an idle one is waiting on something, `=gone` is gone.
+  - `page-process failed kind=.. reason=.. exit=..`: one of the browser's processes failed (`ProcessFailed`).
+    A renderer that exited is loaded again (`reloading`), at most three times in five minutes.
+  - `page-frame 140ms work=3ms raf=10ms layout=120ms blocked=90ms scripts=..`: a frame this thread took 100 ms
+    or more over (long-animation-frame), split into what ran before the frame, its callbacks, and style and
+    layout, with the three longest scripts. A slow `tab-switch` with no `page-frame` beside it waited past this
+    thread. `page-pace median=..ms max=..ms` follows a switch whose frame took 60 ms+: the gap between the next
+    eight frames, which says whether frames are slow to come at all. `app=` on a `tab-switch` is the app's own
+    handler around the post.
   - `page-visibility hidden|visible` (a hidden page is given no frames, and draws what it missed when it is
     back), and `pane-socket lost host=..` then `pane-socket back host=..` (a pane's socket to its host dropped;
     the pane reconnects itself, and is logged once however often it has to ask).

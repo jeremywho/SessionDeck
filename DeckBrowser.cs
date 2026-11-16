@@ -81,6 +81,9 @@ internal sealed class DeckBrowser : Grid
             core.WebResourceRequested += ServeEmbedded;
             core.WebMessageReceived += OnMessage;
             core.NavigationStarting += (_, _) => _ready = false;
+            core.ProcessFailed += OnProcessFailed;
+            _silence.Tick += (_, _) => CheckSilence();
+            _silence.Start();
             core.NewWindowRequested += (_, e) => { e.Handled = true; OpenOutside(e.Uri); };
             core.Navigate($"https://{VirtualHost}/deck.html?theme={(_dark ? "dark" : "light")}{LookQuery()}");
             _status.Visibility = Visibility.Collapsed;
@@ -134,6 +137,9 @@ internal sealed class DeckBrowser : Grid
                     return;
                 case "stall":
                 case "switched":
+                case "took":
+                case "frame":
+                case "pace":
                 case "visibility":
                     if (_watch.Line(root, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()) is { } watched) PerformanceLog.Write(watched);
                     return;
@@ -178,9 +184,88 @@ internal sealed class DeckBrowser : Grid
         Send(msg);
     }
 
-    void Send(object msg)
+    string Send(object msg)
     {
-        try { _web?.CoreWebView2?.PostWebMessageAsJson(JsonSerializer.Serialize(msg)); } catch { }
+        try { _web?.CoreWebView2?.PostWebMessageAsJson(JsonSerializer.Serialize(msg)); return ""; }
+        catch (Exception ex) { return ex.GetType().Name; }
+    }
+
+    static long NowMs => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+    /// <summary>The stamp for a layout about to be posted; the page hands it back when it has taken the layout, and again when it has drawn it.</summary>
+    public long StampLayout() => NowMs;
+
+    /// <summary>Post a layout stamped with <see cref="StampLayout"/>, and start waiting for the page to answer it.</summary>
+    public void PostLayout(long at, object msg)
+    {
+        if (!_ready) { _pending.Enqueue(msg); _watch.Posted(at, "held-until-ready"); return; }
+        _watch.Posted(at, Send(msg));
+    }
+
+    /// <summary>How long the app's own handler ran around the layout stamped <paramref name="at"/>, for the line about that switch.</summary>
+    public void AppWorked(long at, long ms) => _watch.AppWorked(at, ms);
+
+    // ---------------- a page that has stopped answering ----------------
+
+    readonly System.Windows.Threading.DispatcherTimer _silence = new() { Interval = TimeSpan.FromSeconds(1) };
+    readonly List<long> _reloads = new();
+
+    /// <summary>
+    /// A page that is hung or has stopped drawing reports nothing itself. When the newest layout has gone
+    /// unanswered, say so, with whether each of the browser's processes is alive and how busy it is over a second:
+    /// a renderer at a full core is spinning, an idle one is waiting on something, a missing one is gone.
+    /// </summary>
+    void CheckSilence()
+    {
+        if (_watch.Silent(NowMs, _ready) is not { } line) return;
+        var watched = new List<(string Kind, int Pid)>();
+        try
+        {
+            if (_web?.CoreWebView2?.Environment.GetProcessInfos() is { } infos)
+                foreach (var p in infos) watched.Add((p.Kind.ToString(), p.ProcessId));
+        }
+        catch (Exception ex) { line += " processes=" + ex.GetType().Name; }
+        Task.Run(() =>
+        {
+            try
+            {
+                var before = watched.Select(w => { try { using var p = Process.GetProcessById(w.Pid); return (double?)p.TotalProcessorTime.TotalMilliseconds; } catch { return null; } }).ToList();
+                Thread.Sleep(1000);
+                var parts = new List<string>();
+                for (int i = 0; i < watched.Count; i++)
+                {
+                    double? cpu = null; long ws = 0;
+                    try { using var p = Process.GetProcessById(watched[i].Pid); if (before[i] is { } was) cpu = (p.TotalProcessorTime.TotalMilliseconds - was) / 10.0; ws = p.WorkingSet64 / (1024 * 1024); } catch { }
+                    parts.Add(PageWatch.ProcessState(watched[i].Kind, watched[i].Pid, cpu, ws));
+                }
+                PerformanceLog.Write(line + (parts.Count > 0 ? " " + string.Join(" ", parts) : ""));
+            }
+            catch (Exception ex) { App.LogError(ex); }
+        });
+    }
+
+    /// <summary>
+    /// One of the browser's processes failed. It is always logged; nothing else was watching for it. A renderer that
+    /// exited leaves a dead page, which is loaded again (the page asks for every pane back once it is ready), at
+    /// most three times in five minutes so a renderer that keeps dying is not restarted for ever.
+    /// </summary>
+    void OnProcessFailed(object? sender, CoreWebView2ProcessFailedEventArgs e)
+    {
+        bool reload = false;
+        try
+        {
+            if (e.ProcessFailedKind == CoreWebView2ProcessFailedKind.RenderProcessExited)
+            {
+                long now = NowMs;
+                _reloads.RemoveAll(t => now - t > 300_000);
+                if (_reloads.Count < 3) { _reloads.Add(now); reload = true; }
+            }
+            string description = "";
+            try { description = e.ProcessDescription ?? ""; } catch { }
+            PerformanceLog.Write(PageWatch.Failed(e.ProcessFailedKind.ToString(), e.Reason.ToString(), e.ExitCode, description, reload));
+            if (reload) (sender as CoreWebView2 ?? _web?.CoreWebView2)?.Reload();
+        }
+        catch (Exception ex) { App.LogError(ex); }
     }
 
     public void FocusPage()
