@@ -24,16 +24,20 @@ dotnet test Tests\SessionDeck.Tests.csproj
   at 1MB. Keep this thresholded; logging every pass would itself become background I/O.
 - The deck's page reports on itself there too (`PageWatch`, the block under `post` in `deck.html`). Every pane
   shares the page's one thread, so a stall anywhere is a stall in all of them:
-  - `page-stall 1800ms ran=chat-paint:<host>=1700ms`: the thread was held 500 ms or more; `ran` names the
-    page's own handlers that ran 100 ms+ inside it (`msg-<type>`, `chat-data`, `chat-paint`, `fit`). `ran=-`
-    means the time went to the browser (style, layout) or to xterm's parsing, which runs on its own timers.
-  - `tab-switch total=..ms queued=..ms handler=..ms frame=..ms`: 300 ms or more from the app posting a layout
-    to the page having drawn the frame after it. `queued` is the wait before the page took the message (the
-    thread was busy: look for a `page-stall` beside it), `handler` the page's own work on it, `frame` the time
-    to the second frame from there. All three small while the pane still looked stuck means the stall was in
-    drawing to the screen, past the page.
+  - `page-stall 1800ms ran=chat-paint=1650ms/21@<host> fit=90ms/20@<host>`: the thread was held 500 ms or
+    more. `ran` adds up what the page's own handlers took inside it, by handler (`msg-<type>`, `chat-data`,
+    `chat-paint`, `fit`): the time in all, how many runs, and the pane of the longest run. `ran=-` means the
+    time went to the browser (style, layout) or to xterm's parsing, which runs on its own timers.
+  - `tab-switch total=..ms queued=..ms handler=..ms frame=..ms pane=<host> kind=chat|terminal`: every layout
+    that changed which pane a column shows, quick or not, from the app posting it to the page having drawn the
+    frame after it. `queued` is the wait before the page took the message (the thread was busy: look for a
+    `page-stall` beside it), `handler` the page's own work on it, `frame` the time to the second frame from
+    there. All three small while the pane still looked stuck means the stall was in drawing to the screen, past
+    the page; that is why the quick ones are logged too. `page-layout` is the same for a layout that changed
+    nothing on show, logged from 300 ms.
   - `page-visibility hidden|visible` (a hidden page is given no frames, and draws what it missed when it is
-    back) and `pane-socket lost host=..` (a pane's socket to its host dropped; the pane reconnects itself).
+    back), and `pane-socket lost host=..` then `pane-socket back host=..` (a pane's socket to its host dropped;
+    the pane reconnects itself, and is logged once however often it has to ask).
 - DWM investigation is opt-in and documented in `docs/dwm-diagnostics.md`. The diagnostic launcher
   separates Mica from recurring work, records one-second DWM/app telemetry, and exits only the test app
   if the known sustained-DWM-CPU/resident-growth signature appears. Never enable that logging normally.

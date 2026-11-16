@@ -159,17 +159,32 @@
   }
 
   // What kept the page from answering, for the performance log. Every pane shares this one thread, so whatever holds
-  // it holds them all: the page says each time it was held for half a second, and which of its own handlers ran
-  // long inside that. A stall with none named was the browser's own work (styling, layout, the terminals' parsing).
-  const STALL_MS = 500, SLOW_MS = 100, STALLS_A_MINUTE = 20;
-  const slow = [];
+  // it holds them all: the page says each time it was held for half a second, and what its own handlers took of that.
+  // A stall with none named was the browser's own work (styling, layout, the terminals' parsing).
+  const STALL_MS = 500, NOTED_MS = 4, STALLS_A_MINUTE = 20;
+  const ran = [];
   function timed(what, id, fn) {
     const began = performance.now();
     try { return fn(); }
     finally {
       const ms = performance.now() - began;
-      if (ms >= SLOW_MS) { slow.push({ what, id, ms: Math.round(ms), end: began + ms }); if (slow.length > 30) slow.shift(); }
+      if (ms >= NOTED_MS) { ran.push({ what, id, ms, end: began + ms }); if (ran.length > 800) ran.splice(0, 200); }
     }
+  }
+  // What of ours ran inside a stall, by handler: its time in all, how many runs that was, and the pane of the longest.
+  // Many short runs hold the page as well as one long one does (every chat painting in one frame, every terminal
+  // fitting after one resize), so they are added up rather than each held to a size.
+  function ranIn(from, to) {
+    const by = new Map();
+    for (const r of ran) {
+      if (r.end <= from || r.end > to + 5) continue;
+      const s = by.get(r.what) || { ms: 0, n: 0, top: r };
+      s.ms += r.ms; s.n++;
+      if (r.ms > s.top.ms) s.top = r;
+      by.set(r.what, s);
+    }
+    return Array.from(by).filter(([, s]) => s.ms >= 50).sort((a, b) => b[1].ms - a[1].ms)
+      .map(([what, s]) => `${what}=${Math.round(s.ms)}ms/${s.n}${s.top.id ? '@' + s.top.id : ''}`).join(' ');
   }
   let stallsFrom = 0, stalls = 0;
   if (window.PerformanceObserver) {
@@ -179,9 +194,7 @@
           if (e.duration < STALL_MS) continue;
           if (e.startTime - stallsFrom > 60000) { stallsFrom = e.startTime; stalls = 0; }
           if (++stalls > STALLS_A_MINUTE) continue;
-          const ran = slow.filter(s => s.end > e.startTime && s.end <= e.startTime + e.duration + 5)
-            .map(s => `${s.what}${s.id ? ':' + s.id : ''}=${s.ms}ms`).join(' ');
-          post({ type: 'stall', ms: Math.round(e.duration), ran, hidden: document.hidden });
+          post({ type: 'stall', ms: Math.round(e.duration), ran: ranIn(e.startTime, e.startTime + e.duration), hidden: document.hidden });
         }
       }).observe({ entryTypes: ['longtask'] });
     } catch { }
@@ -771,11 +784,14 @@
     }
   }
 
+  // Which pane each column shows: a layout that changes this is a tab switch, and is reported however quick it was.
+  const shownNow = () => groups.map(g => g.id || '').join(',');
+
   // How long a change of layout (a tab switch, mostly) took to reach the page and be drawn, for the performance log:
   // how long the message waited, how long the page took over it, and when the frame after it came.
-  function switched(at, got, began, handler) {
+  function switched(at, got, began, handler, changed) {
     const f = groups[focused] && groups[focused].id ? panes.get(groups[focused].id) : null;
-    const report = frame => post({ type: 'switched', at, queued: Math.max(0, got - at), handler, frame,
+    const report = frame => post({ type: 'switched', at, queued: Math.max(0, got - at), handler, frame, changed,
                                    pane: f ? f.id : '', kind: f ? (f.chat ? 'chat' : 'terminal') : '', hidden: document.hidden });
     // A page nobody can see is given no frames; there is nothing to wait for.
     if (document.hidden) { report(-1); return; }
@@ -786,9 +802,9 @@
     window.chrome.webview.addEventListener('message', ev => {
       const m = ev.data;
       if (!m || !m.type) return;
-      const got = Date.now(), began = performance.now();
+      const got = Date.now(), began = performance.now(), shown = shownNow();
       timed('msg-' + m.type, typeof m.id === 'string' ? m.id : '', () => take(m));
-      if (m.type === 'layout' && m.at) switched(m.at, got, began, Math.round(performance.now() - began));
+      if (m.type === 'layout' && m.at) switched(m.at, got, began, Math.round(performance.now() - began), shownNow() !== shown);
     });
   }
 

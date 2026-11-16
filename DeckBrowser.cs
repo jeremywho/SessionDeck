@@ -27,6 +27,7 @@ internal sealed class DeckBrowser : Grid
 
     WebView2? _web;
     bool _ready;
+    readonly PageWatch _watch = new();
     bool _dark;
     readonly Queue<object> _pending = new();
     readonly TextBlock _status = new()
@@ -134,10 +135,11 @@ internal sealed class DeckBrowser : Grid
                 case "stall":
                 case "switched":
                 case "visibility":
-                    if (PageWatch.Line(root, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()) is { } watched) PerformanceLog.Write(watched);
+                    if (_watch.Line(root, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()) is { } watched) PerformanceLog.Write(watched);
                     return;
                 case "disconnected":
-                    if (PageWatch.Line(root, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()) is { } lost) PerformanceLog.Write(lost);
+                case "connected":
+                    if (_watch.Line(root, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()) is { } socket) PerformanceLog.Write(socket);
                     break;
                 case "copy":
                     try { Clipboard.SetText(root.GetProperty("text").GetString() ?? ""); } catch (Exception ex) { App.LogError(ex); }
