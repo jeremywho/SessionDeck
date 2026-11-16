@@ -244,6 +244,7 @@ internal partial class DeckPane : UserControl
         _browser.Post(new
         {
             type = "layout",
+            at = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
             groups = pinned.Select(g => new { id = g.Active?.View.Host.Id, frac = g.Fraction, kind = Kind(g) }).ToArray(),
             focused = FocusedGroup is { } f ? pinned.IndexOf(f) : -1,
             edge = unpinned.Count > 0 ? EdgeWidth : 0,

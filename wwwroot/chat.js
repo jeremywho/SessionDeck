@@ -777,6 +777,8 @@
     const model = new ChatModel();
     const nodes = new Map();
     let ws = null, seq = 0, reader = new LineReader(false), closed = false, retries = 0, connected = false, frame = 0;
+    // The deck times this pane's long work for its performance log; anywhere else it just runs.
+    const timed = opts.timed || ((_what, _id, fn) => fn());
     // Earlier conversation: whether this host pages it, whether a page was already put in, and the request out now.
     let hostPages = false, paged = false, asked = '', nextAsk = 1, draftKey = '';
     // The host's conversation counter and what it can do; the list of conversations while one is being picked;
@@ -922,7 +924,7 @@
 
     function schedule() {
       if (frame) return;
-      frame = requestAnimationFrame(() => { frame = 0; paint(); });
+      frame = requestAnimationFrame(() => { frame = 0; timed('chat-paint', id, paint); });
     }
 
     function paint() {
@@ -1807,7 +1809,7 @@
       ws = sock;
       let openedAt = 0;
       sock.onopen = () => { openedAt = Date.now(); connected = true; post({ type: 'connected', id }); schedule(); };
-      sock.onmessage = ev => {
+      sock.onmessage = ev => timed('chat-data', id, () => {
         if (typeof ev.data === 'string') {
           let msg;
           try { msg = JSON.parse(ev.data); } catch { return; }
@@ -1841,7 +1843,7 @@
         seq += bytes.length;
         for (const line of reader.push(bytes)) model.durable(line);
         schedule();
-      };
+      });
       sock.onclose = () => {
         if (ws !== sock) return;
         ws = null;

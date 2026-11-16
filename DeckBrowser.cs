@@ -131,6 +131,14 @@ internal sealed class DeckBrowser : Grid
                 case "metrics":
                     PerformanceLog.Write("term-metrics " + root.GetRawText());
                     return;
+                case "stall":
+                case "switched":
+                case "visibility":
+                    if (PageWatch.Line(root, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()) is { } watched) PerformanceLog.Write(watched);
+                    return;
+                case "disconnected":
+                    if (PageWatch.Line(root, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()) is { } lost) PerformanceLog.Write(lost);
+                    break;
                 case "copy":
                     try { Clipboard.SetText(root.GetProperty("text").GetString() ?? ""); } catch (Exception ex) { App.LogError(ex); }
                     return;

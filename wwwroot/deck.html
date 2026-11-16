@@ -158,6 +158,37 @@
     if (window.chrome && window.chrome.webview) window.chrome.webview.postMessage(msg);
   }
 
+  // What kept the page from answering, for the performance log. Every pane shares this one thread, so whatever holds
+  // it holds them all: the page says each time it was held for half a second, and which of its own handlers ran
+  // long inside that. A stall with none named was the browser's own work (styling, layout, the terminals' parsing).
+  const STALL_MS = 500, SLOW_MS = 100, STALLS_A_MINUTE = 20;
+  const slow = [];
+  function timed(what, id, fn) {
+    const began = performance.now();
+    try { return fn(); }
+    finally {
+      const ms = performance.now() - began;
+      if (ms >= SLOW_MS) { slow.push({ what, id, ms: Math.round(ms), end: began + ms }); if (slow.length > 30) slow.shift(); }
+    }
+  }
+  let stallsFrom = 0, stalls = 0;
+  if (window.PerformanceObserver) {
+    try {
+      new PerformanceObserver(list => {
+        for (const e of list.getEntries()) {
+          if (e.duration < STALL_MS) continue;
+          if (e.startTime - stallsFrom > 60000) { stallsFrom = e.startTime; stalls = 0; }
+          if (++stalls > STALLS_A_MINUTE) continue;
+          const ran = slow.filter(s => s.end > e.startTime && s.end <= e.startTime + e.duration + 5)
+            .map(s => `${s.what}${s.id ? ':' + s.id : ''}=${s.ms}ms`).join(' ');
+          post({ type: 'stall', ms: Math.round(e.duration), ran, hidden: document.hidden });
+        }
+      }).observe({ entryTypes: ['longtask'] });
+    } catch { }
+  }
+  // A window that is minimised or covered gets no frames, and what its panes were sent meanwhile is drawn when it is back.
+  document.addEventListener('visibilitychange', () => post({ type: 'visibility', hidden: document.hidden }));
+
   // xterm paints its own background per cell; keep it fully transparent and let the pane carry the
   // tinted, translucent surface so the window behind shows through at the chosen opacity.
   function termOptions() {
@@ -342,7 +373,7 @@
     el.className = 'pane';
     document.body.appendChild(el);
     const chat = ChatPane.create({
-      el, id, port, token, post, exited, session,
+      el, id, port, token, post, exited, session, timed,
       onFocus: () => {
         const gi = groups.findIndex(g => g.id === id);
         if (gi >= 0 && gi !== focused) { focused = gi; layout(); }
@@ -428,7 +459,7 @@
     });
     term.onResize(({ cols, rows }) => send(p, { type: 'resize', cols, rows }));
     term.onTitleChange(title => post({ type: 'title', id, title }));
-    p.ro = new ResizeObserver(() => { fit.fit(); reportMetrics(p); });
+    p.ro = new ResizeObserver(() => timed('fit', id, () => { fit.fit(); reportMetrics(p); }));
     p.ro.observe(el);
     connect(p);
   }
@@ -705,42 +736,59 @@
 
   window.addEventListener('focus', focusShown);
 
+  function take(m) {
+    switch (m.type) {
+      case 'open': open(m.id, m.port, m.token, m.kind, m.exited, m.session); break;
+      case 'layout':
+        groups = m.groups.map(g => ({ id: g.id || null, frac: Number(g.frac) || 1, kind: g.kind || 'tabs' }));
+        focused = Math.min(m.focused ?? focused, Math.max(0, groups.length - 1));
+        unpinned = m.unpinned || [];
+        edgePx = Number(m.edge) || 0;
+        document.documentElement.style.setProperty('--edge', `${edgePx}px`);
+        renderEdge();
+        layout();
+        if (fly) {
+          if (unpinned.some(u => u.index === fly.index)) showFly(fly.index, fly.sticky);
+          else hideFly();
+        }
+        break;
+      case 'flyout': showFly(m.index, true); focusFly(); break;
+      case 'close': close(m.id); break;
+      case 'focus': focusShown(); break;
+      case 'paste': {
+        // No text on the clipboard: hand the CLI the bare Ctrl+V so Codex (and Claude on other
+        // platforms) can read an image from the clipboard themselves.
+        const p = panes.get(m.id);
+        if (!p) break;
+        if (m.text) p.term.paste(m.text); else send(p, { type: 'input', data: String.fromCharCode(22) });
+        break;
+      }
+      case 'fit': for (const p of panes.values()) p.fit.fit(); break;
+      case 'kill': { const p = panes.get(m.id); if (p && p.chat) p.chat.kill(); else if (p) send(p, { type: 'kill' }); break; }
+      case 'theme': dark = !!m.dark; look = lookFrom(m.look || {}); applyLook(); break;
+      case 'prs': PrPane.render(m.board); break;
+      case 'prsFetched': PrPane.fetched(m.fetchedAt, m.error); break;
+    }
+  }
+
+  // How long a change of layout (a tab switch, mostly) took to reach the page and be drawn, for the performance log:
+  // how long the message waited, how long the page took over it, and when the frame after it came.
+  function switched(at, got, began, handler) {
+    const f = groups[focused] && groups[focused].id ? panes.get(groups[focused].id) : null;
+    const report = frame => post({ type: 'switched', at, queued: Math.max(0, got - at), handler, frame,
+                                   pane: f ? f.id : '', kind: f ? (f.chat ? 'chat' : 'terminal') : '', hidden: document.hidden });
+    // A page nobody can see is given no frames; there is nothing to wait for.
+    if (document.hidden) { report(-1); return; }
+    requestAnimationFrame(() => requestAnimationFrame(() => report(Math.round(performance.now() - began))));
+  }
+
   if (window.chrome && window.chrome.webview) {
     window.chrome.webview.addEventListener('message', ev => {
       const m = ev.data;
       if (!m || !m.type) return;
-      switch (m.type) {
-        case 'open': open(m.id, m.port, m.token, m.kind, m.exited, m.session); break;
-        case 'layout':
-          groups = m.groups.map(g => ({ id: g.id || null, frac: Number(g.frac) || 1, kind: g.kind || 'tabs' }));
-          focused = Math.min(m.focused ?? focused, Math.max(0, groups.length - 1));
-          unpinned = m.unpinned || [];
-          edgePx = Number(m.edge) || 0;
-          document.documentElement.style.setProperty('--edge', `${edgePx}px`);
-          renderEdge();
-          layout();
-          if (fly) {
-            if (unpinned.some(u => u.index === fly.index)) showFly(fly.index, fly.sticky);
-            else hideFly();
-          }
-          break;
-        case 'flyout': showFly(m.index, true); focusFly(); break;
-        case 'close': close(m.id); break;
-        case 'focus': focusShown(); break;
-        case 'paste': {
-          // No text on the clipboard: hand the CLI the bare Ctrl+V so Codex (and Claude on other
-          // platforms) can read an image from the clipboard themselves.
-          const p = panes.get(m.id);
-          if (!p) break;
-          if (m.text) p.term.paste(m.text); else send(p, { type: 'input', data: String.fromCharCode(22) });
-          break;
-        }
-        case 'fit': for (const p of panes.values()) p.fit.fit(); break;
-        case 'kill': { const p = panes.get(m.id); if (p && p.chat) p.chat.kill(); else if (p) send(p, { type: 'kill' }); break; }
-        case 'theme': dark = !!m.dark; look = lookFrom(m.look || {}); applyLook(); break;
-        case 'prs': PrPane.render(m.board); break;
-        case 'prsFetched': PrPane.fetched(m.fetchedAt, m.error); break;
-      }
+      const got = Date.now(), began = performance.now();
+      timed('msg-' + m.type, typeof m.id === 'string' ? m.id : '', () => take(m));
+      if (m.type === 'layout' && m.at) switched(m.at, got, began, Math.round(performance.now() - began));
     });
   }
 
