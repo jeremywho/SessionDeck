@@ -1,6 +1,47 @@
+using System.Buffers;
+using System.Globalization;
 using System.Text.Json;
 
 namespace SessionDeck.Host;
+
+/// <summary>
+/// When a line of the conversation was said, written on it as Claude writes it on its own lines
+/// (<c>timestamp</c>, ISO 8601 in UTC), so the pane reads one field whatever the agent.
+/// </summary>
+internal static class ChatLines
+{
+    /// <summary>The line with its time on it, when it is a message (user or assistant) that says none; any other line as given.</summary>
+    internal static byte[] Stamped(byte[] line, DateTimeOffset at) => Stamp(line, at, evenHistory: true);
+
+    /// <summary>
+    /// The same for a line said now, by the host's clock. A line read back from an earlier
+    /// conversation is left as it is: when it was said is not known, and it was not now.
+    /// </summary>
+    internal static byte[] StampedNow(byte[] line, DateTime now) => Stamp(line, new DateTimeOffset(now.ToUniversalTime()), evenHistory: false);
+
+    static byte[] Stamp(byte[] line, DateTimeOffset at, bool evenHistory)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(line);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object) return line;
+            if (!root.TryGetProperty("type", out var type) || type.ValueKind != JsonValueKind.String || type.GetString() is not ("user" or "assistant")) return line;
+            if (root.TryGetProperty("timestamp", out _)) return line;
+            if (!evenHistory && root.TryGetProperty("history", out var history) && history.ValueKind == JsonValueKind.True) return line;
+            var buffer = new ArrayBufferWriter<byte>(line.Length + 48);
+            using (var w = new Utf8JsonWriter(buffer))
+            {
+                w.WriteStartObject();
+                foreach (var p in root.EnumerateObject()) p.WriteTo(w);
+                w.WriteString("timestamp", at.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture));
+                w.WriteEndObject();
+            }
+            return buffer.WrittenSpan.ToArray();
+        }
+        catch (JsonException) { return line; }
+    }
+}
 
 /// <summary>What a chat translator asks the host to do with something it was told.</summary>
 internal enum ChatEffectKind

@@ -628,7 +628,9 @@ internal static class HostProgram
             switch (effect.Kind)
             {
                 case ChatEffectKind.ToCli: WriteChatInput(Encoding.UTF8.GetString(effect.Data)); break;
-                case ChatEffectKind.Durable: AppendChatLine(effect.Data); break;
+                // A message with no time of its own is being said now. Stamped before it is kept, so a viewer that
+                // attaches later reads the same time.
+                case ChatEffectKind.Durable: AppendChatLine(ChatLines.StampedNow(effect.Data, DateTime.UtcNow)); break;
                 case ChatEffectKind.Live: Broadcast(true, ChatStream.LiveFrame(effect.Data)); break;
                 case ChatEffectKind.Frame: Broadcast(true, effect.Data); break;
                 case ChatEffectKind.Reset: Serve(effect.Seed!); break;

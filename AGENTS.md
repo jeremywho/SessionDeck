@@ -442,6 +442,20 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
   ("Advisor"), running until the result block comes (`serverResult` in `chat.js`); any other
   `server_tool_use` gets the same treatment under its own name. The host passes these lines through
   untouched.
+- **Every message line carries when it was said, as `timestamp` (ISO 8601, UTC), and the pane reads only that.**
+  Claude writes it itself, on live lines and in the transcript (`ChatTranscript.Line` copies it into history
+  lines). Codex records `startedAtMs`/`completedAtMs` on every item and repeats them when turns are read back
+  (`CodexChat.When`). ACP says no times at all, live or in `session/load` (checked against OpenCode 11-17), so
+  for any agent's message that has none the host writes its own clock on it as it is kept
+  (`ChatLines.StampedNow` in `HostProgram.Agent`), and never on a `history` line: an ACP chat's times are
+  lost when its host restarts and replays the conversation. This needs no `ChatStream.Revision` bump; a
+  line without a time just shows none.
+  In the pane (`chat.js`) the model keeps a clock (`lastAt`) and puts a `time` item ahead of whatever is
+  shown next after a pause (`pauseBefore`: the start, an hour, a new day). Times that go backwards do not
+  move it (queued messages and parallel results arrive out of order in real transcripts). What is sent or
+  streamed from here is timed by the viewer's clock until the session's own line arrives. `prepend` settles
+  the mark at the seam. The words are a function of `(at, now)` and are worked out again on `focus()` and on
+  one shared minute timer (`retime`), writing only what changed.
 - **A phone ends a session through the gateway, and the deck finishes it.** `POST
   /sessions/<hostId>/end` makes the gateway write `phone-ended.json` (it is the only writer; the deck
   only reads, as with `phone-read.json`) and end the host. On each refresh the deck forgets that

@@ -16,6 +16,27 @@ public class CodexChatTests
     static readonly DateTime T0 = new(2026, 11, 12, 12, 0, 0, DateTimeKind.Utc);
 
     static JsonElement J(string json) => JsonDocument.Parse(json).RootElement.Clone();
+
+    [Fact]
+    public void An_item_codex_recorded_a_time_for_carries_it_live_and_read_back()
+    {
+        const long started = 1794940000000, completed = 1794940004500;
+        string when = DateTimeOffset.FromUnixTimeMilliseconds(completed).UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", System.Globalization.CultureInfo.InvariantCulture);
+        foreach (bool history in new[] { true, false })
+        {
+            var user = CodexChat.Lines(J($$"""{"type":"userMessage","id":"u1","content":[{"type":"text","text":"hi"}],"startedAtMs":{{started}},"completedAtMs":{{completed}}}"""), history);
+            Assert.Equal(when, J(Encoding.UTF8.GetString(Assert.Single(user))).GetProperty("timestamp").GetString());
+            var agent = CodexChat.Lines(J($$"""{"type":"agentMessage","id":"a1","text":"hello","startedAtMs":{{started}},"completedAtMs":{{completed}}}"""), history);
+            Assert.Equal(when, J(Encoding.UTF8.GetString(Assert.Single(agent))).GetProperty("timestamp").GetString());
+        }
+        // Still running: when it started. Neither recorded (an old thread): no time is made up.
+        Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(started), CodexChat.When(J($$"""{"type":"agentMessage","startedAtMs":{{started}},"completedAtMs":null}""")));
+        Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(completed), CodexChat.When(J($$"""{"type":"agentMessage","startedAtMs":{{started}},"completedAtMs":{{completed}}}""")));
+        Assert.Null(CodexChat.When(J("""{"type":"agentMessage","id":"a1","text":"hello"}""")));
+        Assert.Null(CodexChat.When(J("""{"type":"agentMessage","startedAtMs":0,"completedAtMs":"soon"}""")));
+        var untimed = CodexChat.Lines(J("""{"type":"agentMessage","id":"a1","text":"hello"}"""), history: true);
+        Assert.False(J(Encoding.UTF8.GetString(Assert.Single(untimed))).TryGetProperty("timestamp", out _));
+    }
     static JsonElement Of(ChatEffect e) => J(Encoding.UTF8.GetString(e.Data));
     static string Type(JsonElement e) => e.TryGetProperty("type", out var t) ? t.GetString() ?? "" : "";
     static string Raw(ChatEffect e) => Encoding.UTF8.GetString(e.Data);

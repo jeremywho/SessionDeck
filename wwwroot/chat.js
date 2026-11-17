@@ -23,11 +23,69 @@
     return { text: resultText(c), error: false };
   }
   const SET_PREFIX = 'sd-set-';
+  // How long a conversation has to have been quiet for the time to be said where it picks up again.
+  const PAUSE_MS = 60 * 60000;
+
+  // When a line was said, in ms, or null when it does not say (an agent whose replay carries no times).
+  function stampOf(line) {
+    const t = typeof line.timestamp === 'string' ? Date.parse(line.timestamp) : typeof line.timestamp === 'number' ? line.timestamp : NaN;
+    return Number.isFinite(t) ? t : null;
+  }
+
+  function sameDay(a, b) {
+    const x = new Date(a), y = new Date(b);
+    return x.getFullYear() === y.getFullYear() && x.getMonth() === y.getMonth() && x.getDate() === y.getDate();
+  }
+
+  // Whether the time is worth saying before something said at `at`, when the last thing before it was said at
+  // `prev`: at the start, after an hour's quiet, and when the day has changed.
+  function pauseBefore(prev, at) {
+    return prev === null || at - prev >= PAUSE_MS || !sameDay(prev, at);
+  }
+
+  // A time as someone reads it now: the clock alone names today, then yesterday, a weekday within the week, a date
+  // within the year, and the year after that. `inSentence` is the same after other words: today goes unsaid.
+  // It is worked out from `now` every time it is shown, since a pane stays open for days.
+  // The formats are made once: the times on show are worded again each time a pane is come back to.
+  const DATED = { weekday: 'long', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' };
+  const FORMATS = {};
+  const format = (name, options) => FORMATS[name] || (FORMATS[name] = new Intl.DateTimeFormat(undefined, options));
+
+  function timeLabel(at, now, inSentence) {
+    const when = new Date(at);
+    const clock = format('clock', { hour: 'numeric', minute: '2-digit' }).format(when);
+    const midnight = t => { const d = new Date(t); return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(); };
+    const days = Math.round((midnight(now) - midnight(at)) / 86400000);
+    if (days <= 0) return inSentence ? clock : 'Today ' + clock;
+    if (days === 1) return (inSentence ? 'yesterday ' : 'Yesterday ') + clock;
+    if (days < 7) return format('weekday', { weekday: 'long' }).format(when) + ' ' + clock;
+    if (when.getFullYear() !== new Date(now).getFullYear()) return format('year', Object.assign({ year: 'numeric' }, DATED)).format(when);
+    return format('date', DATED).format(when);
+  }
+
+  // How long since, in whole words, for the line that says when a conversation was last heard from.
+  function since(at, now) {
+    const count = (n, unit) => `${n} ${unit}${n === 1 ? '' : 's'} ago`;
+    const minutes = Math.max(0, Math.floor((now - at) / 60000));
+    if (minutes < 60) return count(Math.max(1, minutes), 'minute');
+    if (minutes < 24 * 60) return count(Math.floor(minutes / 60), 'hour');
+    const days = Math.floor(minutes / (24 * 60));
+    if (days < 60) return count(days, 'day');
+    if (days < 730) return count(Math.floor(days / 30), 'month');
+    return count(Math.floor(days / 365), 'year');
+  }
+
+  function fullTime(at) {
+    return format('full', { dateStyle: 'full', timeStyle: 'short' }).format(new Date(at));
+  }
   const DRAFT_PREFIX = 'sd.chat.draft:';
   // How wide the conversation column is. The person sets it by dragging the column's edge; it is one width for every
   // chat on the page and is kept, like a window's size.
   const WIDE_KEY = 'sd.chat.wide', WIDE_MIN = 480, GRIP_INSET = 6;
   const widePanes = new Set();
+  // Every open pane's way of wording its times again, on one slow timer for them all.
+  const clocks = new Set();
+  if (typeof window !== 'undefined') setInterval(() => { for (const retime of clocks) retime(); }, 60000);
   // A subagent can make hundreds of calls; the latest of them are drawn.
   const SUB_SHOWN = 200;
 
@@ -48,7 +106,10 @@
   }
 
   class ChatModel {
-    constructor() {
+    // `now` is the viewer's clock, for what is said from here before the session's own line of it comes back.
+    // Without one, times come from the session's lines alone.
+    constructor(now) {
+      this.now = typeof now === 'function' ? now : null;
       this.catalog = { models: [], commands: [], modes: MODES, agent: 'Claude' };
       this.settings = { mode: '', model: '', effort: '', resume: '' };
       this.reset();
@@ -72,9 +133,27 @@
       this.earlier = false;
       // Results whose call is not shown: it is in conversation not loaded yet, and gets its result when that is.
       this.orphans = new Map();
+      // When the conversation was last heard from, and the time waiting to be said ahead of whatever comes next
+      // (the conversation's start, or where it picks up after a pause).
+      this.lastAt = null;
+      this.markAt = null;
+    }
+
+    // Something was said at `at`. Times that go backwards (a queued message, results of calls made together) are
+    // not a pause and do not move the clock.
+    clock(at) {
+      if (at === null || (this.lastAt !== null && at <= this.lastAt)) return;
+      if (pauseBefore(this.lastAt, at)) this.markAt = at;
+      this.lastAt = at;
     }
 
     add(item) {
+      if (this.markAt !== null) {
+        const mark = { kind: 'time', at: this.markAt };
+        this.markAt = null;
+        this.items.push(mark);
+        this.dirty.add(mark);
+      }
       this.items.push(item);
       this.dirty.add(item);
       return item;
@@ -111,6 +190,14 @@
         if (!this.tools.has(id)) this.tools.set(id, tool);
       }
       for (const [id, result] of older.orphans) this.orphans.set(id, result);
+      // What is shown began with its time, as any start does. With the conversation before it in place that time
+      // stays only if there was a pause there; and a pause the page ended on is said where the shown part begins.
+      const top = this.items[0];
+      if (top && top.kind === 'time') {
+        if (older.lastAt !== null && older.markAt === null && !pauseBefore(older.lastAt, top.at)) this.remove(top);
+      } else if (older.markAt !== null && top) {
+        older.items.push({ kind: 'time', at: older.markAt });
+      }
       // A run of calls cut in two by where the page ends is one run again.
       const seam = older.items[older.items.length - 1], first = this.items[0];
       if (seam && first && seam.kind === 'tools' && first.kind === 'tools') {
@@ -134,7 +221,9 @@
     // A message typed here, shown at once and matched with the session's own copy when that arrives.
     // `images` are this viewer's own previews of what was attached; the session's copy carries none.
     sent(text, images) {
-      const item = this.add({ kind: 'user', text, images: images || [], pending: true });
+      const at = this.now ? this.now() : null;
+      this.clock(at);
+      const item = this.add({ kind: 'user', text, images: images || [], pending: true, at });
       this.pending.push(item);
       return item;
     }
@@ -159,6 +248,7 @@
       if (!line || typeof line !== 'object') return;
       if (this.oldest === null && (line.type === 'user' || line.type === 'assistant') && !line.parent_tool_use_id)
         this.oldest = { at: typeof line.at === 'number' ? line.at : null, uuid: typeof line.uuid === 'string' ? line.uuid : '' };
+      if ((line.type === 'user' || line.type === 'assistant') && !line.parent_tool_use_id) this.clock(stampOf(line));
       switch (line.type) {
         case 'user': this.user(line); break;
         case 'assistant': this.assistant(line); break;
@@ -192,6 +282,8 @@
         const kind = ev.content_block && ev.content_block.type;
         this.current = null;
         if (kind === 'text' || kind === 'thinking') {
+          // A reply that starts to arrive is being said now: its own line, with its time, comes when it is whole.
+          this.clock(this.now ? this.now() : null);
           this.current = this.add({ kind: kind === 'text' ? 'assistant' : 'thinking', text: '', draft: true });
           this.drafts.push(this.current);
         }
@@ -242,10 +334,11 @@
         const item = this.pending.splice(i, 1)[0];
         item.pending = false;
         item.confirmed = true;
+        item.at = stampOf(line) ?? item.at;
         this.touch(item);
         return;
       }
-      this.add({ kind: 'user', text, imageCount, history: !!line.history });
+      this.add({ kind: 'user', text, imageCount, history: !!line.history, at: stampOf(line) });
     }
 
     // What a subagent does while it runs, kept under the call that started it.
@@ -708,7 +801,7 @@
     return modes;
   }
 
-  const api = { ChatModel, LineReader, Wire, toolBrief, textOf, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText, liveStep, taskRunning, asks, offeredCommands, renameAsked, modelLabel, Recall, filterSessions, ago, startsOver, clampWide, diffKind };
+  const api = { ChatModel, timeLabel, since, pauseBefore, PAUSE_MS, LineReader, Wire, toolBrief, textOf, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText, liveStep, taskRunning, asks, offeredCommands, renameAsked, modelLabel, Recall, filterSessions, ago, startsOver, clampWide, diffKind };
   if (typeof module !== 'undefined' && module.exports) { module.exports = api; return; }
 
   // ================= the page side =================
@@ -774,7 +867,8 @@
 
   function create(opts) {
     const { el, id, port, token, post } = opts;
-    const model = new ChatModel();
+    const now = opts.now || (() => Date.now());
+    const model = new ChatModel(now);
     const nodes = new Map();
     let ws = null, seq = 0, reader = new LineReader(false), closed = false, retries = 0, connected = false, frame = 0;
     // The deck times this pane's long work for its performance log; anywhere else it just runs.
@@ -794,7 +888,11 @@
     const earlier = h('button', 'load-earlier', 'Load earlier messages');
     earlier.type = 'button';
     earlier.hidden = true;
-    column.append(earlier, empty, working);
+    // When the conversation was last heard from, under its last message: someone coming back to it reads that
+    // without scrolling. Shown once it has been quiet for the length of a pause.
+    const tail = h('div', 'time-tail');
+    tail.hidden = true;
+    column.append(earlier, empty, working, tail);
     scroll.appendChild(column);
 
     // The composer is one card: what is attached, the message, and under it the session's settings and the send button.
@@ -958,8 +1056,35 @@
       earlier.disabled = !!asked || !connected;
       earlier.textContent = asked ? 'Loading…' : 'Load earlier messages';
       paintStatus();
+      paintTail();
       if (stick) scroll.scrollTop = scroll.scrollHeight;
     }
+
+    function markText(item) { return timeLabel(item.at, now()); }
+
+    // Whether anything it wrote changed: the caller keeps a reader at the latest message there.
+    function paintTail() {
+      const at = model.lastAt, t = now();
+      const show = at !== null && model.items.length > 0 && el.dataset.state !== 'busy' && t - at >= PAUSE_MS;
+      const text = show ? `Last message ${since(at, t)}, ${timeLabel(at, t, true)}` : '';
+      const changed = tail.hidden === show || (show && tail.textContent !== text);
+      if (changed) { tail.hidden = !show; tail.textContent = text; tail.title = show ? fullTime(at) : ''; }
+      return changed;
+    }
+
+    // Times are worded from now ("Yesterday", "3 days ago"), and a pane stays open for days: they are read again
+    // when the pane is come back to and on a slow timer, and written only where the words changed.
+    function retime() {
+      if (closed && model.ended === null) return;
+      let changed = paintTail();
+      for (const item of model.items) {
+        if (item.kind !== 'time') continue;
+        const node = nodes.get(item), text = markText(item);
+        if (node && node.textContent !== text) { node.textContent = text; changed = true; }
+      }
+      if (changed && atLatest) scroll.scrollTop = scroll.scrollHeight;
+    }
+    clocks.add(retime);
 
     function paintStatus() {
       const state = !connected && model.ended === null ? 'offline' : model.state;
@@ -1066,10 +1191,17 @@
     // Builds the element for an item, or updates the one it has and returns it.
     function render(item, node) {
       switch (item.kind) {
+        case 'time': {
+          node = node || h('div', 'time-mark');
+          node.textContent = markText(item);
+          node.title = fullTime(item.at);
+          return node;
+        }
         case 'user': {
           node = node || h('div', 'msg user');
           node.classList.toggle('pending', !!item.pending);
           node.textContent = '';
+          node.title = item.at ? fullTime(item.at) : '';
           if (item.text) node.appendChild(h('div', 'user-text', item.text));
           if (item.images && item.images.length) {
             const strip = h('div', 'user-images');
@@ -1870,7 +2002,7 @@
 
     return {
       model,
-      focus() { input.focus(); },
+      focus() { retime(); input.focus(); },
       // Type and send in one step, for a shell around the page that has its own way of taking words.
       send(text) { input.value = String(text || ''); grow(); return submit(); },
       get state() { return el.dataset.state; },
@@ -1897,6 +2029,7 @@
         if (frame) cancelAnimationFrame(frame);
         resized.disconnect();
         widePanes.delete(applyWide);
+        clocks.delete(retime);
         try { if (ws) ws.close(); } catch { }
         for (const shot of shots) URL.revokeObjectURL(shot.url);
         for (const item of model.items) for (const url of item.images || []) URL.revokeObjectURL(url);

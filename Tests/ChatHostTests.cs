@@ -597,10 +597,21 @@ public class ChatHostTests : IDisposable
         Assert.Equal(("OpenCode", "fake-model"), (viewer.Catalog!.Value.GetProperty("agent").GetString(), viewer.Catalog.Value.GetProperty("models")[0].GetProperty("value").GetString()));
         Assert.Equal(("", "fake-model", "low"), SettingsOf(viewer));
 
+        var asked = DateTimeOffset.UtcNow.AddSeconds(-1);
         await viewer.Send(ChatStream.UserLine("héllo"));
         var turn = await viewer.Until(l => Type(l) == "result");
         Assert.Equal(new[] { "user", "assistant", "result" }, turn.Select(Type));
         Assert.Equal(("héllo", "echo: héllo in " + Session), (Said(turn[0]), Said(turn[1])));
+        // The agent's protocol says no times: each message is kept with when the host heard it, and the end of the turn with none.
+        foreach (var message in turn.Take(2))
+            Assert.InRange(DateTimeOffset.Parse(message.GetProperty("timestamp").GetString()!, System.Globalization.CultureInfo.InvariantCulture), asked, DateTimeOffset.UtcNow.AddSeconds(1));
+        Assert.False(turn[2].TryGetProperty("timestamp", out _));
+        // A viewer that attaches afterwards reads the same times: they are in what the host kept, not made up on the way out.
+        using (var later = await Viewer.Attach(Record(), after: 0))
+        {
+            await later.Pump(() => later.Lines.Count >= 3);
+            Assert.Equal(turn.Take(2).Select(m => m.GetProperty("timestamp").GetString()), later.Lines.Take(2).Select(m => m.GetProperty("timestamp").GetString()));
+        }
         Assert.Equal("success", turn[2].GetProperty("subtype").GetString());
         Assert.Equal(new[] { "system", "stream_event", "stream_event" }, viewer.Live.Select(Type));
         record = await RecordWhen(r => r.AgentStatus == "idle" && r.LastEvent == "Stop");

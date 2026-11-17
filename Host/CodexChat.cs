@@ -553,7 +553,19 @@ internal sealed class CodexChat : IChatAgent
                 if (ToolResult(item, history) is { } result) lines.Add(result);
                 break;
         }
+        // Codex records when each item started and completed, and says so again when the turns are read back.
+        if (When(item) is { } at)
+            for (int i = 0; i < lines.Count; i++) lines[i] = ChatLines.Stamped(lines[i], at);
         return lines;
+    }
+
+    /// <summary>When an item was said: when it completed, or when it started if it has not; null when Codex recorded neither.</summary>
+    internal static DateTimeOffset? When(JsonElement item)
+    {
+        foreach (string name in new[] { "completedAtMs", "startedAtMs" })
+            if (item.ValueKind == JsonValueKind.Object && item.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetInt64(out long ms) && ms > 0)
+                try { return DateTimeOffset.FromUnixTimeMilliseconds(ms); } catch (ArgumentOutOfRangeException) { }
+        return null;
     }
 
     static byte[] Assistant(string id, object block, bool history) =>

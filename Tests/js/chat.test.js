@@ -837,3 +837,230 @@ test('another tool the service runs is shown under its own name with what it ret
   assert.deepEqual(m.items[0].tools[0].result, { text: 'three results', error: false });
 });
 
+
+// ---- times ----
+// Built with local constructors, so a day is a day wherever the tests run.
+const { timeLabel, since, pauseBefore, PAUSE_MS } = require('../../wwwroot/chat.js');
+const day = (y, mo, d, h = 12, mi = 0, s = 0) => new Date(y, mo - 1, d, h, mi, s).getTime();
+const stamped = (line, t) => Object.assign({}, line, { timestamp: new Date(t).toISOString() });
+const clockOf = t => new Date(t).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+const marks = m => m.items.filter(i => i.kind === 'time').map(i => i.at);
+
+test('a conversation starts with its time, and says the time again after an hour of quiet', () => {
+  const m = new ChatModel();
+  const t = [day(2026, 11, 10, 10, 0), day(2026, 11, 10, 10, 5), day(2026, 11, 10, 11, 4), day(2026, 11, 10, 11, 5), day(2026, 11, 10, 12, 5), day(2026, 11, 10, 12, 6)];
+  for (const line of [stamped(echo('one'), t[0]), stamped(said('first'), t[1]), stamped(echo('two'), t[2]), stamped(said('second'), t[3]), stamped(echo('three'), t[4]), stamped(said('third'), t[5])]) m.durable(line);
+  // 59 minutes after the first reply is not a pause; 60 minutes after the second is.
+  assert.deepEqual(kinds(m), ['time', 'user', 'assistant', 'user', 'assistant', 'time', 'user', 'assistant']);
+  assert.deepEqual(marks(m), [t[0], t[4]]);
+  assert.equal(m.lastAt, t[5]);
+  assert.equal(m.items[1].at, t[0]);
+  // Each mark is handed to the page to draw, like any other item.
+  assert.ok(m.dirty.has(m.items[0]) && m.dirty.has(m.items[5]));
+});
+
+test('a new day is said even when little time has passed', () => {
+  const m = new ChatModel();
+  const late = day(2026, 11, 10, 23, 50), early = day(2026, 11, 11, 0, 10);
+  for (const line of [stamped(echo('before midnight'), late), stamped(said('ok'), late + 60000), stamped(echo('after midnight'), early)]) m.durable(line);
+  assert.deepEqual(kinds(m), ['time', 'user', 'assistant', 'time', 'user']);
+  assert.deepEqual(marks(m), [late, early]);
+});
+
+test('lines that carry no time get no marks, and neither does a subagent\'s side', () => {
+  const m = new ChatModel();
+  for (const line of [echo('hello'), said('hi'), done()]) m.durable(line);
+  assert.deepEqual(kinds(m), ['user', 'assistant']);
+  assert.equal(m.lastAt, null);
+  const t = day(2026, 11, 10, 10, 0);
+  for (const line of [stamped(echo('run it'), t), stamped(used('a1', 'Agent', { prompt: 'look' }), t + 1000),
+    stamped(Object.assign(said('from the subagent'), { parent_tool_use_id: 'a1' }), t + 3 * PAUSE_MS)]) m.durable(line);
+  assert.equal(m.lastAt, t + 1000);
+  assert.equal(m.markAt, null);
+});
+
+test('times that go backwards are not a pause and do not move the clock', () => {
+  const m = new ChatModel();
+  const t = day(2026, 11, 10, 10, 0);
+  for (const line of [stamped(echo('one'), t), stamped(said('reply'), t + 30 * 60000), stamped(echo('queued earlier'), t + 10 * 60000)]) m.durable(line);
+  assert.equal(m.lastAt, t + 30 * 60000);
+  // 45 minutes after the latest time seen, though 65 after the one that came out of order: not a pause.
+  m.durable(stamped(said('again'), t + 75 * 60000));
+  assert.deepEqual(marks(m), [t]);
+  assert.equal(m.lastAt, t + 75 * 60000);
+});
+
+test('a pause that ends in a tool\'s result is said ahead of the next thing shown', () => {
+  const m = new ChatModel();
+  const t = day(2026, 11, 10, 10, 0), back = t + 150 * 60000;
+  for (const line of [stamped(echo('build it'), t), stamped(used('t1', 'Bash', { command: 'make' }), t + 60000), stamped(returned('t1', 'built'), back)]) m.durable(line);
+  // Nothing new is shown yet, so the time waits: a mark never hangs at the end of the conversation.
+  assert.deepEqual(kinds(m), ['time', 'user', 'tools']);
+  assert.equal(m.markAt, back);
+  m.durable(stamped(said('Built.'), back + 30000));
+  assert.deepEqual(kinds(m), ['time', 'user', 'tools', 'time', 'assistant']);
+  assert.deepEqual(marks(m), [t, back]);
+  assert.equal(m.markAt, null);
+});
+
+test('a message sent from here is timed by this viewer\'s clock until the session\'s own copy says when', () => {
+  let clock = day(2026, 11, 10, 10, 0);
+  const m = new ChatModel(() => clock);
+  m.sent('hello');
+  assert.deepEqual(kinds(m), ['time', 'user']);
+  assert.equal(m.items[1].at, clock);
+  m.durable(stamped(echo('hello'), clock + 2000));
+  assert.deepEqual(kinds(m), ['time', 'user']);
+  assert.equal(m.items[1].at, clock + 2000);
+  assert.equal(m.items[1].pending, false);
+  // Sent again within the hour: no second mark.
+  clock += 20 * 60000;
+  m.sent('more');
+  assert.deepEqual(kinds(m), ['time', 'user', 'user']);
+  // A command is never echoed, so the time it was sent at is the one it keeps.
+  assert.equal(m.items[2].at, clock);
+  // And a copy that comes back saying no time (an agent that keeps none) does not take it away.
+  m.durable(echo('more'));
+  assert.equal(m.items[2].pending, false);
+  assert.equal(m.items[2].at, clock);
+});
+
+test('a reply that streams in after a long quiet has its time above it, once', () => {
+  let clock = day(2026, 11, 10, 10, 0);
+  const m = new ChatModel(() => clock);
+  for (const line of [stamped(echo('wake me later'), clock), stamped(said('Will do.'), clock + 5000), done()]) m.durable(line);
+  clock += 3 * PAUSE_MS;
+  m.live(blockStart(0, 'text'));
+  m.live(textDelta(0, 'It is later.'));
+  assert.deepEqual(kinds(m), ['time', 'user', 'assistant', 'time', 'assistant']);
+  assert.equal(m.items[3].at, clock);
+  m.durable(stamped(said('It is later.'), clock + 4000));
+  assert.deepEqual(kinds(m), ['time', 'user', 'assistant', 'time', 'assistant']);
+  assert.equal(m.items[4].draft, false);
+});
+
+test('earlier conversation put ahead takes the top time away when there was no pause there', () => {
+  const m = new ChatModel();
+  const t = day(2026, 11, 10, 12, 0);
+  for (const line of [stamped(echo('later question'), t), stamped(said('later answer'), t + 60000)]) m.durable(line);
+  assert.deepEqual(kinds(m), ['time', 'user', 'assistant']);
+  const top = m.items[0];
+  m.dirty.clear();
+  m.prepend([stamped(echo('earlier question'), t - 30 * 60000), stamped(said('earlier answer'), t - 20 * 60000)], null);
+  assert.deepEqual(kinds(m), ['time', 'user', 'assistant', 'user', 'assistant']);
+  assert.deepEqual(marks(m), [t - 30 * 60000]);
+  // The page is told to take the old mark down.
+  assert.equal(top.removed, true);
+  assert.ok(m.dirty.has(top));
+  assert.equal(m.lastAt, t + 60000);
+});
+
+test('earlier conversation put ahead keeps the top time when there was a pause there', () => {
+  const m = new ChatModel();
+  const t = day(2026, 11, 10, 12, 0);
+  for (const line of [stamped(echo('later question'), t), stamped(said('later answer'), t + 60000)]) m.durable(line);
+  m.prepend([stamped(echo('earlier question'), t - 3 * PAUSE_MS), stamped(said('earlier answer'), t - 3 * PAUSE_MS + 60000)], null);
+  assert.deepEqual(kinds(m), ['time', 'user', 'assistant', 'time', 'user', 'assistant']);
+  assert.deepEqual(marks(m), [t - 3 * PAUSE_MS, t]);
+});
+
+test('a run of calls cut by where a page ends is one run again, with no time between its halves', () => {
+  const m = new ChatModel();
+  const t = day(2026, 11, 10, 10, 0);
+  for (const line of [stamped(used('t2', 'Read', { file_path: 'b' }), t + 120000), stamped(returned('t2', 'b'), t + 121000)]) m.durable(line);
+  assert.deepEqual(kinds(m), ['time', 'tools']);
+  m.prepend([stamped(echo('read both'), t), stamped(used('t1', 'Read', { file_path: 'a' }), t + 60000), stamped(returned('t1', 'a'), t + 61000)], null);
+  assert.deepEqual(kinds(m), ['time', 'user', 'tools']);
+  assert.deepEqual(calls(m).map(c => c.id), ['t1', 't2']);
+});
+
+test('a pause the earlier page ended on is said where the shown part begins', () => {
+  const t = day(2026, 11, 10, 9, 0), back = t + 2 * PAUSE_MS;
+  const older = [stamped(echo('build it'), t), stamped(used('t1', 'Bash', { command: 'make' }), t + 60000), stamped(returned('t1', 'built'), back)];
+  // What is shown began with its own time: it stays, though the line just before it is seconds older.
+  const withTime = new ChatModel();
+  withTime.durable(stamped(said('Built.'), back + 30000));
+  withTime.prepend(older, null);
+  assert.deepEqual(kinds(withTime), ['time', 'user', 'tools', 'time', 'assistant']);
+  // What is shown had no time of its own: the pause is said from the page's.
+  const without = new ChatModel();
+  without.durable(said('Built.'));
+  without.prepend(older, null);
+  assert.deepEqual(kinds(without), ['time', 'user', 'tools', 'time', 'assistant']);
+  assert.deepEqual(marks(without), [t, back]);
+});
+
+test('starting over forgets the clock', () => {
+  const m = new ChatModel();
+  const t = day(2026, 11, 10, 10, 0);
+  m.durable(stamped(echo('one'), t));
+  m.durable(stamped(returned('nothing', 'x'), t + 2 * PAUSE_MS));
+  assert.equal(m.markAt, t + 2 * PAUSE_MS);
+  m.reset();
+  assert.equal(m.lastAt, null);
+  assert.equal(m.markAt, null);
+  m.durable(stamped(echo('another conversation'), t - 5 * PAUSE_MS));
+  assert.deepEqual(marks(m), [t - 5 * PAUSE_MS]);
+});
+
+test('a pause is the start, an hour, or a change of day', () => {
+  const t = day(2026, 11, 10, 10, 0);
+  assert.equal(pauseBefore(null, t), true);
+  assert.equal(pauseBefore(t, t + PAUSE_MS - 1), false);
+  assert.equal(pauseBefore(t, t + PAUSE_MS), true);
+  assert.equal(pauseBefore(day(2026, 11, 10, 23, 59), day(2026, 11, 11, 0, 1)), true);
+  assert.equal(PAUSE_MS, 3600000);
+});
+
+test('a time is worded from now: today, yesterday, a weekday, a date, a year', () => {
+  const now = day(2026, 11, 17, 15, 0);
+  const morning = day(2026, 11, 17, 9, 5);
+  assert.equal(timeLabel(morning, now), 'Today ' + clockOf(morning));
+  // Yesterday by the calendar, though less than a day ago.
+  const lastNight = day(2026, 11, 16, 23, 50);
+  assert.equal(timeLabel(lastNight, now), 'Yesterday ' + clockOf(lastNight));
+  assert.equal(timeLabel(day(2026, 11, 16, 23, 59), day(2026, 11, 17, 0, 1)), 'Yesterday ' + clockOf(day(2026, 11, 16, 23, 59)));
+  const friday = day(2026, 11, 13, 9, 5);
+  assert.equal(timeLabel(friday, now), new Date(friday).toLocaleDateString(undefined, { weekday: 'long' }) + ' ' + clockOf(friday));
+  const sixDays = day(2026, 11, 11, 9, 5), sevenDays = day(2026, 11, 10, 9, 5);
+  assert.ok(timeLabel(sixDays, now).startsWith(new Date(sixDays).toLocaleDateString(undefined, { weekday: 'long' }) + ' '));
+  const dated = { weekday: 'long', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' };
+  // The weekday is spelled out in a date as it is on its own, so a column of times reads as one form.
+  assert.ok(timeLabel(sevenDays, now).startsWith(new Date(sevenDays).toLocaleDateString(undefined, { weekday: 'long' }) + ','));
+  assert.equal(timeLabel(sevenDays, now), new Date(sevenDays).toLocaleString(undefined, dated));
+  assert.ok(!timeLabel(sevenDays, now).includes('2026'));
+  const lastYear = day(2025, 12, 30, 9, 5);
+  assert.equal(timeLabel(lastYear, now), new Date(lastYear).toLocaleString(undefined, Object.assign({ year: 'numeric' }, dated)));
+  assert.ok(timeLabel(lastYear, now).includes('2025'));
+  // A clock a little ahead of this one is still today.
+  assert.equal(timeLabel(now + 90000, now), 'Today ' + clockOf(now + 90000));
+});
+
+test('the same time is worded again as the days go by', () => {
+  const said = day(2026, 11, 14, 16, 30);
+  assert.equal(timeLabel(said, day(2026, 11, 14, 18, 0)), 'Today ' + clockOf(said));
+  assert.equal(timeLabel(said, day(2026, 11, 15, 8, 0)), 'Yesterday ' + clockOf(said));
+  assert.equal(timeLabel(said, day(2026, 11, 17, 8, 0)), new Date(said).toLocaleDateString(undefined, { weekday: 'long' }) + ' ' + clockOf(said));
+});
+
+test('after other words a time leaves today unsaid and yesterday in lower case', () => {
+  const now = day(2026, 11, 17, 15, 0);
+  assert.equal(timeLabel(day(2026, 11, 17, 9, 5), now, true), clockOf(day(2026, 11, 17, 9, 5)));
+  assert.equal(timeLabel(day(2026, 11, 16, 9, 5), now, true), 'yesterday ' + clockOf(day(2026, 11, 16, 9, 5)));
+  assert.equal(timeLabel(day(2026, 11, 13, 9, 5), now, true), timeLabel(day(2026, 11, 13, 9, 5), now));
+});
+
+test('how long since is said in whole words', () => {
+  const now = day(2026, 11, 17, 15, 0), minute = 60000, hour = 60 * minute, dayMs = 24 * hour;
+  assert.equal(since(now, now), '1 minute ago');
+  assert.equal(since(now - 59 * minute, now), '59 minutes ago');
+  assert.equal(since(now - 60 * minute, now), '1 hour ago');
+  assert.equal(since(now - 119 * minute, now), '1 hour ago');
+  assert.equal(since(now - 23 * hour, now), '23 hours ago');
+  assert.equal(since(now - dayMs, now), '1 day ago');
+  assert.equal(since(now - 59 * dayMs, now), '59 days ago');
+  assert.equal(since(now - 60 * dayMs, now), '2 months ago');
+  assert.equal(since(now - 729 * dayMs, now), '24 months ago');
+  assert.equal(since(now - 730 * dayMs, now), '2 years ago');
+  assert.equal(since(now + 5 * minute, now), '1 minute ago');
+});

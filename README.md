@@ -143,7 +143,12 @@ does not ask: it is started with `--dangerously-skip-permissions`, as AGY termin
 more things differ in both: a message sent while the agent is working waits for the turn to end,
 and the whole conversation is loaded at once rather than a page at a time. Claude
 chats need the native `claude.exe` and use the default login; Codex chats need `codex.exe`, AGY
-chats `agy.exe`, and OpenCode chats `opencode` on the path. A new Claude chat starts on the CLI's **Default** model (not on the model `/model` last saved in your
+chats `agy.exe`, and OpenCode chats `opencode` on the path. A chat shows when things were said: a quiet line where the conversation starts and wherever it picks up
+after an hour or on a new day, and under the last message how long ago that was ("Last message 3 days ago,
+Saturday 4:52 PM"). Hover one of your own messages for its exact time. Claude and Codex keep every
+message's time, so it is there for old conversations too; for agy and OpenCode it is there for what was
+said while the session's host has been running.
+A new Claude chat starts on the CLI's **Default** model (not on the model `/model` last saved in your
 Claude settings), unless you picked one or your deck flags name one; the picker under the message box
 changes it for that chat. When your Claude settings name an advisor model, a chat consults it as a
 terminal session does, and each consult shows as an **Advisor** line in the conversation.
