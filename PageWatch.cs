@@ -88,7 +88,7 @@ internal sealed class PageWatch
                 if (Number(root, "at") is > 0 and var took && took == _waitAt) _taken = true;
                 return null;
             case "frame":
-                return $"page-frame {Number(root, "ms")}ms work={Number(root, "work")}ms raf={Number(root, "raf")}ms layout={Number(root, "layout")}ms blocked={Number(root, "blocked")}ms{hidden} scripts={Rest(Text(root, "scripts"))}";
+                return $"page-frame {Number(root, "ms")}ms work={Number(root, "work")}ms raf={Number(root, "raf")}ms layout={Number(root, "layout")}ms blocked={Number(root, "blocked")}ms{hidden} ran={Rest(Text(root, "ran"))} scripts={Rest(Text(root, "scripts"))}";
             case "pace":
                 return $"page-pace median={Number(root, "median")}ms max={Number(root, "max")}ms pane={Word(Text(root, "pane"))}";
             case "stall":

@@ -44,8 +44,10 @@ dotnet test Tests\SessionDeck.Tests.csproj
     A renderer that exited is loaded again (`reloading`), at most three times in five minutes.
   - `page-frame 140ms work=3ms raf=10ms layout=120ms blocked=90ms scripts=..`: a frame this thread took 100 ms
     or more over (long-animation-frame), split into what ran before the frame, its callbacks, and style and
-    layout, with the three longest scripts. A slow `tab-switch` with no `page-frame` beside it waited past this
-    thread. `page-pace median=..ms max=..ms` follows a switch whose frame took 60 ms+: the gap between the next
+    layout, with the three longest scripts (each with its `[file:function@position]`) and, as `ran=`, what the
+    page's own timed handlers took of it and for which pane (from 10 ms). A frame whose callback is in `xterm.js`
+    is a terminal drawing; `ran=chat-paint=..@<host>` is that chat. A slow `tab-switch` with no `page-frame`
+    beside it waited past this thread. `page-pace median=..ms max=..ms` follows a switch whose frame took 60 ms+: the gap between the next
     eight frames, which says whether frames are slow to come at all. `app=` on a `tab-switch` is the app's own
     handler around the post.
   - `page-visibility hidden|visible` (a hidden page is given no frames, and draws what it missed when it is

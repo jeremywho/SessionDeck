@@ -168,12 +168,12 @@ public class PageWatchTests
 
     [Fact]
     public void A_long_frame_says_where_this_thread_spent_it() =>
-        Assert.Equal("page-frame 140ms work=3ms raf=10ms layout=120ms blocked=90ms scripts=FrameRequestCallback=9ms(forced 4ms) WebSocket.onmessage=2ms",
-            Line("""{"type":"frame","ms":140.2,"work":3,"raf":10,"layout":120,"blocked":90,"scripts":"FrameRequestCallback=9ms(forced 4ms) WebSocket.onmessage=2ms","hidden":false}"""));
+        Assert.Equal("page-frame 140ms work=3ms raf=10ms layout=120ms blocked=90ms ran=chat-paint=96ms/1@abc scripts=FrameRequestCallback[chat.js:paint@31200]=96ms(forced 58ms) WebSocket.onmessage=2ms",
+            Line("""{"type":"frame","ms":140.2,"work":3,"raf":10,"layout":120,"blocked":90,"ran":"chat-paint=96ms/1@abc","scripts":"FrameRequestCallback[chat.js:paint@31200]=96ms(forced 58ms) WebSocket.onmessage=2ms","hidden":false}"""));
 
     [Fact]
     public void A_long_frame_with_no_script_in_it_says_none() =>
-        Assert.Equal("page-frame 110ms work=0ms raf=0ms layout=108ms blocked=60ms hidden scripts=-",
+        Assert.Equal("page-frame 110ms work=0ms raf=0ms layout=108ms blocked=60ms hidden ran=- scripts=-",
             Line("""{"type":"frame","ms":110,"work":0,"raf":0,"layout":108,"blocked":60,"scripts":"","hidden":true}"""));
 
     [Fact]

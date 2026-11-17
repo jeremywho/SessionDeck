@@ -174,7 +174,7 @@
   // What of ours ran inside a stall, by handler: its time in all, how many runs that was, and the pane of the longest.
   // Many short runs hold the page as well as one long one does (every chat painting in one frame, every terminal
   // fitting after one resize), so they are added up rather than each held to a size.
-  function ranIn(from, to) {
+  function ranIn(from, to, least = 50) {
     const by = new Map();
     for (const r of ran) {
       if (r.end <= from || r.end > to + 5) continue;
@@ -183,7 +183,7 @@
       if (r.ms > s.top.ms) s.top = r;
       by.set(r.what, s);
     }
-    return Array.from(by).filter(([, s]) => s.ms >= 50).sort((a, b) => b[1].ms - a[1].ms)
+    return Array.from(by).filter(([, s]) => s.ms >= least).sort((a, b) => b[1].ms - a[1].ms)
       .map(([what, s]) => `${what}=${Math.round(s.ms)}ms/${s.n}${s.top.id ? '@' + s.top.id : ''}`).join(' ');
   }
   let stallsFrom = 0, stalls = 0;
@@ -212,11 +212,18 @@
           if (e.startTime - framesFrom > 60000) { framesFrom = e.startTime; frames = 0; }
           if (++frames > FRAMES_A_MINUTE) continue;
           const end = e.startTime + e.duration, render = e.renderStart || end, layoutAt = e.styleAndLayoutStart || end;
+          // Each script with where it is in the source (file:function@position): "FrameRequestCallback" alone is every
+          // pane's drawing and the terminals' too, and does not say whose.
+          const where = s => {
+            const file = String(s.sourceURL || '').split('/').pop().split('?')[0], fn = s.sourceFunctionName || '';
+            return file || fn ? `[${file}${fn ? ':' + fn : ''}${s.sourceCharPosition >= 0 ? '@' + s.sourceCharPosition : ''}]`.replace(/\s/g, '') : '';
+          };
           const scripts = Array.from(e.scripts || []).sort((a, b) => b.duration - a.duration).slice(0, 3)
-            .map(s => `${String(s.invoker || s.invokerType || 'script').slice(0, 60)}=${Math.round(s.duration)}ms`
+            .map(s => `${String(s.invoker || s.invokerType || 'script').slice(0, 40)}${where(s).slice(0, 60)}=${Math.round(s.duration)}ms`
               + (s.forcedStyleAndLayoutDuration >= 1 ? `(forced ${Math.round(s.forcedStyleAndLayoutDuration)}ms)` : '')).join(' ');
           post({ type: 'frame', ms: Math.round(e.duration), work: Math.round(render - e.startTime), raf: Math.round(layoutAt - render),
-                 layout: Math.round(end - layoutAt), blocked: Math.round(e.blockingDuration || 0), scripts, hidden: document.hidden });
+                 layout: Math.round(end - layoutAt), blocked: Math.round(e.blockingDuration || 0), scripts,
+                 ran: ranIn(e.startTime, end, 10), hidden: document.hidden });
         }
       }).observe({ type: 'long-animation-frame' });
     } catch { }
