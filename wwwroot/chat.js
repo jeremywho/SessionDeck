@@ -25,6 +25,9 @@
   const SET_PREFIX = 'sd-set-';
   // How long a conversation has to have been quiet for the time to be said where it picks up again.
   const PAUSE_MS = 60 * 60000;
+  // How long a conversation has to have been quiet for the age of its last message to be said under it. Short: it
+  // is the one time someone looking at a chat can always see, and "a minute ago" already says the chat is done.
+  const QUIET_MS = 60000;
 
   // When a line was said, in ms, or null when it does not say (an agent whose replay carries no times).
   function stampOf(line) {
@@ -85,7 +88,7 @@
   const widePanes = new Set();
   // Every open pane's way of wording its times again, on one slow timer for them all.
   const clocks = new Set();
-  if (typeof window !== 'undefined') setInterval(() => { for (const retime of clocks) retime(); }, 60000);
+  if (typeof window !== 'undefined') setInterval(() => { for (const retime of clocks) retime(true); }, 60000);
   // A subagent can make hundreds of calls; the latest of them are drawn.
   const SUB_SHOWN = 200;
 
@@ -889,7 +892,7 @@
     earlier.type = 'button';
     earlier.hidden = true;
     // When the conversation was last heard from, under its last message: someone coming back to it reads that
-    // without scrolling. Shown once it has been quiet for the length of a pause.
+    // without scrolling. Shown once it has been quiet for a minute and nothing is running.
     const tail = h('div', 'time-tail');
     tail.hidden = true;
     column.append(earlier, empty, working, tail);
@@ -1062,27 +1065,32 @@
 
     function markText(item) { return timeLabel(item.at, now()); }
 
-    // Whether anything it wrote changed: the caller keeps a reader at the latest message there.
+    // Whether the line came or went, which changes how tall the conversation is: the caller keeps a reader at the
+    // latest message then. New words on a line already there change nothing's place.
     function paintTail() {
       const at = model.lastAt, t = now();
-      const show = at !== null && model.items.length > 0 && el.dataset.state !== 'busy' && t - at >= PAUSE_MS;
+      const show = at !== null && model.items.length > 0 && el.dataset.state !== 'busy' && t - at >= QUIET_MS;
       const text = show ? `Last message ${since(at, t)}, ${timeLabel(at, t, true)}` : '';
-      const changed = tail.hidden === show || (show && tail.textContent !== text);
-      if (changed) { tail.hidden = !show; tail.textContent = text; tail.title = show ? fullTime(at) : ''; }
-      return changed;
+      const moved = tail.hidden === show;
+      if (moved || (show && tail.textContent !== text)) { tail.hidden = !show; tail.textContent = text; tail.title = show ? fullTime(at) : ''; }
+      return moved;
     }
 
     // Times are worded from now ("Yesterday", "3 days ago"), and a pane stays open for days: they are read again
     // when the pane is come back to and on a slow timer, and written only where the words changed.
-    function retime() {
+    // On the timer only a pane that can be seen is worded again. The words of every pane change together (each
+    // minute after a turn, and all of them at midnight), and a deck's worth of hidden panes laid out again in one
+    // frame is a stall for the one being read. A hidden pane is worded when it is come back to.
+    function retime(onTimer) {
       if (closed && model.ended === null) return;
-      let changed = paintTail();
+      if (onTimer && typeof el.checkVisibility === 'function' && !el.checkVisibility({ visibilityProperty: true })) return;
+      const moved = paintTail();
       for (const item of model.items) {
         if (item.kind !== 'time') continue;
         const node = nodes.get(item), text = markText(item);
-        if (node && node.textContent !== text) { node.textContent = text; changed = true; }
+        if (node && node.textContent !== text) node.textContent = text;
       }
-      if (changed && atLatest) scroll.scrollTop = scroll.scrollHeight;
+      if (moved && atLatest) scroll.scrollTop = scroll.scrollHeight;
     }
     clocks.add(retime);
 
@@ -2002,7 +2010,7 @@
 
     return {
       model,
-      focus() { retime(); input.focus(); },
+      focus() { retime(false); input.focus(); },
       // Type and send in one step, for a shell around the page that has its own way of taking words.
       send(text) { input.value = String(text || ''); grow(); return submit(); },
       get state() { return el.dataset.state; },

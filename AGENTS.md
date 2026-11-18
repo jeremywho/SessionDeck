@@ -455,7 +455,10 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
   move it (queued messages and parallel results arrive out of order in real transcripts). What is sent or
   streamed from here is timed by the viewer's clock until the session's own line arrives. `prepend` settles
   the mark at the seam. The words are a function of `(at, now)` and are worked out again on `focus()` and on
-  one shared minute timer (`retime`), writing only what changed.
+  one shared minute timer (`retime`), writing only what changed. The timer skips a pane that cannot be seen
+  (`checkVisibility`): every pane's words change together, and a deck of hidden panes laid out again in one
+  frame would stall the one being read. The line under the last message (`paintTail`) shows from a minute of
+  quiet (`QUIET_MS`); the marks inside the conversation keep the hour (`PAUSE_MS`).
 - **A phone ends a session through the gateway, and the deck finishes it.** `POST
   /sessions/<hostId>/end` makes the gateway write `phone-ended.json` (it is the only writer; the deck
   only reads, as with `phone-read.json`) and end the host. On each refresh the deck forgets that

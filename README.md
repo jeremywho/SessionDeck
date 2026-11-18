@@ -144,8 +144,8 @@ more things differ in both: a message sent while the agent is working waits for 
 and the whole conversation is loaded at once rather than a page at a time. Claude
 chats need the native `claude.exe` and use the default login; Codex chats need `codex.exe`, AGY
 chats `agy.exe`, and OpenCode chats `opencode` on the path. A chat shows when things were said: a quiet line where the conversation starts and wherever it picks up
-after an hour or on a new day, and under the last message how long ago that was ("Last message 3 days ago,
-Saturday 4:52 PM"). Hover one of your own messages for its exact time. Claude and Codex keep every
+after an hour or on a new day, and under the last message, from a minute after the chat goes quiet, how long ago that was ("Last message
+3 days ago, Saturday 4:52 PM"). Hover one of your own messages for its exact time. Claude and Codex keep every
 message's time, so it is there for old conversations too; for agy and OpenCode it is there for what was
 said while the session's host has been running.
 A new Claude chat starts on the CLI's **Default** model (not on the model `/model` last saved in your
