@@ -65,6 +65,12 @@
 .chat .md pre { position: relative; padding: 12px 14px; background: var(--chat-well); border-radius: 10px; overflow-x: auto; line-height: 1.5; }
 .chat .md pre code { white-space: pre; }
 .chat .md pre .copy { position: absolute; top: 8px; right: 8px; }
+/* Chromium 157 styles thead and tfoot with `break-inside: if(media(overflow-block: paged): avoid;)`. Every header
+   styled that way leaves a media-query result behind in the page, and on a window resize the engine walks all of
+   them once for every <details> on the page (each has a built-in shadow tree). A reply's table is drawn again on
+   each update and a chat is mostly <details>, so a deck open for hours froze for minutes when its window moved.
+   Saying the value here means the built-in one is never used. Nothing here is printed, so nothing is lost. */
+.chat thead, .chat tfoot { break-inside: auto; }
 .chat .md table { border-collapse: collapse; display: block; max-width: 100%; overflow-x: auto; font-variant-numeric: tabular-nums; }
 .chat .md th, .chat .md td { padding: 6px 20px 6px 0; border-bottom: 1px solid var(--pr-line); text-align: left; vertical-align: top; }
 .chat .md th { font-weight: 600; color: var(--fg2); border-bottom-color: var(--pr-line-strong); }

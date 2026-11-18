@@ -442,6 +442,22 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
   ("Advisor"), running until the result block comes (`serverResult` in `chat.js`); any other
   `server_tool_use` gets the same treatment under its own name. The host passes these lines through
   untouched.
+- **`.chat thead, .chat tfoot { break-inside: auto; }` in `chat.css` is load-bearing; do not remove it.** Chromium 157's
+  built-in sheet styles `thead` and `tfoot` with `break-inside: if(media(overflow-block: paged): avoid;)`. Every
+  header styled that way leaves a media-query result in a cache the engine never trims while results stay the same,
+  and on a window resize it walks the whole cache once for every tree scope with a stylesheet. Each `<details>`
+  has a built-in shadow tree with one, and a chat pane is mostly `<details>` (tool calls, thinking). A streaming
+  reply's table is drawn again on every update, so both numbers are large in a deck that has been open for hours.
+  Measured in a dump of the frozen renderer (2026-11-17): 27,808 cached entries, all that one condition, walked
+  for each of 9,120 `<details>`, about 3.5 minutes a pass, at least two passes back to back after the deck was
+  moved to another virtual desktop. Reproduced in headless Edge 157 with the real stylesheet: 600 `<details>` and
+  16,000 table re-renders make one resize take 21 s; with no tables 6 ms, with no `<details>` 35 ms, with this
+  rule 7 to 14 ms. The page's own rule wins the cascade, so the built-in value is never evaluated and no entry is
+  made. What it does not cover: a table drawn outside `.chat` (give it the same rule), any other built-in or
+  page rule that uses `if(media(...))`, and entries already made (gone when the page reloads, which a deck
+  update does). The earlier "page answers nothing until the deck is restarted" reports fit this but were not
+  dumped. Evidence and the scripts that read it without symbols: `C:\Temp\deck-freeze-20261117-200615`,
+  `C:\Temp\refute-work`, `C:\Temp\chatlab\thead-details.mjs` on the machine it happened on.
 - **Every message line carries when it was said, as `timestamp` (ISO 8601, UTC), and the pane reads only that.**
   Claude writes it itself, on live lines and in the transcript (`ChatTranscript.Line` copies it into history
   lines). Codex records `startedAtMs`/`completedAtMs` on every item and repeats them when turns are read back

@@ -1064,3 +1064,18 @@ test('how long since is said in whole words', () => {
   assert.equal(since(now - 730 * dayMs, now), '2 years ago');
   assert.equal(since(now + 5 * minute, now), '1 minute ago');
 });
+
+// ---- the stylesheet ----
+
+test('table headers and footers say their own break-inside, so the browser\'s built-in media condition is never used', () => {
+  // Chromium 157's built-in rule for thead and tfoot is `break-inside: if(media(overflow-block: paged): avoid;)`. Left
+  // in force it stalled the deck's page for minutes (2026-11-17); see AGENTS.md. The rule must cover both elements
+  // wherever a chat draws a table, and must come from the page's own stylesheet.
+  const css = require('node:fs').readFileSync(require('node:path').join(__dirname, '../../wwwroot/chat.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const rule = /(^|\})\s*([^{}]*)\{([^{}]*break-inside\s*:\s*auto\s*;?[^{}]*)\}/gm;
+  const selectors = [];
+  for (const m of css.matchAll(rule)) selectors.push(...m[2].split(',').map(s => s.replace(/\/\*[\s\S]*?\*\//g, '').trim()));
+  assert.ok(selectors.includes('.chat thead'), 'no rule for .chat thead: ' + JSON.stringify(selectors));
+  assert.ok(selectors.includes('.chat tfoot'), 'no rule for .chat tfoot: ' + JSON.stringify(selectors));
+  assert.ok(!/if\s*\(\s*media/.test(css), 'the stylesheet itself must not use if(media())');
+});
