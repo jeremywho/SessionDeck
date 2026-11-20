@@ -434,8 +434,12 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
     started ends on the usual quiet and the session rests `scheduled` on the next. A timer read back from
     an earlier process is not waited on: the timer lived in that process. The pane leaves a `Schedule`
     call running at the end of a turn instead of marking it stopped (`OUTLIVES_TURN`).
-    Restarting the host ends its agent's timers; nothing restarts an Antigravity chat on its own
-    (`SessionScanner.CanResume` is false without a transcript the app reads).
+    Ending the host ends its agent's timers. The restart of idle sessions after an update never
+    touches an Antigravity chat (`SessionScanner.CanResume` is false without a transcript the app
+    reads), but a deck that starts again brings a saved chat back on a new agent process, and there
+    Antigravity replays the call that was still waiting as failed (measured in the deck rig).
+    When a session ends the pane marks every call still running as stopped (`ChatModel.exited`): a
+    call cut off mid-turn, a timer, a subagent left in the background.
   Not covered, and not measured to happen: a viewer that attaches in the middle of a turn does not see text
   already streamed in the current run until the run ends.
 - **An ACP agent's context use comes from the agent, through its host.** The app reads Claude's and Codex's

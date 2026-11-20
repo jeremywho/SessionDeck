@@ -1142,6 +1142,24 @@ test('a reload says what was added, removed and updated, or that the list is the
   assert.equal(reloadNote({ ok: true, count: 3, added: 'x', removed: null }), 'Skills reloaded: the same 3 commands and skills.');
 });
 
+test('when the session ends, a subagent in the background and its calls are over, and a finished call is as it was', () => {
+  const m = new ChatModel();
+  m.durable(used('a1', 'Agent', { description: 'Long job', prompt: 'p' }));
+  m.durable(task('task_started', 'a1', { description: 'Long job', is_backgrounded: true }));
+  m.durable(returned('a1', 'Started in the background.'));
+  m.durable(under('a1', used('c1', 'Bash', { command: 'sleep 60' })));
+  m.durable(used('d1', 'Read', { file_path: 'x' }));
+  m.durable(returned('d1', 'ok'));
+  m.durable(done());
+  const agent = calls(m).find(c => c.id === 'a1'), read = calls(m).find(c => c.id === 'd1');
+  assert.equal(taskRunning(agent), true);
+  m.exited(0);
+  assert.equal(taskRunning(agent), false);
+  assert.equal(runOverview([agent]).running, false);
+  assert.equal(agent.children[0].stopped, true);
+  assert.ok(!read.stopped);
+});
+
 // ---- a timer ----
 
 test('a timer left running when the turn ends is still running, and done when it reports', () => {
@@ -1153,6 +1171,13 @@ test('a timer left running when the turn ends is still running, and done when it
   assert.ok(!timer.stopped);
   assert.equal(timer.result, null);
   m.durable(returned('s1', 'fired'));
+  assert.deepEqual(timer.result, { text: 'fired', error: false });
+  // The session ends with another still to fire: nothing is running any more, the timer and a call cut off mid-turn alike.
+  for (const line of [echo('again'), used('s2', 'Schedule', { DurationSeconds: 600 }), done(), echo('go on'), used('t2', 'Bash', { command: 'sleep 99' })]) m.durable(line);
+  const [later, cut] = ['s2', 't2'].map(id => calls(m).find(c => c.id === id));
+  assert.deepEqual([!!later.stopped, !!cut.stopped], [false, false]);
+  m.exited(0);
+  assert.deepEqual([later.stopped, cut.stopped], [true, true]);
   assert.deepEqual(timer.result, { text: 'fired', error: false });
   // Read back from an earlier process, it is not waiting on anything.
   const old = new ChatModel();

@@ -503,6 +503,13 @@
       this.busy = false;
       this.settleDrafts();
       for (const [id, req] of this.requests) if (req.open) this.close(id, 'cancelled');
+      // Nothing outlives the session: not a call cut off in the middle of a turn, not a timer still to fire, not a
+      // subagent left in the background.
+      for (const tool of this.tools.values()) {
+        if (tool.stopped || (tool.result && !taskRunning(tool))) continue;
+        tool.stopped = true;
+        this.touch(tool);
+      }
     }
 
     get state() {
