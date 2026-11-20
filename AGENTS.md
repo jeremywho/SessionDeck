@@ -346,6 +346,12 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
   into requests, as a list of effects the host carries out (`HostProgram.Agent`; the translators
   share `IChatAgent` in `Host/ChatAgent.cs`). It is pure and tested on its own; `ChatHostTests`
   runs the real host against a script standing in for the app server.
+  The agent's pipe, each viewer and the once-a-second clock ask on threads of their own, so
+  `HostProgram.Agent` works out and shows one thing at a time (`AgentOrder`): without it a line
+  could land in the conversation after what followed it (an approval's answer after the reply it
+  led to, when the agent answered at once). What goes to the agent is written last and
+  outside that lock, because a write to a pipe waits while the agent is not reading and the thread
+  that reads the agent must never wait behind it.
 - **What differs from Claude, by measurement:** the thread id is the app server's to name, so
   the record's `SessionId` is empty until the thread is open; one process starts, resumes and
   lists threads, so `/resume` and earlier history are requests and never a restart
@@ -419,6 +425,17 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
     only reports its end after the turn, and news that is not work (commands, settings), start nothing.
   - A prompt sent meanwhile flushes what was being said first, so the kept order is the order it was read in.
   - Inside a turn nothing changes: a pause there is not an end, and the turn's own answer closes the run.
+  - Antigravity's `schedule` call is its timer and its wait on a background task both (measured: a one-shot
+    timer set by `/schedule` is a `schedule` call still `in_progress` at `end_turn`; 45 s later the call
+    reports `completed` and the agent speaks, unprompted, in the same process). A turn that ends with one
+    running leaves the session `scheduled`, not idle (`AcpChat.Waking`), as a Claude turn with background
+    agents does. Its firing counts as the agent starting work (busy at once, not after the few seconds it
+    takes to speak), and a timer still waiting does not count as a call running, so the work one timer
+    started ends on the usual quiet and the session rests `scheduled` on the next. A timer read back from
+    an earlier process is not waited on: the timer lived in that process. The pane leaves a `Schedule`
+    call running at the end of a turn instead of marking it stopped (`OUTLIVES_TURN`).
+    Restarting the host ends its agent's timers; nothing restarts an Antigravity chat on its own
+    (`SessionScanner.CanResume` is false without a transcript the app reads).
   Not covered, and not measured to happen: a viewer that attaches in the middle of a turn does not see text
   already streamed in the current run until the run ends.
 - **An ACP agent's context use comes from the agent, through its host.** The app reads Claude's and Codex's

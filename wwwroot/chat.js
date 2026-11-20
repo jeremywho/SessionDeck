@@ -9,6 +9,8 @@
   // Tools the service runs for the model, by the name the pane shows: the advisor is a second model asked for a
   // review, and reads as a step of its own. Any other keeps the name it came with.
   const SERVER_TOOLS = { advisor: 'Advisor' };
+  // Calls that are meant to be still running when the turn that made them ends.
+  const OUTLIVES_TURN = new Set(['Schedule']);
 
   // What a tool the service ran came back with. It arrives in the model's own message, not as a reply to it. The
   // advisor's advice is the model's to read: the pane is mostly handed a sealed copy, and says that it was given.
@@ -463,8 +465,9 @@
       for (const p of this.pending) { p.pending = false; p.settled = true; this.touch(p); }
       for (const [id, req] of this.requests) if (req.open) this.close(id, 'cancelled');
       for (const tool of this.tools.values()) {
-        // A subagent left running in the background outlives the turn, and so do its calls.
-        if (tool.result || tool.stopped || (tool.parent && taskRunning(tool.parent))) continue;
+        // A subagent left running in the background outlives the turn, and so do its calls. So does a timer
+        // (Antigravity's Schedule): the turn ends with it still to fire, and it reports when it has.
+        if (tool.result || tool.stopped || (tool.parent && taskRunning(tool.parent)) || OUTLIVES_TURN.has(tool.name)) continue;
         tool.stopped = true;
         this.touch(tool);
       }

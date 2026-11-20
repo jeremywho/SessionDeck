@@ -1226,6 +1226,80 @@ public class AcpChatTests
         Assert.Empty(new CodexChat(Cwd, "", "", "", CodexChat.Full).Tick(record, After(1000)));
     }
 
+    // ---- a session that will come back by itself ----
+
+    static string Schedule(string id, string status, bool update = false) =>
+        "{\"sessionUpdate\":\"" + (update ? "tool_call_update" : "tool_call") + "\",\"toolCallId\":\"" + id + "\",\"name\":\"schedule\",\"args\":{\"DurationSeconds\":60,\"Prompt\":\"say it\",\"TimerCondition\":\"any\"},\"status\":\"" + status + "\",\"kind\":\"other\",\"title\":\"Run schedule\",\"rawInput\":{\"DurationSeconds\":60,\"Prompt\":\"say it\"}}";
+
+    [Fact]
+    public void A_turn_that_ends_with_a_timer_running_leaves_the_session_scheduled_until_the_timer_has_fired_and_its_work_is_done()
+    {
+        var (chat, record, _) = OpenWith("Agy");
+        var turn = Prompt(chat, record, "/schedule in a minute, say it");
+        chat.FromCli(J(Update(AgyId, Schedule("call_s1", "in_progress"))), record, After(3));
+        chat.FromCli(J(Response(Id(turn), Stopped("end_turn"))), record, After(6));
+        Assert.Equal(("scheduled", "Stop"), (record.AgentStatus, record.LastEvent));
+        Assert.Empty(chat.Tick(record, After(40)));
+        Assert.Equal("scheduled", record.AgentStatus);
+
+        // It fires: the call reports its end, which is the agent starting on what the timer was for; then it says it.
+        var fired = chat.FromCli(J(Update(AgyId, Schedule("call_s1", "completed", update: true))), record, After(63));
+        Assert.Equal("busy", record.AgentStatus);
+        Assert.Contains(Passed(fired), l => Type(l) == "system" && Str(l, "subtype") == "init");
+        chat.FromCli(J(Update(AgyId, Text("agent_message_chunk", "TIMER-FIRED"))), record, After(66));
+        Assert.Equal("busy", record.AgentStatus);
+        Assert.Equal("TIMER-FIRED", Said(Kept(chat.Tick(record, After(68))).Single()));
+        Assert.Equal("result", Type(Kept(chat.Tick(record, After(96))).Single()));
+        Assert.Equal("idle", record.AgentStatus);
+    }
+
+    [Fact]
+    public void While_another_timer_is_still_running_the_session_goes_back_to_scheduled_and_a_timer_that_fires_silently_ends_it()
+    {
+        var (chat, record, _) = OpenWith("Agy");
+        var turn = Prompt(chat, record, "two timers");
+        chat.FromCli(J(Update(AgyId, Schedule("call_s1", "in_progress"))), record, After(1));
+        chat.FromCli(J(Update(AgyId, Schedule("call_s2", "in_progress"))), record, After(2));
+        chat.FromCli(J(Response(Id(turn), Stopped("end_turn"))), record, After(3));
+        Assert.Equal("scheduled", record.AgentStatus);
+
+        chat.FromCli(J(Update(AgyId, Schedule("call_s1", "completed", update: true))), record, After(60));
+        Assert.Equal("busy", record.AgentStatus);
+        chat.FromCli(J(Update(AgyId, Text("agent_message_chunk", "first one"))), record, After(61));
+        chat.Tick(record, After(63));
+        // The other timer is not work going on: this one's work is over after the usual quiet, and the session waits on the other.
+        chat.Tick(record, After(91));
+        Assert.Equal("scheduled", record.AgentStatus);
+
+        // The second ends with nothing said (cancelled, or nothing to do): busy for the usual quiet, then waiting for the person.
+        chat.FromCli(J(Update(AgyId, Schedule("call_s2", "failed", update: true))), record, After(120));
+        Assert.Equal("busy", record.AgentStatus);
+        Assert.Empty(chat.Tick(record, After(149)));
+        Assert.Equal("result", Type(Kept(chat.Tick(record, After(150))).Single()));
+        Assert.Equal("idle", record.AgentStatus);
+    }
+
+    [Fact]
+    public void Only_a_timer_of_the_process_running_now_counts()
+    {
+        // Any other call left open at the end of a turn is not a promise to come back.
+        var (chat, record, _) = OpenWith("Agy");
+        var turn = Prompt(chat, record, "run it");
+        chat.FromCli(J(Update(AgyId, AgyRun)), record, After(1));
+        chat.FromCli(J(Response(Id(turn), Stopped("end_turn"))), record, After(2));
+        Assert.Equal("idle", record.AgentStatus);
+
+        // A timer read back from an earlier process died with it: the conversation it is replayed into is not waiting on it.
+        var (moved, movedRecord, _) = OpenWith("OpenCode");
+        var load = Sent(moved.Resume("r1", OcOther, "viewer-a")).Single();
+        moved.FromCli(J(Update(OcOther, Schedule("call_old", "in_progress"))), movedRecord, After(1));
+        moved.FromCli(J(Response(Id(load), OcConfig())), movedRecord, After(2));
+        Assert.Equal("idle", movedRecord.AgentStatus);
+        var next = Prompt(moved, movedRecord, "hello");
+        moved.FromCli(J(Response(Id(next), Stopped("end_turn"))), movedRecord, After(5));
+        Assert.Equal("idle", movedRecord.AgentStatus);
+    }
+
     // ---- the agent's skills ----
 
     const string ThreeCommands = """{"sessionUpdate":"available_commands_update","availableCommands":[{"name":"goal","description":"Run until done"},{"name":"plan","description":"Plan first"},{"name":"old-skill","description":"On its way out"}]}""";

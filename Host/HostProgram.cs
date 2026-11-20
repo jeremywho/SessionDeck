@@ -629,33 +629,44 @@ internal static class HostProgram
         Log($"serving {seed.Session} epoch={_chatEpoch}");
     }
 
+    /// <summary>Taken first by whoever asks the translator anything: see <see cref="Agent"/>.</summary>
+    static readonly object AgentOrder = new();
+
     /// <summary>Asks the translator for what follows from something (a line from the agent, a viewer's message) and carries it out.</summary>
     static void Agent(Func<IChatAgent, List<ChatEffect>> what)
     {
         List<ChatEffect> effects;
         bool changed;
-        lock (_record)
+        // The agent's pipe, each viewer and the clock are threads of their own: what one leads to is kept and shown
+        // before the next is worked out, or lines land in the conversation out of the order they happened in.
+        lock (AgentOrder)
         {
-            string before = ChatStream.Signature(_record);
-            effects = what(_agent!);
-            changed = ChatStream.Signature(_record) != before;
-        }
-        foreach (var effect in effects)
-            switch (effect.Kind)
+            lock (_record)
             {
-                case ChatEffectKind.ToCli: WriteChatInput(Encoding.UTF8.GetString(effect.Data)); break;
-                // A message with no time of its own is being said now. Stamped before it is kept, so a viewer that
-                // attaches later reads the same time.
-                case ChatEffectKind.Durable: AppendChatLine(ChatLines.StampedNow(effect.Data, DateTime.UtcNow)); break;
-                case ChatEffectKind.Live: Broadcast(true, ChatStream.LiveFrame(effect.Data)); break;
-                case ChatEffectKind.Frame: Broadcast(true, effect.Data); break;
-                case ChatEffectKind.Reset: Serve(effect.Seed!); break;
-                case ChatEffectKind.Reply:
-                    Client? asker;
-                    lock (ClientsLock) asker = Clients.FirstOrDefault(c => c.Tag == effect.Tag);
-                    asker?.Out.Writer.TryWrite((true, effect.Data));
-                    break;
+                string before = ChatStream.Signature(_record);
+                effects = what(_agent!);
+                changed = ChatStream.Signature(_record) != before;
             }
+            foreach (var effect in effects)
+                switch (effect.Kind)
+                {
+                    // A message with no time of its own is being said now. Stamped before it is kept, so a viewer that
+                    // attaches later reads the same time.
+                    case ChatEffectKind.Durable: AppendChatLine(ChatLines.StampedNow(effect.Data, DateTime.UtcNow)); break;
+                    case ChatEffectKind.Live: Broadcast(true, ChatStream.LiveFrame(effect.Data)); break;
+                    case ChatEffectKind.Frame: Broadcast(true, effect.Data); break;
+                    case ChatEffectKind.Reset: Serve(effect.Seed!); break;
+                    case ChatEffectKind.Reply:
+                        Client? asker;
+                        lock (ClientsLock) asker = Clients.FirstOrDefault(c => c.Tag == effect.Tag);
+                        asker?.Out.Writer.TryWrite((true, effect.Data));
+                        break;
+                }
+        }
+        // Written last and outside: a write waits while the agent is not reading, and the thread that reads the agent
+        // must never wait behind it. What the agent answers can then only follow what was kept above.
+        foreach (var effect in effects)
+            if (effect.Kind == ChatEffectKind.ToCli) WriteChatInput(Encoding.UTF8.GetString(effect.Data));
         if (changed) WriteRecord();
     }
 

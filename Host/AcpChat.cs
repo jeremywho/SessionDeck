@@ -38,6 +38,8 @@ internal sealed class AcpChat : IChatAgent
         public string Id = "", Title = "", Kind = "", Name = "", Status = "";
         public JsonElement Input, Content, Output;
         public bool Shown, Done;
+        /// <summary>Made by the process running now, not read back from an earlier one.</summary>
+        public bool Live;
     }
 
     readonly string _provider, _cwd;
@@ -90,6 +92,17 @@ internal sealed class AcpChat : IChatAgent
     /// </summary>
     bool _unasked;
 
+    /// <summary>
+    /// The call an agent leaves running to come back by itself. Antigravity's <c>schedule</c> is its timer
+    /// and its wait on a background task both (measured, 1.5.13): the turn ends with the call still in
+    /// progress, and when it fires the agent goes on unasked. The timer lives in the agent's process, so
+    /// one read back from an earlier process is not waiting on anything.
+    /// </summary>
+    bool Waking => _tools.Values.Any(t => t.Live && t.Shown && !t.Done && t.Name == "schedule");
+
+    /// <summary>What a session with no turn running is: waiting for the person, or for its own timer.</summary>
+    string Rest => Waking ? "scheduled" : "idle";
+
     /// <summary>How long a pause makes what the agent said unasked a message of the conversation.</summary>
     internal static readonly TimeSpan SaidQuiet = TimeSpan.FromSeconds(2);
     /// <summary>How long with nothing heard and no call running before work nobody asked for is taken to be over.</summary>
@@ -104,9 +117,12 @@ internal sealed class AcpChat : IChatAgent
     {
         bool said = (kind is "agent_message_chunk" or "agent_thought_chunk") && Get(update, "content", out var content) && Text(content, "text").Length > 0;
         bool began = kind == "tool_call" || (kind == "tool_call_update" && Text(update, "status") is "pending" or "in_progress");
+        // A timer that fires is the agent starting on what the timer was for: it speaks a few seconds later (measured).
+        if (kind == "tool_call_update" && Text(update, "status") is "completed" or "failed"
+            && _tools.TryGetValue(Text(update, "toolCallId"), out var timer) && timer is { Live: true, Done: false, Name: "schedule" }) began = true;
         if (!said && !began && kind != "tool_call_update") return;
         _heardAt = now;
-        // A call that only now reports it finished is the end of something, not the start of more.
+        // Any other call that only now reports it finished is the end of something, not the start of more.
         if (!(said || began) || _prompting || _unasked) return;
         _unasked = true;
         effects.Add(Working());
@@ -129,11 +145,12 @@ internal sealed class AcpChat : IChatAgent
             if (_run.ToString().Trim().Length == 0) EndRun(); else Flush(false, effects);
         }
         if (!_unasked || _runKind.Length > 0 || quiet < WorkQuiet) return effects;
-        if (_tools.Values.Any(t => t.Shown && !t.Done) && quiet < CallQuiet) return effects;
+        // A timer waiting to fire is not work going on: the session rests, scheduled, until it does.
+        if (_tools.Values.Any(t => t.Live && t.Shown && !t.Done && t.Name != "schedule") && quiet < CallQuiet) return effects;
         _unasked = false;
         effects.Add(Durable(new { type = "result", subtype = "success", is_error = false, result = "" }));
         record.LastEvent = "Stop";
-        Status(record, "idle", now);
+        Status(record, Rest, now);
         return effects;
     }
 
@@ -566,6 +583,7 @@ internal sealed class AcpChat : IChatAgent
     {
         if (Text(call, "toolCallId").Length == 0) return;
         var tool = ToolOf(call);
+        if (!replay) tool.Live = true;
         bool ended = tool.Status is "completed" or "failed";
         // OpenCode announces a call before it knows what the call is ("shell", no command yet): it is shown once it runs.
         if (!tool.Shown && (ended || tool.Status == "in_progress")) Show(tool, replay, record, effects);
@@ -798,7 +816,7 @@ internal sealed class AcpChat : IChatAgent
                 effects.Add(Durable(new { type = "result", subtype = failed ? "error" : stop == "cancelled" ? "error_during_execution" : "success", is_error = failed, result = said }));
                 if (!failed && said.Length > 0) effects.Add(Durable(new { type = "host", subtype = "note", text = said }));
                 record.LastEvent = "Stop";
-                Status(record, "idle", now);
+                Status(record, Rest, now);
                 Next(record, now, effects);
                 break;
             }

@@ -1141,3 +1141,21 @@ test('a reload says what was added, removed and updated, or that the list is the
   assert.equal(reloadNote({ ok: true }), 'Skills reloaded: the same 0 commands and skills.');
   assert.equal(reloadNote({ ok: true, count: 3, added: 'x', removed: null }), 'Skills reloaded: the same 3 commands and skills.');
 });
+
+// ---- a timer ----
+
+test('a timer left running when the turn ends is still running, and done when it reports', () => {
+  const m = new ChatModel();
+  for (const line of [echo('remind me'), used('s1', 'Schedule', { DurationSeconds: 60 }), used('t1', 'Bash', { command: 'sleep 99' }), said('Scheduled.'), done()]) m.durable(line);
+  const timer = calls(m).find(c => c.id === 's1'), shell = calls(m).find(c => c.id === 't1');
+  // Any other call with no result at the end of the turn was cut off; the timer was not.
+  assert.equal(shell.stopped, true);
+  assert.ok(!timer.stopped);
+  assert.equal(timer.result, null);
+  m.durable(returned('s1', 'fired'));
+  assert.deepEqual(timer.result, { text: 'fired', error: false });
+  // Read back from an earlier process, it is not waiting on anything.
+  const old = new ChatModel();
+  old.durable(Object.assign(used('s9', 'Schedule', {}), { history: true }));
+  assert.equal(calls(old)[0].stopped, true);
+});
