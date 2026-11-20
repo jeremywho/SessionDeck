@@ -1088,12 +1088,15 @@ public class AcpChatTests
         Assert.Equal((500L, 1000L), (record.ContextTokens, record.ContextWindow));
     }
 
-    [Fact]
-    public void A_count_with_no_size_keeps_the_count_and_says_no_size()
+    [Theory]
+    [InlineData("""{"sessionUpdate":"usage_update","used":700}""")]
+    [InlineData("""{"sessionUpdate":"usage_update","used":700,"size":-1}""")]
+    [InlineData("""{"sessionUpdate":"usage_update","used":700,"size":"big"}""")]
+    public void A_count_with_no_size_keeps_the_count_and_says_no_size(string usage)
     {
         var (chat, record, _) = OpenWith("Agy");
         chat.FromCli(J(Update(AgyId, """{"sessionUpdate":"usage_update","used":500,"size":1000}""")), record, T0);
-        chat.FromCli(J(Update(AgyId, """{"sessionUpdate":"usage_update","used":700}""")), record, T0);
+        chat.FromCli(J(Update(AgyId, usage)), record, T0);
         Assert.Equal((700L, 0L), (record.ContextTokens, record.ContextWindow));
     }
 
@@ -1250,6 +1253,26 @@ public class AcpChatTests
         Assert.Equal("busy", record.AgentStatus);
         Assert.Equal("TIMER-FIRED", Said(Kept(chat.Tick(record, After(68))).Single()));
         Assert.Equal("result", Type(Kept(chat.Tick(record, After(96))).Single()));
+        Assert.Equal("idle", record.AgentStatus);
+
+        // Said to be over a second time, it starts nothing.
+        Assert.Empty(Passed(chat.FromCli(J(Update(AgyId, Schedule("call_s1", "completed", update: true))), record, After(100))));
+        Assert.Equal("idle", record.AgentStatus);
+    }
+
+    [Fact]
+    public void A_call_read_back_unfinished_does_not_keep_work_nobody_asked_for_open()
+    {
+        var (chat, record, _) = OpenWith("OpenCode");
+        var load = Sent(chat.Resume("r1", OcOther, "viewer-a")).Single();
+        chat.FromCli(J(Update(OcOther, AgyRun)), record, After(1));
+        chat.FromCli(J(Response(Id(load), OcConfig())), record, After(2));
+
+        chat.FromCli(J(Update(OcOther, Text("agent_message_chunk", "by the way"))), record, After(10));
+        Assert.Equal("busy", record.AgentStatus);
+        Assert.Equal("by the way", Said(Kept(chat.Tick(record, After(12))).Single()));
+        // The call belongs to a process that is gone: nothing will ever report its end.
+        Assert.Equal("result", Type(Kept(chat.Tick(record, After(40))).Single()));
         Assert.Equal("idle", record.AgentStatus);
     }
 

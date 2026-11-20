@@ -778,7 +778,6 @@ internal sealed class AcpChat : IChatAgent
                 record.SessionId = _session;
                 // The conversation's own, or none: never the figure of the one that was open before.
                 (record.ContextTokens, record.ContextWindow) = (_replayUsed, _replayWindow);
-                (_replayUsed, _replayWindow) = (0, 0);
                 record.Title = title;
                 record.LastTool = "";
                 record.LastEvent = "";
