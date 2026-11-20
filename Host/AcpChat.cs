@@ -78,6 +78,62 @@ internal sealed class AcpChat : IChatAgent
 
     bool CanReload => _canResume && RereadsCommands(_provider);
 
+    /// <summary>When the agent last said or did something.</summary>
+    DateTime _heardAt;
+    /// <summary>
+    /// The agent is working with no turn of ours running. Antigravity goes on after it has ended a turn
+    /// (measured, 1.5.13: tool calls and a closing message 20 s to minutes after <c>end_turn</c>), and
+    /// nothing in the protocol says when that is over.
+    /// </summary>
+    bool _unasked;
+
+    /// <summary>How long a pause makes what the agent said unasked a message of the conversation.</summary>
+    internal static readonly TimeSpan SaidQuiet = TimeSpan.FromSeconds(2);
+    /// <summary>How long with nothing heard and no call running before work nobody asked for is taken to be over.</summary>
+    internal static readonly TimeSpan WorkQuiet = TimeSpan.FromSeconds(30);
+    /// <summary>A call that never reports back does not keep the session "working" for ever.</summary>
+    internal static readonly TimeSpan CallQuiet = TimeSpan.FromMinutes(10);
+
+    Effect Working() => Live(new { type = "system", subtype = "init", session_id = _session, model = Current("model"), permissionMode = Current("mode") });
+
+    /// <summary>The agent said or did something that is happening now. Outside a turn that is work of its own: the session is busy again.</summary>
+    void Heard(string kind, JsonElement update, HostRecord record, DateTime now, List<Effect> effects)
+    {
+        bool said = (kind is "agent_message_chunk" or "agent_thought_chunk") && Get(update, "content", out var content) && Text(content, "text").Length > 0;
+        bool began = kind == "tool_call" || (kind == "tool_call_update" && Text(update, "status") is "pending" or "in_progress");
+        if (!said && !began && kind != "tool_call_update") return;
+        _heardAt = now;
+        // A call that only now reports it finished is the end of something, not the start of more.
+        if (!(said || began) || _prompting || _unasked) return;
+        _unasked = true;
+        effects.Add(Working());
+        Status(record, "busy", now);
+    }
+
+    /// <summary>
+    /// What an agent says is whole when something else follows it. Said outside a turn, nothing may
+    /// follow: it stayed out of the conversation (and off every viewer that was not watching it being
+    /// typed) until the next message was sent. A pause is the only end it has, so a pause makes it a
+    /// line; and a longer one, with no call running, ends the work as the end of a turn does.
+    /// </summary>
+    public List<Effect> Tick(HostRecord record, DateTime now)
+    {
+        var effects = new List<Effect>();
+        if (_prompting || _loading != null || _session.Length == 0) return effects;
+        var quiet = now - _heardAt;
+        if (_runKind.Length > 0 && quiet >= SaidQuiet)
+        {
+            if (_run.ToString().Trim().Length == 0) EndRun(); else Flush(false, effects);
+        }
+        if (!_unasked || _runKind.Length > 0 || quiet < WorkQuiet) return effects;
+        if (_tools.Values.Any(t => t.Shown && !t.Done) && quiet < CallQuiet) return effects;
+        _unasked = false;
+        effects.Add(Durable(new { type = "result", subtype = "success", is_error = false, result = "" }));
+        record.LastEvent = "Stop";
+        Status(record, "idle", now);
+        return effects;
+    }
+
     /// <summary>Where the names given to conversations are kept: the protocol has no rename.</summary>
     readonly IChatNames _names;
     /// <summary>The name given to the conversation open now, or empty: nothing the agent calls it replaces one.</summary>
@@ -226,10 +282,13 @@ internal sealed class AcpChat : IChatAgent
 
     void Send(JsonElement prompt, HostRecord record, DateTime now, List<Effect> effects)
     {
+        // What the agent was saying unasked comes before what is said to it now, as it did for anyone watching.
+        Flush(false, effects);
+        _unasked = false;
         _prompting = true;
         // The agent does not have to say back what it was told (Antigravity does, OpenCode does not): the message is shown as sent.
         effects.Add(new Effect(Kind.Durable, UserLine("u-" + ++_made, prompt, history: false)));
-        effects.Add(Live(new { type = "system", subtype = "init", session_id = _session, model = Current("model"), permissionMode = Current("mode") }));
+        effects.Add(Working());
         effects.Add(Call("session/prompt", new { sessionId = _session, prompt }, new Pending("prompt")));
         record.LastEvent = "UserPromptSubmit";
         Status(record, "busy", now);
@@ -286,6 +345,7 @@ internal sealed class AcpChat : IChatAgent
         if (refusal.Length > 0) return new() { new Effect(Kind.Reply, ChatSessions.RefusedFrame(request, refusal), tag) };
         _loading = session;
         _reload = null;
+        _unasked = false;
         _replay.Clear();
         _tools.Clear();
         EndRun();
@@ -372,7 +432,9 @@ internal sealed class AcpChat : IChatAgent
 
     void Update(JsonElement update, bool replay, HostRecord record, DateTime now, List<Effect> effects)
     {
-        switch (Text(update, "sessionUpdate"))
+        string kind = Text(update, "sessionUpdate");
+        if (!replay) Heard(kind, update, record, now, effects);
+        switch (kind)
         {
             case "agent_message_chunk": Chunk("text", update, replay, effects); break;
             case "agent_thought_chunk": Chunk("thinking", update, replay, effects); break;

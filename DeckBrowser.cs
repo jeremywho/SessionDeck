@@ -172,9 +172,24 @@ internal sealed class DeckBrowser : Grid
 
     static void OpenOutside(string? uri)
     {
-        if (string.IsNullOrEmpty(uri)) return;
-        if (!uri.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !uri.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) return;
-        try { Process.Start(new ProcessStartInfo(uri) { UseShellExecute = true }); } catch { }
+        var (kind, target) = OutsideLink.Decide(uri, File.Exists, Directory.Exists);
+        try
+        {
+            switch (kind)
+            {
+                case OutsideLink.Kind.Web:
+                case OutsideLink.Kind.Open:
+                    Process.Start(new ProcessStartInfo(target) { UseShellExecute = true });
+                    break;
+                case OutsideLink.Kind.Show:
+                    Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{target}\"") { UseShellExecute = false });
+                    break;
+                case OutsideLink.Kind.Folder:
+                    Process.Start(new ProcessStartInfo("explorer.exe", $"\"{target}\"") { UseShellExecute = false });
+                    break;
+            }
+        }
+        catch (Exception ex) { App.LogError(ex); }
     }
 
     /// <summary>Deliver to the page, or hold it until the page says it is ready.</summary>

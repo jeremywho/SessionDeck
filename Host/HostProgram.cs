@@ -158,6 +158,7 @@ internal static class HostProgram
     static readonly ChatStream _chat = new();
     /// <summary>Set for a chat whose agent has no stream-json mode (Codex's app server, an ACP agent): this turns its protocol into the lines a viewer reads.</summary>
     static IChatAgent? _agent;
+    static System.Threading.Timer? _agentTick;
     static readonly object ChatInputLock = new();
     static readonly StringBuilder _chatErrors = new();
     /// <summary>The conversation the CLI was last started on, its transcript, and the command that started it. The record's session id can run ahead of this: the CLI names its session at each turn.</summary>
@@ -457,6 +458,13 @@ internal static class HostProgram
             if (_agent != null)
             {
                 Agent(c => c.Start());
+                // An agent can go on working and speaking after it has ended its turn, with nothing to mark the end of
+                // what it says: the translator is told that time is passing.
+                _agentTick = new System.Threading.Timer(_ =>
+                {
+                    try { if (!_exited) Agent(c => c.Tick(_record, DateTime.UtcNow)); }
+                    catch (Exception ex) { Log($"tick: {ex.Message}"); }
+                }, null, 1000, 1000);
                 if (prompt.Length > 0) AgentInput(ChatStream.UserLine(prompt));
             }
             else

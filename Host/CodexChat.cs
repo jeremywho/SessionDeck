@@ -184,6 +184,9 @@ internal sealed class CodexChat : IChatAgent
     };
 
     /// <summary>Name the thread: <c>thread/name/set</c>, which Codex keeps with the thread (measured, 0.167: answered <c>{}</c>, then <c>thread/name/updated</c>).</summary>
+    /// <summary>Codex says when each thing it says is whole: nothing here waits on a pause.</summary>
+    public List<Effect> Tick(HostRecord record, DateTime now) => new();
+
     /// <summary>The app server has no request that reads prompts and skills again.</summary>
     public List<Effect> Commands(string request, string tag) =>
         new() { new Effect(Kind.Reply, ChatSessions.NoCommandsFrame(request, "Codex cannot reload its skills in a chat."), tag) };

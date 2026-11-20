@@ -58,6 +58,8 @@
 .chat .md ul, .chat .md ol { padding-left: 26px; }
 .chat .md li + li { margin-top: 4px; }
 .chat .md a { color: var(--pr-blue); text-decoration: underline; cursor: pointer; }
+/* A link that goes nowhere from here (a relative path, a file on the computer seen from a phone) reads as the text it is. */
+.chat .md a:not([href]) { color: inherit; text-decoration: none; cursor: text; }
 .chat .md blockquote { padding-left: 14px; color: var(--fg2); border-left: 2px solid var(--pr-line-strong); }
 .chat .md hr { border: 0; border-top: 1px solid var(--pr-line); margin: 16px 0; }
 .chat .md code { font-family: var(--chat-mono); font-size: 0.875em; }

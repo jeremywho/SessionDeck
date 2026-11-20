@@ -578,6 +578,11 @@ public class ChatHostTests : IDisposable
                     $text = $m.params.prompt[0].text
                     Say @{ jsonrpc = '2.0'; method = 'session/update'; params = @{ sessionId = $session; update = @{ sessionUpdate = 'agent_message_chunk'; messageId = 'msg_fake_1'; content = @{ type = 'text'; text = "echo: $text in $($m.params.sessionId)" } } } }
                     Say @{ jsonrpc = '2.0'; id = $m.id; result = @{ stopReason = 'end_turn' } }
+                    # An agent that goes on after it has ended its turn, as Antigravity does.
+                    if ($text -eq 'and then say more') {
+                        Start-Sleep -Milliseconds 400
+                        Say @{ jsonrpc = '2.0'; method = 'session/update'; params = @{ sessionId = $session; update = @{ sessionUpdate = 'agent_message_chunk'; messageId = 'msg_fake_2'; content = @{ type = 'text'; text = 'said after the turn' } } } }
+                    }
                 }
             }
         }
@@ -635,6 +640,44 @@ public class ChatHostTests : IDisposable
         Assert.Equal(new[] { "user", "assistant", "result" }, second.Select(Type));
         Assert.Equal(("again", "echo: again in " + Session), (Said(second[0]), Said(second[1])));
         Assert.Equal("named here", Record().Title);
+
+        await viewer.SendFrame("""{"type":"kill"}""");
+        await viewer.Exited();
+        Assert.True(_host!.WaitForExit(15000), "host did not exit after it was told to end");
+    }
+
+    [Fact]
+    public async Task What_an_agent_says_after_its_turn_is_kept_for_a_viewer_that_was_not_watching()
+    {
+        string script = Path.Combine(_dir, "fake-acp.ps1");
+        File.WriteAllText(script, FakeAcp);
+        await Start(new HostSpec
+        {
+            Id = "chattest0001", SessionId = "", Provider = "Agy", Kind = ChatStream.Kind,
+            CommandLine = $"\"{SessionLauncher.ResolvePowerShell()}\" -NoLogo -NoProfile -File \"{script}\"",
+            Cwd = _dir, HostsDir = Path.Combine(_dir, "hosts"), RingBytes = 256 * 1024,
+        });
+        const string Session = "ses_fakeacp00000000000000001";
+        var record = await RecordWhen(r => r.SessionId == Session && r.Model == "fake-model");
+        using var viewer = await Viewer.Attach(record, after: 0);
+        await viewer.Pump(() => viewer.Catalog.HasValue);
+
+        await viewer.Send(ChatStream.UserLine("and then say more"));
+        var turn = await viewer.Until(l => Type(l) == "result");
+        Assert.Equal(new[] { "user", "assistant", "result" }, turn.Select(Type));
+
+        // Nothing else is sent and nothing follows it: the host makes it a line of the conversation on its own.
+        var after = await viewer.Until(l => Type(l) == "assistant");
+        Assert.Equal("said after the turn", Said(after[^1]));
+        Assert.Equal("busy", (await RecordWhen(r => r.AgentStatus == "busy")).AgentStatus);
+
+        // A viewer that attaches now (a phone opening the chat) was not there while it was typed, and reads it all the same.
+        using (var late = await Viewer.Attach(Record(), after: 0))
+        {
+            await late.Pump(() => late.Lines.Count >= 4);
+            Assert.Equal(new[] { "user", "assistant", "result", "assistant" }, late.Lines.Take(4).Select(Type));
+            Assert.Equal("said after the turn", Said(late.Lines[3]));
+        }
 
         await viewer.SendFrame("""{"type":"kill"}""");
         await viewer.Exited();

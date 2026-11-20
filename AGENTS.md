@@ -405,6 +405,33 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
   restart that starts it fresh hands the name on with `--name` (`HostManager.NameCarried`). An AGY
   chat's row is named by its host, not by a `/rename` once typed into an AGY terminal
   (`SessionPipeline.ApplyAgyNames` leaves chats alone).
+- **An ACP agent can go on after it has ended its turn, and the host has to notice on its own.** Antigravity
+  answers `session/prompt` with `end_turn` and then keeps working: tool calls, thinking, and a closing message
+  (measured in a live session, 1.5.13: `end_turn` at 14:06:40, calls until 14:07:00, then the message). A run of
+  text has no end mark in the protocol and is kept when something else follows it; outside a turn nothing does.
+  That message was streamed to whoever was watching and stayed out of the scrollback for 38 minutes, until the
+  next prompt flushed it, after the person's own question. A phone, which reads the scrollback, never saw it.
+  So the host tells the translator that time is passing (`IChatAgent.Tick`, once a second from `HostProgram`):
+  - Outside a turn, text or thinking with nothing heard for 2 s becomes a line (`AcpChat.SaidQuiet`).
+  - Work begun outside a turn (a chunk that says something, a call that starts) makes the session busy again,
+    with the same live `system/init` a turn starts with, and is ended by a `result` line once nothing has
+    been heard for 30 s with no call running (`WorkQuiet`), or 10 minutes with one (`CallQuiet`). A call that
+    only reports its end after the turn, and news that is not work (commands, settings), start nothing.
+  - A prompt sent meanwhile flushes what was being said first, so the kept order is the order it was read in.
+  - Inside a turn nothing changes: a pause there is not an end, and the turn's own answer closes the run.
+  Not covered, and not measured to happen: a viewer that attaches in the middle of a turn does not see text
+  already streamed in the current run until the run ends.
+- **A link to a file is opened by the deck, by kind, and never run** (`OutsideLink.Decide`). Agents write
+  `[name](file:///C:/…)` and `[name](C:/…)` for what they made. The pane used to strip those hrefs (only
+  `http`, `https` and `mailto` survived `scrub`), leaving text styled as a link that did nothing. Now, in the
+  deck, a file URL or a drive path stays a link and its click is posted like any other; the deck opens a
+  picture, video, page, document or inert source file with its default program, opens a folder, and shows
+  anything else selected in Explorer. Never opened: programs, shortcuts, installers, and source that
+  Windows may hand to something that runs it (`.js`, `.vbs`, `.py`, `.ps1`, `.sh`, `.bat`, `.cmd`). Never
+  followed: a share on another machine (asking for one sends this account's credentials there) and any other
+  scheme. A file that is not there opens the folder it would be in. A relative path stays text: the pane does
+  not know the session's folder. On a phone a file link is text too, since the file is on the computer;
+  `a:not([href])` is styled as plain text so nothing looks clickable that is not.
 - **`/skills` and `/skills reload` in an Antigravity chat are the host's, and never a turn.** They are the
   two forms agy's own terminal has ("Usage: /skills List available skills /skills reload Reload skills from
   disk", read out of agy 1.5.13); its chat protocol advertises 14 commands and that one is not among them.

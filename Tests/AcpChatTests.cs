@@ -1059,6 +1059,116 @@ public class AcpChatTests
         Assert.False(AcpChat.IsSessionId(new string('a', 129)));
     }
 
+    // ---- an agent that goes on after its turn ----
+
+    static (AcpChat Chat, HostRecord Record) AfterATurn(string provider = "Agy")
+    {
+        var (chat, record, _) = OpenWith(provider);
+        var turn = Prompt(chat, record, "make the diagrams");
+        chat.FromCli(J(Response(Id(turn), Stopped("end_turn"))), record, T0);
+        Assert.Equal("idle", record.AgentStatus);
+        return (chat, record);
+    }
+
+    static DateTime After(double seconds) => T0.AddSeconds(seconds);
+
+    [Fact]
+    public void What_an_agent_says_after_its_turn_ended_is_kept_when_it_pauses_and_not_left_for_the_next_message()
+    {
+        var (chat, record) = AfterATurn();
+
+        // It goes on working: the session is busy again, and viewers watching are told a turn's worth of work began.
+        var began = chat.FromCli(J(Update(AgyId, AgyRun)), record, After(1));
+        Assert.Equal("busy", record.AgentStatus);
+        Assert.Equal(("system", "init"), (Type(Passed(began)[0]), Str(Passed(began)[0], "subtype")));
+        Assert.Equal("tool_use", Str(Block(Kept(began).Single()), "type"));
+        Assert.Equal("tool_result", Str(Block(Kept(chat.FromCli(J(Update(AgyId, AgyRunDone)), record, After(3))).Single()), "type"));
+
+        // Then it says its closing words. They are shown as they are typed, and are not yet a line of the conversation.
+        var typed = chat.FromCli(J(Update(AgyId, Text("agent_message_chunk", "Done, "))), record, After(20));
+        typed.AddRange(chat.FromCli(J(Update(AgyId, Text("agent_message_chunk", "the diagrams are ready."))), record, After(21)));
+        Assert.Empty(Kept(typed));
+        Assert.DoesNotContain(Passed(typed), l => Type(l) == "system");
+        Assert.Empty(chat.Tick(record, After(22.9)));
+
+        // Two seconds with nothing more said, and it is one: a viewer that was not watching reads it too.
+        var kept = Kept(chat.Tick(record, After(23))).Single();
+        Assert.Equal(("assistant", "Done, the diagrams are ready."), (Type(kept), Said(kept)));
+        Assert.Empty(chat.Tick(record, After(24)));
+        Assert.Equal("busy", record.AgentStatus);
+
+        // Half a minute with nothing heard and no call running: the work is over, said as the end of a turn is.
+        Assert.Empty(chat.Tick(record, After(50.9)));
+        var over = Kept(chat.Tick(record, After(51))).Single();
+        Assert.Equal(("result", "success", false), (Type(over), Str(over, "subtype"), over.GetProperty("is_error").GetBoolean()));
+        Assert.Equal(("idle", "Stop"), (record.AgentStatus, record.LastEvent));
+        Assert.Empty(chat.Tick(record, After(500)));
+    }
+
+    [Fact]
+    public void A_message_sent_while_the_agent_was_still_saying_something_unasked_comes_after_it()
+    {
+        var (chat, record) = AfterATurn();
+        chat.FromCli(J(Update(AgyId, Text("agent_message_chunk", "Done, the diagrams are ready."))), record, After(20));
+        var sent = chat.FromViewer(J(UserSays("Are you still working?")), record, After(20.5));
+        Assert.Equal(new[] { "assistant", "user" }, Kept(sent).Select(Type));
+        Assert.Equal(("Done, the diagrams are ready.", "Are you still working?"), (Said(Kept(sent)[0]), Said(Kept(sent)[1])));
+        Assert.Equal("session/prompt", Method(Sent(sent).Single()));
+        // The turn that message started ends the work: no second end is said for the part nobody asked for.
+        chat.FromCli(J(Response(Id(Sent(sent).Single()), Stopped("end_turn"))), record, After(30));
+        Assert.Empty(chat.Tick(record, After(600)));
+    }
+
+    [Fact]
+    public void Inside_a_turn_a_pause_ends_nothing()
+    {
+        var (chat, record, _) = OpenWith("Agy");
+        var turn = Prompt(chat, record, "think hard");
+        chat.FromCli(J(Update(AgyId, Text("agent_message_chunk", "Half a sentence"))), record, After(1));
+        Assert.Empty(chat.Tick(record, After(10)));
+        Assert.Empty(chat.Tick(record, After(1000)));
+        var ended = Kept(chat.FromCli(J(Response(Id(turn), Stopped("end_turn"))), record, After(1001)));
+        Assert.Equal(new[] { "assistant", "result" }, ended.Select(Type));
+        Assert.Equal("Half a sentence", Said(ended[0]));
+    }
+
+    [Fact]
+    public void Unasked_work_is_not_over_while_a_call_is_running_until_the_call_has_been_silent_for_ten_minutes()
+    {
+        var (chat, record) = AfterATurn();
+        chat.FromCli(J(Update(AgyId, AgyRun)), record, After(1));
+        Assert.Empty(chat.Tick(record, After(40)));
+        Assert.Empty(chat.Tick(record, After(600)));
+        Assert.Equal("busy", record.AgentStatus);
+        Assert.Equal("result", Type(Kept(chat.Tick(record, After(601))).Single()));
+        Assert.Equal("idle", record.AgentStatus);
+    }
+
+    [Fact]
+    public void A_call_that_reports_its_end_after_the_turn_and_news_that_is_not_work_start_nothing()
+    {
+        var (chat, record, _) = OpenWith("Agy");
+        var turn = Prompt(chat, record, "run it");
+        chat.FromCli(J(Update(AgyId, AgyRun)), record, After(1));
+        chat.FromCli(J(Response(Id(turn), Stopped("end_turn"))), record, After(2));
+        // The call's end arrives late, after the turn's.
+        var late = chat.FromCli(J(Update(AgyId, AgyRunDone)), record, After(3));
+        Assert.Empty(Passed(late));
+        Assert.Equal("idle", record.AgentStatus);
+        Assert.Empty(Passed(chat.FromCli(J(Update(AgyId, ThreeCommands)), record, After(4))));
+        Assert.DoesNotContain(Passed(chat.FromCli(J(Update(AgyId, Text("agent_message_chunk", ""))), record, After(5))), l => Type(l) == "system");
+        Assert.Equal("idle", record.AgentStatus);
+        // A chunk with nothing in it is not something said: nothing is kept for it either.
+        Assert.Empty(chat.Tick(record, After(60)));
+    }
+
+    [Fact]
+    public void Codex_waits_on_no_pause()
+    {
+        var record = new HostRecord();
+        Assert.Empty(new CodexChat(Cwd, "", "", "", CodexChat.Full).Tick(record, After(1000)));
+    }
+
     // ---- the agent's skills ----
 
     const string ThreeCommands = """{"sessionUpdate":"available_commands_update","availableCommands":[{"name":"goal","description":"Run until done"},{"name":"plan","description":"Plan first"},{"name":"old-skill","description":"On its way out"}]}""";

@@ -847,7 +847,8 @@
   }
 
   let markedReady = false;
-  function markdown(text) {
+  // `files`: links to files on the session's computer are kept as links (the deck opens them; a phone cannot).
+  function markdown(text, files) {
     if (!root.marked) return '<p>' + escapeHtml(text).replace(/\n/g, '<br>') + '</p>';
     if (!markedReady) {
       markedReady = true;
@@ -865,17 +866,20 @@
     try { html = root.marked.parse(text); } catch { return '<p>' + escapeHtml(text) + '</p>'; }
     const tpl = document.createElement('template');
     tpl.innerHTML = html;
-    scrub(tpl.content);
+    scrub(tpl.content, !!files);
     return tpl.innerHTML;
   }
 
   // Whatever the markdown pass produced, only plain formatting survives it: no scripts, handlers, styles or remote loads.
-  function scrub(node) {
+  // A link to a file on the computer the session runs on (`file:///C:/…` or `C:/…`), which the deck can open there.
+  const FILE_LINK = /^(file:\/\/\/[A-Za-z]:|[A-Za-z]:[\\/])/i;
+
+  function scrub(node, files) {
     for (const el of Array.from(node.querySelectorAll('*'))) {
       if (!SAFE_TAGS.has(el.tagName)) { el.replaceWith(document.createTextNode(el.textContent || '')); continue; }
       for (const attr of Array.from(el.attributes)) {
         const name = attr.name.toLowerCase();
-        if (el.tagName === 'A' && name === 'href' && /^(https?:|mailto:)/i.test(attr.value.trim())) continue;
+        if (el.tagName === 'A' && name === 'href' && (/^(https?:|mailto:)/i.test(attr.value.trim()) || (files && FILE_LINK.test(attr.value.trim())))) continue;
         if (el.tagName === 'CODE' && name === 'class' && /^language-[\w+#.-]+$/.test(attr.value)) continue;
         if ((el.tagName === 'TH' || el.tagName === 'TD') && name === 'align' && /^(left|right|center)$/.test(attr.value)) continue;
         if (el.tagName === 'INPUT' && (name === 'type' && attr.value === 'checkbox' || name === 'checked' || name === 'disabled')) continue;
@@ -1254,7 +1258,7 @@
         case 'assistant': {
           node = node || h('div', 'msg assistant md');
           node.classList.toggle('draft', !!item.draft);
-          node.innerHTML = markdown(item.text);
+          node.innerHTML = markdown(item.text, !opts.touch);
           decorate(node, !item.draft);
           return node;
         }
@@ -1289,6 +1293,8 @@
         }
       }
       for (const a of node.querySelectorAll('a[href]')) {
+        // Where a link to a file goes is not on show anywhere else (the deck has no status bar).
+        if (FILE_LINK.test(a.getAttribute('href'))) a.title = a.getAttribute('href');
         a.addEventListener('click', ev => { ev.preventDefault(); post({ type: 'open', uri: a.getAttribute('href') }); });
       }
       for (const pre of node.querySelectorAll('pre')) {
@@ -1433,7 +1439,7 @@
       const plan = h('div', 'md plan-body');
       const text = planText(item);
       if (text) {
-        plan.innerHTML = markdown(text);
+        plan.innerHTML = markdown(text, !opts.touch);
         decorate(plan, true);
         box.appendChild(plan);
       }

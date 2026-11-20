@@ -80,6 +80,8 @@ internal interface IChatAgent
     List<ChatEffect> FromCli(JsonElement message, HostRecord record, DateTime now);
     /// <summary>One line a viewer typed or clicked.</summary>
     List<ChatEffect> FromViewer(JsonElement line, HostRecord record, DateTime now);
+    /// <summary>Called about once a second while the agent's process runs: what follows from time having passed with nothing said.</summary>
+    List<ChatEffect> Tick(HostRecord record, DateTime now);
     /// <summary>The conversation before the message a viewer names as its oldest.</summary>
     List<ChatEffect> History(string request, string uuid, string tag);
     /// <summary>The conversations there are to move to.</summary>
