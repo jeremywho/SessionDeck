@@ -68,4 +68,36 @@ public class OutsideLinkTests
     [InlineData("C:diagram.png")]
     [InlineData("file:///etc/passwd")]
     public void Another_machines_share_a_relative_path_and_every_other_kind_of_link_do_nothing(string? link) => Assert.Equal((OutsideLink.Kind.None, ""), Decide(link));
+
+    [Theory]
+    [InlineData(@"\\fileserver\share\a.cs")]
+    [InlineData(@"\\fileserver\share\a.cs#L10")]
+    [InlineData("//fileserver/share/a.cs#L10")]
+    [InlineData("file://fileserver/share/diagram.png")]
+    [InlineData("file:////fileserver/share/diagram.png")]
+    [InlineData("file://localhost/C:/work/out/diagram.png")]
+    [InlineData(@"\\?\UNC\fileserver\share\a.cs#L10")]
+    public void A_share_on_another_machine_is_never_asked_about_not_even_whether_the_file_is_there(string link)
+    {
+        // Asking is the leak: Windows offers this account's credentials to the machine named.
+        var asked = new List<string>();
+        var decided = OutsideLink.Decide(link, p => { asked.Add(p); return true; }, p => { asked.Add(p); return true; });
+        Assert.Equal((OutsideLink.Kind.None, ""), decided);
+        Assert.Empty(asked);
+    }
+
+    [Theory]
+    [InlineData("out/diagram.png")]
+    [InlineData("./diagram.png")]
+    [InlineData("diagram.png")]
+    [InlineData("C:diagram.png")]
+    [InlineData("/etc/passwd")]
+    [InlineData("file:///etc/passwd")]
+    [InlineData("C:/work/out/nul")]
+    [InlineData("file:///C:/work/out/nul")]
+    [InlineData("C:/work/out/setup.exe:diagram.png")]
+    [InlineData("file:///C:/work/out/setup.exe:diagram.png")]
+    public void Nothing_is_opened_for_a_path_that_is_not_a_plain_file_on_a_drive_even_where_such_a_file_exists(string link) =>
+        // Every file and folder "exists" here: what is refused is refused for what the link says, not for what is on the disk.
+        Assert.Equal((OutsideLink.Kind.None, ""), OutsideLink.Decide(link, _ => true, _ => true));
 }

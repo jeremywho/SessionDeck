@@ -43,19 +43,22 @@ internal static class OutsideLink
         string path;
         if (uri.StartsWith("file:", StringComparison.OrdinalIgnoreCase))
         {
-            if (!Uri.TryCreate(uri, UriKind.Absolute, out var parsed) || !parsed.IsFile || parsed.IsUnc || parsed.Host.Length > 0) return null;
+            if (!Uri.TryCreate(uri, UriKind.Absolute, out var parsed)) return null;
             path = parsed.LocalPath;
         }
-        else
-        {
-            path = uri.Replace('/', '\\');
-            // An agent may point at a line (`file.cs#L10`): the file is what can be opened.
-            int mark = path.IndexOf('#');
-            if (mark > 0 && !fileExists(path)) path = path[..mark];
-        }
-        if (path.Length < 3 || !char.IsAsciiLetter(path[0]) || path[1] != ':' || path[2] != '\\') return null;
+        else path = uri.Replace('/', '\\');
+        // Decided from the text alone, before the file system is asked anything: asking whether a file on a share exists is already the request.
+        if (!OnADrive(path)) return null;
+        // An agent may point at a line (`file.cs#L10`): the file is what can be opened.
+        int mark = path.IndexOf('#');
+        if (mark > 0 && !fileExists(path)) path = path[..mark];
         try { path = Path.GetFullPath(path); }
         catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException) { return null; }
-        return path.Length >= 3 && char.IsAsciiLetter(path[0]) && path[1] == ':' && path[2] == '\\' ? path : null;
+        // A device name inside a folder comes back as \\.\nul.
+        return OnADrive(path) ? path : null;
     }
+
+    /// <summary>A full path on a lettered drive, naming no stream of a file (<c>C:\a.exe:b.png</c> reads as a picture and is not one).</summary>
+    static bool OnADrive(string path) =>
+        path.Length >= 3 && char.IsAsciiLetter(path[0]) && path[1] == ':' && path[2] == '\\' && path.IndexOf(':', 2) < 0;
 }
