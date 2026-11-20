@@ -426,8 +426,12 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
     left running across a reload are untested.
   - A command entry is a name and a description. Nothing says which is a skill and which is built in, so
     the list does not sort them (agy's terminal does: workspace, global, built-in).
-  - "Updated" means a description changed. A skill whose body changed and description did not reads as no
-    change; whether the agent then runs the new body was not measured.
+  - A reload is about the list. agy reads a skill's body when the skill is used (measured: a body edited in
+    an open conversation ran, new, on the next use with no reload), so an edit never needs one. What needs
+    one is a skill that is new, gone, or described differently; "Updated" means the description changed,
+    and a reload that finds nothing says the list is the same, not that nothing changed.
+  - Started with `--dangerously-skip-permissions`, as the deck starts it, agy asked for no approval after
+    being reattached (measured: a file read after three reloads).
   - The pane gives up on an answer after 15 s (`skills` in `chat.js`), and the phone's relay lets the
     request through (`AttachRelay.AllowedTowardHost`).
 - **A Claude chat whose turn ends with background agents still running is "scheduled", not idle**

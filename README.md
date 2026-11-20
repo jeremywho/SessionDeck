@@ -159,7 +159,8 @@ wrapper through restarts, reboots and `/resume`, and show as "Claude as swift". 
 the session at once without a turn: the name goes to the agent where it keeps names (Claude,
 Codex) and is kept by Session Deck where it does not (AGY, OpenCode). In an AGY chat `/skills` lists the
 commands and skills Antigravity offers and `/skills reload` has it read them from disk again, so a skill
-written or edited while the chat is open can be used without restarting it; neither is a turn.
+written while the chat is open shows up and can be used without restarting it; neither is a turn. (An edit
+to a skill you already have needs no reload: Antigravity reads a skill when it is used.)
 
 ## Docking
 Right-click the tray icon → **Dock to** → an edge or corner, and the window **snaps there on the

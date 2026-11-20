@@ -612,12 +612,13 @@
       : `${agent} has said no commands or skills. /skills reload reads them from disk.`;
   }
 
-  // What reading them again found, as one line.
+  // What reading them again found, as one line. It is the list that is compared: a skill's body is read when the
+  // skill is used, so an edit to one is in force either way, and "the same" must not read as "your edit was ignored".
   function reloadNote(msg) {
     const parts = [['Added', msg.added], ['Removed', msg.removed], ['Updated', msg.changed]]
       .filter(([, names]) => Array.isArray(names) && names.length)
       .map(([what, names]) => `${what}: ${names.map(n => '/' + n).join(', ')}.`);
-    return parts.length ? 'Skills reloaded. ' + parts.join(' ') : `Skills reloaded: no changes (${Number(msg.count) || 0} commands and skills).`;
+    return parts.length ? 'Skills reloaded. ' + parts.join(' ') : `Skills reloaded: the same ${Number(msg.count) || 0} commands and skills.`;
   }
 
   // An agent that serves several providers lists each model as "provider/Name" under the id "provider/model"

@@ -1132,12 +1132,12 @@ test('the list of skills is one line naming each, and says so when there are non
   assert.equal(skillsNote('Antigravity', []), 'Antigravity has said no commands or skills. /skills reload reads them from disk.');
 });
 
-test('a reload says what was added, removed and updated, or that nothing changed', () => {
+test('a reload says what was added, removed and updated, or that the list is the same', () => {
   const { reloadNote } = require('../../wwwroot/chat.js');
-  assert.equal(reloadNote({ ok: true, count: 15, added: [], removed: [], changed: [] }), 'Skills reloaded: no changes (15 commands and skills).');
+  assert.equal(reloadNote({ ok: true, count: 15, added: [], removed: [], changed: [] }), 'Skills reloaded: the same 15 commands and skills.');
   assert.equal(reloadNote({ ok: true, count: 16, added: ['rigprobe-two'], removed: [], changed: [] }), 'Skills reloaded. Added: /rigprobe-two.');
   assert.equal(reloadNote({ ok: true, count: 15, added: ['a', 'b'], removed: ['c'], changed: ['d'] }), 'Skills reloaded. Added: /a, /b. Removed: /c. Updated: /d.');
   // A host that says less than this is read as having said nothing changed.
-  assert.equal(reloadNote({ ok: true }), 'Skills reloaded: no changes (0 commands and skills).');
-  assert.equal(reloadNote({ ok: true, count: 3, added: 'x', removed: null }), 'Skills reloaded: no changes (3 commands and skills).');
+  assert.equal(reloadNote({ ok: true }), 'Skills reloaded: the same 0 commands and skills.');
+  assert.equal(reloadNote({ ok: true, count: 3, added: 'x', removed: null }), 'Skills reloaded: the same 3 commands and skills.');
 });
