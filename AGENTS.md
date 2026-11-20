@@ -405,6 +405,31 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
   restart that starts it fresh hands the name on with `--name` (`HostManager.NameCarried`). An AGY
   chat's row is named by its host, not by a `/rename` once typed into an AGY terminal
   (`SessionPipeline.ApplyAgyNames` leaves chats alone).
+- **`/skills` and `/skills reload` in an Antigravity chat are the host's, and never a turn.** They are the
+  two forms agy's own terminal has ("Usage: /skills List available skills /skills reload Reload skills from
+  disk", read out of agy 1.5.13); its chat protocol advertises 14 commands and that one is not among them.
+  The protocol has no request that re-reads skills, and agy does not watch the disk (a skill written while
+  it runs is not announced). What it does do is read them whenever a conversation is attached to, so the
+  host attaches to the one already open: `session/resume` with the open session's id (`AcpChat.Commands`).
+  Measured on 1.5.13: nothing is replayed, the conversation keeps its context and its settings, and one
+  `available_commands_update` follows the answer. The asking viewer is answered then
+  (`{"type":"commands","ok","count","added","removed","changed"}`), with the difference worked out from the
+  names and descriptions; every viewer gets the new catalog as always. Rules that follow:
+  - Offered only where it was measured to work: the catalog says `reload: true` when the agent says it can
+    be reattached (`sessionCapabilities.resume`) AND `AcpChat.RereadsCommands` names it. OpenCode 2.2.6 can
+    be reattached too and answers with the list it already had (it reads a command's file when the command
+    is used, so a new one works at once and only its menu entry is missing until the host restarts): it is
+    not offered there, and `/skills` typed into any other chat goes to the agent as words. No
+    `ChatStream.Revision` bump: the flag is in the catalog, so only a host started after the update has it.
+  - Refused during a turn or while the session opens or moves, and what is typed while the agent has not
+    answered waits for it (`_resuming`): only a conversation at rest was measured. `/schedule` and `/goal`
+    left running across a reload are untested.
+  - A command entry is a name and a description. Nothing says which is a skill and which is built in, so
+    the list does not sort them (agy's terminal does: workspace, global, built-in).
+  - "Updated" means a description changed. A skill whose body changed and description did not reads as no
+    change; whether the agent then runs the new body was not measured.
+  - The pane gives up on an answer after 15 s (`skills` in `chat.js`), and the phone's relay lets the
+    request through (`AttachRelay.AllowedTowardHost`).
 - **A Claude chat whose turn ends with background agents still running is "scheduled", not idle**
   (`ChatStream`, measured on 2.1.325). The CLI says the whole set of running background tasks in
   `system background_tasks_changed` (replace, not delta); agents are `local_agent`, `remote_agent`,

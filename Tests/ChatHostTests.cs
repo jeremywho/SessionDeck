@@ -566,8 +566,14 @@ public class ChatHostTests : IDisposable
             $m = $line | ConvertFrom-Json
             if ($null -eq $m.id) { continue }
             switch ($m.method) {
-                'initialize' { Say @{ jsonrpc = '2.0'; id = $m.id; result = @{ protocolVersion = 1; agentCapabilities = @{ loadSession = $true; sessionCapabilities = @{ list = @{} } }; agentInfo = @{ name = 'Fake ACP'; version = '1' } } } }
-                'session/new' { Say @{ jsonrpc = '2.0'; id = $m.id; result = @{ sessionId = $session; configOptions = @(@{ id = 'model'; name = 'Model'; category = 'model'; type = 'select'; currentValue = 'fake-model'; options = @(@{ value = 'fake-model'; name = 'Fake Model' }) }, @{ id = 'effort'; name = 'Effort'; category = 'thought_level'; type = 'select'; currentValue = 'low'; options = @(@{ value = 'low'; name = 'Low' }) }) } } }
+                'initialize' { Say @{ jsonrpc = '2.0'; id = $m.id; result = @{ protocolVersion = 1; agentCapabilities = @{ loadSession = $true; sessionCapabilities = @{ list = @{}; resume = @{} } }; agentInfo = @{ name = 'Fake ACP'; version = '1' } } } }
+                'session/resume' {
+                    Say @{ jsonrpc = '2.0'; id = $m.id; result = @{ sessionId = $session } }
+                    Say @{ jsonrpc = '2.0'; method = 'session/update'; params = @{ sessionId = $session; update = @{ sessionUpdate = 'available_commands_update'; availableCommands = @(@{ name = 'goal'; description = 'Run until done' }, @{ name = 'fresh-skill'; description = 'Just written' }) } } }
+                }
+                'session/new' { Say @{ jsonrpc = '2.0'; id = $m.id; result = @{ sessionId = $session; configOptions = @(@{ id = 'model'; name = 'Model'; category = 'model'; type = 'select'; currentValue = 'fake-model'; options = @(@{ value = 'fake-model'; name = 'Fake Model' }) }, @{ id = 'effort'; name = 'Effort'; category = 'thought_level'; type = 'select'; currentValue = 'low'; options = @(@{ value = 'low'; name = 'Low' }) }) } }
+                    Say @{ jsonrpc = '2.0'; method = 'session/update'; params = @{ sessionId = $session; update = @{ sessionUpdate = 'available_commands_update'; availableCommands = @(@{ name = 'goal'; description = 'Run until done' }) } } }
+                }
                 'session/prompt' {
                     $text = $m.params.prompt[0].text
                     Say @{ jsonrpc = '2.0'; method = 'session/update'; params = @{ sessionId = $session; update = @{ sessionUpdate = 'agent_message_chunk'; messageId = 'msg_fake_1'; content = @{ type = 'text'; text = "echo: $text in $($m.params.sessionId)" } } } }
@@ -629,6 +635,44 @@ public class ChatHostTests : IDisposable
         Assert.Equal(new[] { "user", "assistant", "result" }, second.Select(Type));
         Assert.Equal(("again", "echo: again in " + Session), (Said(second[0]), Said(second[1])));
         Assert.Equal("named here", Record().Title);
+
+        await viewer.SendFrame("""{"type":"kill"}""");
+        await viewer.Exited();
+        Assert.True(_host!.WaitForExit(15000), "host did not exit after it was told to end");
+    }
+
+    [Fact]
+    public async Task An_antigravity_chat_host_has_the_agent_read_its_skills_again_when_a_viewer_asks()
+    {
+        string script = Path.Combine(_dir, "fake-acp.ps1");
+        File.WriteAllText(script, FakeAcp);
+        await Start(new HostSpec
+        {
+            Id = "chattest0001", SessionId = "", Provider = "Agy", Kind = ChatStream.Kind,
+            CommandLine = $"\"{SessionLauncher.ResolvePowerShell()}\" -NoLogo -NoProfile -File \"{script}\"",
+            Cwd = _dir, HostsDir = Path.Combine(_dir, "hosts"), RingBytes = 256 * 1024,
+        });
+        const string Session = "ses_fakeacp00000000000000001";
+        var record = await RecordWhen(r => r.SessionId == Session && r.Model == "fake-model");
+        using var viewer = await Viewer.Attach(record, after: 0);
+        await viewer.Pump(() => viewer.Catalog is { } c && c.GetProperty("commands").GetArrayLength() == 1);
+        Assert.True(viewer.Catalog!.Value.GetProperty("reload").GetBoolean());
+
+        await viewer.Send(ChatStream.UserLine("before"));
+        await viewer.Until(l => Type(l) == "result");
+        await RecordWhen(r => r.AgentStatus == "idle" && r.LastEvent == "Stop");
+
+        await viewer.SendFrame("""{"type":"commands","request":"c1"}""");
+        var answer = await viewer.NextAnswer();
+        Assert.Equal(("commands", "c1", true, 2), (Type(answer), answer.GetProperty("request").GetString(), answer.GetProperty("ok").GetBoolean(), answer.GetProperty("count").GetInt32()));
+        Assert.Equal(new[] { "fresh-skill" }, answer.GetProperty("added").EnumerateArray().Select(n => n.GetString()));
+        Assert.Equal(new[] { "goal", "fresh-skill" }, viewer.Catalog!.Value.GetProperty("commands").EnumerateArray().Select(c => c.GetProperty("name").GetString()));
+
+        // The conversation is the same one, at rest, and takes the next message.
+        Assert.Equal((Session, "idle"), (Record().SessionId, Record().AgentStatus));
+        await viewer.Send(ChatStream.UserLine("after"));
+        var turn = await viewer.Until(l => Type(l) == "result");
+        Assert.Equal("echo: after in " + Session, Said(turn[1]));
 
         await viewer.SendFrame("""{"type":"kill"}""");
         await viewer.Exited();
@@ -740,7 +784,7 @@ public class ChatHostTests : IDisposable
                 switch (Type(frame))
                 {
                     case "snapshot": Snapshot = frame; Snapshots.Add(frame); break;
-                    case "sessions": case "resumed": case "renamed": _answers.Enqueue(frame); break;
+                    case "sessions": case "resumed": case "renamed": case "commands": _answers.Enqueue(frame); break;
                     case "live": Live.Add(frame.GetProperty("line").Clone()); break;
                     case "title": Titles.Add(frame.GetProperty("title").GetString() ?? ""); break;
                     case "catalog": Catalog = frame; break;

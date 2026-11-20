@@ -442,6 +442,16 @@ public class CodexChatTests
     }
 
     [Fact]
+    public void Codex_is_not_asked_to_reload_skills_and_the_viewer_is_told_it_cannot()
+    {
+        var (chat, _) = Open();
+        var refused = chat.Commands("c1", "viewer-a").Single();
+        var frame = J(Encoding.UTF8.GetString(refused.Data));
+        Assert.Equal((ChatEffectKind.Reply, "viewer-a", "commands", "c1", false, "Codex cannot reload its skills in a chat."),
+            (refused.Kind, refused.Tag, frame.GetProperty("type").GetString(), frame.GetProperty("request").GetString(), frame.GetProperty("ok").GetBoolean(), frame.GetProperty("error").GetString()));
+    }
+
+    [Fact]
     public void A_rename_is_codexs_own_request_and_no_turn()
     {
         var (chat, record) = Open();

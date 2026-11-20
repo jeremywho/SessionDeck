@@ -40,8 +40,9 @@ internal static class AttachRelay
             using var doc = JsonDocument.Parse(message.ToArray());
             if (doc.RootElement.ValueKind != JsonValueKind.Object || !doc.RootElement.TryGetProperty("type", out var t) || t.ValueKind != JsonValueKind.String) return false;
             // Asking a chat host for earlier conversation changes nothing on the desktop: it only reads.
-            // Requests a chat pane makes of its host: to read earlier conversation, to list the conversations in the folder, to move to one.
-            if (t.GetString() is "history" or "sessions" or "resume" or "rename") return true;
+            // Requests a chat pane makes of its host: to read earlier conversation, to list the conversations in the folder, to move to one,
+            // to name it, to have the agent read its commands again.
+            if (t.GetString() is "history" or "sessions" or "resume" or "rename" or "commands") return true;
             return t.GetString() == "input" && doc.RootElement.TryGetProperty("data", out var d) && d.ValueKind == JsonValueKind.String;
         }
         catch (JsonException) { return false; }

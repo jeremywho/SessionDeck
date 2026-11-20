@@ -113,7 +113,7 @@
     // Without one, times come from the session's lines alone.
     constructor(now) {
       this.now = typeof now === 'function' ? now : null;
-      this.catalog = { models: [], commands: [], modes: MODES, agent: 'Claude' };
+      this.catalog = { models: [], commands: [], modes: MODES, agent: 'Claude', reload: false };
       this.settings = { mode: '', model: '', effort: '', resume: '' };
       this.reset();
     }
@@ -238,6 +238,8 @@
         commands: Array.isArray(frame.commands) ? frame.commands : [],
         modes: Array.isArray(frame.modes) && frame.modes.every(m => Array.isArray(m) && m.length >= 2) ? frame.modes : MODES,
         agent: typeof frame.agent === 'string' && frame.agent ? frame.agent : 'Claude',
+        // Whether this host can have the agent read its commands and skills from disk again (`/skills reload`).
+        reload: frame.reload === true,
       };
     }
 
@@ -585,10 +587,37 @@
   // Naming the session is the host's to do (revision 5). Typed to an agent it is a prompt like any other: a turn
   // spent on a name. Before revision 5 the text goes on as typed, which the Claude CLI at least takes as its own command.
   const RENAME = { name: 'rename', description: 'Name this session', hint: '<name>' };
-  function offeredCommands(commands, hostRevision) {
+  // `bare`: what follows the name is optional, so Enter on it in the menu runs it as it stands (Tab completes it to add more).
+  const SKILLS = { name: 'skills', description: 'List skills and commands, or reload them', hint: '[reload]', bare: true };
+  function offeredCommands(commands, hostRevision, reload) {
     if (hostRevision < 4) return commands;
-    const own = hostRevision >= 5 ? [RESUME, RENAME] : [RESUME];
+    const own = (hostRevision >= 5 ? [RESUME, RENAME] : [RESUME]).concat(reload ? [SKILLS] : []);
     return own.concat(commands.filter(c => !own.some(o => o.name === c.name)));
+  }
+
+  // What `/skills` asks for: 'list' (said alone), 'reload', or 'usage' for anything else said after it; null when the
+  // message is not that command. The two forms are the ones the agent's own terminal has.
+  function skillsAsked(message) {
+    const m = /^\/skills(?:\s+([\s\S]*))?$/.exec(message.trim());
+    if (!m) return null;
+    const rest = (m[1] || '').trim().toLowerCase();
+    return rest === '' || rest === 'list' ? 'list' : rest === 'reload' ? 'reload' : 'usage';
+  }
+
+  // The commands and skills an agent offers, as one line. The protocol says a name and a description for each and
+  // not which is a skill, so they are not told apart here.
+  function skillsNote(agent, commands) {
+    const names = commands.map(c => '/' + c.name);
+    return names.length ? `${agent} offers ${names.length} commands and skills: ${names.join(', ')}. /skills reload reads them again from disk.`
+      : `${agent} has said no commands or skills. /skills reload reads them from disk.`;
+  }
+
+  // What reading them again found, as one line.
+  function reloadNote(msg) {
+    const parts = [['Added', msg.added], ['Removed', msg.removed], ['Updated', msg.changed]]
+      .filter(([, names]) => Array.isArray(names) && names.length)
+      .map(([what, names]) => `${what}: ${names.map(n => '/' + n).join(', ')}.`);
+    return parts.length ? 'Skills reloaded. ' + parts.join(' ') : `Skills reloaded: no changes (${Number(msg.count) || 0} commands and skills).`;
   }
 
   // An agent that serves several providers lists each model as "provider/Name" under the id "provider/model"
@@ -804,7 +833,7 @@
     return modes;
   }
 
-  const api = { ChatModel, timeLabel, since, pauseBefore, PAUSE_MS, LineReader, Wire, toolBrief, textOf, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText, liveStep, taskRunning, asks, offeredCommands, renameAsked, modelLabel, Recall, filterSessions, ago, startsOver, clampWide, diffKind };
+  const api = { ChatModel, timeLabel, since, pauseBefore, PAUSE_MS, LineReader, Wire, toolBrief, textOf, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText, liveStep, taskRunning, asks, offeredCommands, renameAsked, skillsAsked, skillsNote, reloadNote, modelLabel, Recall, filterSessions, ago, startsOver, clampWide, diffKind };
   if (typeof module !== 'undefined' && module.exports) { module.exports = api; return; }
 
   // ================= the page side =================
@@ -1100,6 +1129,7 @@
       working.hidden = state !== 'busy';
       stateText.textContent = preparing ? 'Preparing image…'
         : resuming ? 'Resuming…'
+        : reloading ? 'Reloading skills…'
         : state === 'waiting' ? 'Answer required'
         : state === 'ended' ? (model.ended === '' ? 'Session ended' : `Session ended (exit ${model.ended})`)
         : state === 'offline' ? 'Reconnecting…'
@@ -1635,6 +1665,9 @@
       if (text === '/' + RESUME.name && !taken.length && hostRevision >= 4) { openPicker(); return; }
       const naming = taken.length || hostRevision < 5 ? null : renameAsked(text);
       if (naming !== null) { rename(naming); return; }
+      // Only where the host can do it: anywhere else the words go to the agent, which may have a /skills of its own.
+      const wanted = taken.length || !model.catalog.reload ? null : skillsAsked(text);
+      if (wanted !== null) { skills(wanted); return; }
       let images = [];
       if (taken.length) {
         preparing = true;
@@ -1754,6 +1787,48 @@
       grow();
     }
 
+    // ---- the agent's skills ----
+
+    // The reload asked of the host and not yet answered, with the timer that gives up on it.
+    let reloading = null;
+
+    function endReload() {
+      if (reloading) clearTimeout(reloading.timer);
+      reloading = null;
+    }
+
+    function skills(what) {
+      const agent = model.catalog.agent;
+      if (what === 'reload') {
+        if (!ws || ws.readyState !== WebSocket.OPEN || reloading) return;
+        const request = 'c' + nextAsk++;
+        // The host answers when the agent has said its commands again. One that never does is not waited on for ever.
+        const timer = setTimeout(() => {
+          if (!reloading || reloading.request !== request) return;
+          reloading = null;
+          model.add({ kind: 'note', tone: 'error', text: `${agent} did not answer the reload.` });
+          schedule();
+        }, 15000);
+        reloading = { request, timer };
+        ws.send(JSON.stringify({ type: 'commands', request }));
+      } else {
+        model.add({ kind: 'note', tone: 'plain', text: what === 'list' ? skillsNote(agent, model.catalog.commands)
+          : 'Usage: /skills lists the skills and commands, /skills reload reads them again from disk.' });
+      }
+      input.value = '';
+      keepDraft();
+      paintMenu();
+      grow();
+      schedule();
+    }
+
+    function gotCommands(msg) {
+      if (!reloading || msg.request !== reloading.request) return;
+      endReload();
+      model.add(msg.ok ? { kind: 'note', tone: 'plain', text: reloadNote(msg) }
+        : { kind: 'note', tone: 'error', text: String(msg.error || 'The skills were not reloaded.') });
+    }
+
     function gotRenamed(msg) {
       model.add(msg.ok ? { kind: 'note', tone: 'plain', text: 'Renamed to “' + String(msg.name || '') + '”' }
         : { kind: 'note', tone: 'error', text: String(msg.error || 'The session was not renamed.') });
@@ -1861,7 +1936,7 @@
       if (choosing) { paintPicker(); return; }
       menu.classList.remove('resume');
       const query = commandQuery(input.value);
-      menuItems = query === null || menuClosedFor === input.value ? [] : matchCommands(offeredCommands(model.catalog.commands, hostRevision), query);
+      menuItems = query === null || menuClosedFor === input.value ? [] : matchCommands(offeredCommands(model.catalog.commands, hostRevision, model.catalog.reload), query);
       if (menuClosedFor !== null && menuClosedFor !== input.value) menuClosedFor = null;
       if (menuActive >= menuItems.length) menuActive = 0;
       menu.hidden = menuItems.length === 0;
@@ -1889,7 +1964,7 @@
 
     // Tab completes the name; Enter runs a command that takes nothing more, and completes one that does.
     function choose(command, run) {
-      if (run && !command.hint) { input.value = '/' + command.name; submit(); return; }
+      if (run && (!command.hint || command.bare)) { input.value = '/' + command.name; submit(); return; }
       input.value = '/' + command.name + ' ';
       input.setSelectionRange(input.value.length, input.value.length);
       grow();
@@ -1972,6 +2047,7 @@
           else if (msg.type === 'sessions') { gotSessions(msg); return; }
           else if (msg.type === 'resumed') notResumed(msg);
           else if (msg.type === 'renamed') gotRenamed(msg);
+          else if (msg.type === 'commands') gotCommands(msg);
           else if (msg.type === 'catalog') { model.setCatalog(msg); paintMenu(); }
           else if (msg.type === 'settings') { hostTakesImages = true; model.setSettings(msg); }
           else if (msg.type === 'title') post({ type: 'title', id, title: msg.title });
@@ -1990,6 +2066,7 @@
         connected = false;
         asked = '';
         resuming = '';
+        endReload();
         closePicker();
         schedule();
         if (closed) return;
@@ -2038,6 +2115,7 @@
         resized.disconnect();
         widePanes.delete(applyWide);
         clocks.delete(retime);
+        endReload();
         try { if (ws) ws.close(); } catch { }
         for (const shot of shots) URL.revokeObjectURL(shot.url);
         for (const item of model.items) for (const url of item.images || []) URL.revokeObjectURL(url);

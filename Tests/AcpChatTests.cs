@@ -1059,6 +1059,140 @@ public class AcpChatTests
         Assert.False(AcpChat.IsSessionId(new string('a', 129)));
     }
 
+    // ---- the agent's skills ----
+
+    const string ThreeCommands = """{"sessionUpdate":"available_commands_update","availableCommands":[{"name":"goal","description":"Run until done"},{"name":"plan","description":"Plan first"},{"name":"old-skill","description":"On its way out"}]}""";
+    const string ReloadedCommands = """{"sessionUpdate":"available_commands_update","availableCommands":[{"name":"goal","description":"Run until done"},{"name":"plan","description":"Plan carefully first"},{"name":"fresh-skill","description":"Just written"}]}""";
+
+    static (ChatEffectKind Kind, string Tag, string Type, string Request, bool Ok) Head(ChatEffect e) =>
+        (e.Kind, e.Tag, Type(Of(e)), Str(Of(e), "request"), Of(e).GetProperty("ok").GetBoolean());
+    static string[] Names(JsonElement frame, string list) => frame.GetProperty(list).EnumerateArray().Select(n => n.GetString() ?? "").ToArray();
+
+    [Fact]
+    public void Only_an_agent_measured_to_read_its_skills_again_when_reattached_offers_a_reload()
+    {
+        var (_, _, agy) = OpenWith("Agy");
+        Assert.True(Frames(agy).Single(f => Type(f) == "catalog").GetProperty("reload").GetBoolean());
+        Assert.True(AcpChat.RereadsCommands("Agy"));
+        Assert.False(AcpChat.RereadsCommands("OpenCode"));
+
+        // OpenCode can be reattached too, and answers with the list it had: it is not offered there, and a request is refused.
+        var (opencode, _, oc) = OpenWith("OpenCode");
+        Assert.False(Frames(oc).Single(f => Type(f) == "catalog").GetProperty("reload").GetBoolean());
+        var refused = opencode.Commands("c1", "viewer-a").Single();
+        Assert.Equal((ChatEffectKind.Reply, "viewer-a", "commands", "c1", false), Head(refused));
+        Assert.Equal("OpenCode cannot reload its skills in a chat.", Str(Of(refused), "error"));
+
+        // An Antigravity that does not say it can be reattached is not asked to be.
+        var bare = new AcpChat("Agy", Cwd, "", "", "", "");
+        var record = new HostRecord();
+        var create = Sent(bare.FromCli(J(Response(Id(Sent(bare.Start()).Single()), BareInit)), record, T0)).Single();
+        var opened = bare.FromCli(J(Response(Id(create), AgyNew)), record, T0);
+        Assert.False(Frames(opened).Single(f => Type(f) == "catalog").GetProperty("reload").GetBoolean());
+        Assert.Equal("Antigravity cannot reload its skills in a chat.", Str(Of(bare.Commands("c2", "viewer-a").Single()), "error"));
+    }
+
+    [Fact]
+    public void A_reload_reattaches_to_the_open_conversation_and_answers_when_the_agent_says_its_commands_again()
+    {
+        var (chat, record, _) = OpenWith("Agy");
+        chat.FromCli(J(Update(AgyId, ThreeCommands)), record, T0);
+        string settings = chat.SettingsFrame();
+
+        var asked = chat.Commands("c1", "viewer-a");
+        var resume = Assert.Single(asked);
+        Assert.Equal(ChatEffectKind.ToCli, resume.Kind);
+        Assert.Equal(("session/resume", AgyId, Cwd, 0), (Method(Of(resume)), Str(Params(Of(resume)), "sessionId"), Str(Params(Of(resume)), "cwd"), Params(Of(resume)).GetProperty("mcpServers").GetArrayLength()));
+
+        // The agent answers with the session's settings as it has them. Nothing of the answer is taken, and nobody is told anything yet.
+        string otherSettings = "{\"sessionId\":\"" + AgyId + "\",\"configOptions\":" + AgyOptions.Replace("\"currentValue\":\"gemini-4-carbon\"", "\"currentValue\":\"gemini-4-argon\"") + "}";
+        Assert.Contains("gemini-4-argon", otherSettings);
+        Assert.Empty(chat.FromCli(J(Response(Id(Of(resume)), otherSettings)), record, T0));
+        Assert.Equal(settings, chat.SettingsFrame());
+
+        // Then it says its commands: every viewer gets the list, and the one that asked is told what is different.
+        var told = chat.FromCli(J(Update(AgyId, ReloadedCommands)), record, T0);
+        Assert.Equal(new[] { ChatEffectKind.Frame, ChatEffectKind.Reply }, told.Select(e => e.Kind));
+        Assert.Equal(new[] { "goal", "plan", "fresh-skill" }, Of(told[0]).GetProperty("commands").EnumerateArray().Select(c => Str(c, "name")));
+        Assert.Equal((ChatEffectKind.Reply, "viewer-a", "commands", "c1", true), Head(told[1]));
+        var answer = Of(told[1]);
+        Assert.Equal(3, answer.GetProperty("count").GetInt32());
+        Assert.Equal(new[] { "fresh-skill" }, Names(answer, "added"));
+        Assert.Equal(new[] { "old-skill" }, Names(answer, "removed"));
+        Assert.Equal(new[] { "plan" }, Names(answer, "changed"));
+
+        // Its commands said again later, unasked, are for everyone and an answer to nobody.
+        Assert.Equal(new[] { ChatEffectKind.Frame }, chat.FromCli(J(Update(AgyId, ThreeCommands)), record, T0).Select(e => e.Kind));
+    }
+
+    [Fact]
+    public void A_reload_that_finds_nothing_different_says_so()
+    {
+        var (chat, record, _) = OpenWith("Agy");
+        chat.FromCli(J(Update(AgyId, ThreeCommands)), record, T0);
+        var resume = Sent(chat.Commands("c1", "viewer-a")).Single();
+        chat.FromCli(J(Response(Id(resume), AgyNew)), record, T0);
+        var answer = Of(chat.FromCli(J(Update(AgyId, ThreeCommands)), record, T0).Single(e => e.Kind == ChatEffectKind.Reply));
+        Assert.Equal((3, 0, 0, 0), (answer.GetProperty("count").GetInt32(), Names(answer, "added").Length, Names(answer, "removed").Length, Names(answer, "changed").Length));
+    }
+
+    [Fact]
+    public void A_reload_waits_for_the_turn_to_end_and_what_is_typed_while_it_runs_waits_for_it()
+    {
+        var early = new AcpChat("Agy", Cwd, "", "", "", "");
+        early.FromCli(J(Response(Id(Sent(early.Start()).Single()), AgyInit)), new HostRecord(), T0);
+        Assert.Equal("The session is still opening.", Str(Of(early.Commands("c0", "viewer-a").Single()), "error"));
+
+        var (chat, record, _) = OpenWith("Agy");
+        var turn = Prompt(chat, record, "busy now");
+        var refused = chat.Commands("c1", "viewer-a").Single();
+        Assert.Equal((ChatEffectKind.Reply, "viewer-a", "commands", "c1", false), Head(refused));
+        Assert.Equal("Reload when the turn has finished.", Str(Of(refused), "error"));
+        chat.FromCli(J(Response(Id(turn), Stopped("end_turn"))), record, T0);
+
+        var resume = Sent(chat.Commands("c2", "viewer-a")).Single();
+        Assert.Equal("session/resume", Method(resume));
+        Assert.Equal("The skills are already being reloaded.", Str(Of(chat.Commands("c3", "viewer-b").Single()), "error"));
+        Assert.Equal("The session is already changing.", Str(Of(chat.Resume("r1", "11111111-1111-4111-8111-111111111111", "viewer-a").Single()), "error"));
+        // A message typed before the agent has answered is not sent into the middle of that: it is the next turn.
+        Assert.Empty(Sent(chat.FromViewer(J(UserSays("typed meanwhile")), record, T0)));
+        var after = Sent(chat.FromCli(J(Response(Id(resume), AgyNew)), record, T0)).Single();
+        Assert.Equal(("session/prompt", "typed meanwhile"), (Method(after), Str(Params(after).GetProperty("prompt")[0], "text")));
+    }
+
+    [Fact]
+    public void A_reload_the_agent_refuses_is_told_to_the_asker_and_another_can_be_asked()
+    {
+        var (chat, record, _) = OpenWith("Agy");
+        chat.FromCli(J(Update(AgyId, ThreeCommands)), record, T0);
+        var first = Sent(chat.Commands("c1", "viewer-a")).Single();
+        var failed = chat.FromCli(J(Failure(Id(first), "not now")), record, T0).Single();
+        Assert.Equal((ChatEffectKind.Reply, "viewer-a", "commands", "c1", false), Head(failed));
+        Assert.Equal("Antigravity could not reload its skills: not now", Str(Of(failed), "error"));
+        // Its commands said afterwards answer nobody: that request is over.
+        Assert.DoesNotContain(chat.FromCli(J(Update(AgyId, ThreeCommands)), record, T0), e => e.Kind == ChatEffectKind.Reply);
+
+        // An agent that answers and then never says its commands does not block the next request, which is the one answered.
+        var second = Sent(chat.Commands("c2", "viewer-a")).Single();
+        Assert.Empty(chat.FromCli(J(Response(Id(second), AgyNew)), record, T0));
+        var third = Sent(chat.Commands("c3", "viewer-b")).Single();
+        Assert.Equal("session/resume", Method(third));
+        chat.FromCli(J(Response(Id(third), AgyNew)), record, T0);
+        var answer = chat.FromCli(J(Update(AgyId, ReloadedCommands)), record, T0).Single(e => e.Kind == ChatEffectKind.Reply);
+        Assert.Equal((ChatEffectKind.Reply, "viewer-b", "commands", "c3", true), Head(answer));
+    }
+
+    [Fact]
+    public void Moving_to_another_conversation_ends_a_reload_that_was_waiting_for_the_commands()
+    {
+        var (chat, record, _) = OpenWith("Agy");
+        var resume = Sent(chat.Commands("c1", "viewer-a")).Single();
+        chat.FromCli(J(Response(Id(resume), AgyNew)), record, T0);
+        Assert.Equal("session/load", Method(Sent(chat.Resume("r1", "11111111-1111-4111-8111-111111111111", "viewer-a")).Single()));
+        // The conversation being loaded says its commands: that is its opening, not the answer to the reload.
+        Assert.DoesNotContain(chat.FromCli(J(Update("11111111-1111-4111-8111-111111111111", ReloadedCommands)), record, T0), e => e.Kind == ChatEffectKind.Reply);
+    }
+
     [Fact]
     public void A_move_is_refused_with_the_reason_when_it_cannot_be_made()
     {

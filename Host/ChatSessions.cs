@@ -251,4 +251,11 @@ internal static class ChatSessions
 
     public static byte[] NotRenamedFrame(string request, string error) =>
         JsonSerializer.SerializeToUtf8Bytes(new { type = "renamed", request, ok = false, error });
+
+    /// <summary>The answer to a viewer's <c>{"type":"commands","request":"…"}</c>: the agent read its commands and skills again, and what is different.</summary>
+    public static byte[] CommandsFrame(string request, int count, IEnumerable<string> added, IEnumerable<string> removed, IEnumerable<string> changed) =>
+        JsonSerializer.SerializeToUtf8Bytes(new { type = "commands", request, ok = true, count, added, removed, changed });
+
+    public static byte[] NoCommandsFrame(string request, string error) =>
+        JsonSerializer.SerializeToUtf8Bytes(new { type = "commands", request, ok = false, error });
 }

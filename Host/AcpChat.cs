@@ -61,6 +61,22 @@ internal sealed class AcpChat : IChatAgent
     /// <summary>The conversation being reopened: until the agent answers, its updates are the past being replayed and not something happening now.</summary>
     string? _loading;
     bool _prompting, _canList, _canLoad, _titled;
+    /// <summary>The agent can be attached to a conversation again without replaying it (<c>session/resume</c>).</summary>
+    bool _canResume;
+    /// <summary>The open conversation is being attached to again and the agent has not answered: no turn is started meanwhile.</summary>
+    bool _resuming;
+    /// <summary>A viewer asked for the commands to be read again: who, and what they were. Answered when the agent next says its commands.</summary>
+    (string Request, string Tag, Dictionary<string, string> Before)? _reload;
+
+    /// <summary>
+    /// Whether attaching to the open conversation again makes the agent read its commands and skills
+    /// from disk and say them. Measured, not assumed: Antigravity 1.5.13 does. OpenCode 2.2.6 answers
+    /// with the list it already had (it reads a command's file when the command is used, so a new one
+    /// works at once and only its list is stale).
+    /// </summary>
+    internal static bool RereadsCommands(string provider) => provider == "Agy";
+
+    bool CanReload => _canResume && RereadsCommands(_provider);
 
     /// <summary>Where the names given to conversations are kept: the protocol has no rename.</summary>
     readonly IChatNames _names;
@@ -139,7 +155,7 @@ internal sealed class AcpChat : IChatAgent
                 var prompt = Prompt(content);
                 if (prompt.GetArrayLength() == 0) break;
                 // There is no adding to a running turn in this protocol: what is typed meanwhile is the next turn.
-                if (_session.Length == 0 || _prompting || _loading != null) _waiting.Add(prompt);
+                if (_session.Length == 0 || _prompting || _loading != null || _resuming) _waiting.Add(prompt);
                 else Send(prompt, record, now, effects);
                 // OpenCode's service can fail a session once and open it the next time: a message is reason to ask again.
                 if (_unopened) { _unopened = false; effects.Add(Open()); }
@@ -266,13 +282,42 @@ internal sealed class AcpChat : IChatAgent
             : session == _session ? "That conversation is the one open here."
             : !_canLoad ? $"{NameOf(_provider)} cannot reopen a conversation."
             : _prompting ? "Stop the current turn first."
-            : _loading != null || _session.Length == 0 ? "The session is already changing." : "";
+            : _loading != null || _resuming || _session.Length == 0 ? "The session is already changing." : "";
         if (refusal.Length > 0) return new() { new Effect(Kind.Reply, ChatSessions.RefusedFrame(request, refusal), tag) };
         _loading = session;
+        _reload = null;
         _replay.Clear();
         _tools.Clear();
         EndRun();
         return new() { Call("session/load", new { sessionId = session, cwd = _cwd, mcpServers = Array.Empty<object>() }, new Pending("load", request, tag, session)) };
+    }
+
+    /// <summary>
+    /// Read the agent's commands and skills from disk again. The protocol has no request for that. An
+    /// agent that reads them whenever a conversation is attached to (<see cref="RereadsCommands"/>) is
+    /// attached to the one already open: it replays nothing, keeps the conversation and its settings,
+    /// and then says its commands, which is when the asking viewer is answered. Refused while anything
+    /// is in progress, since only a conversation at rest was measured.
+    /// </summary>
+    public List<Effect> Commands(string request, string tag)
+    {
+        string refusal = !CanReload ? $"{NameOf(_provider)} cannot reload its skills in a chat."
+            : _session.Length == 0 || _loading != null ? "The session is still opening."
+            : _prompting ? "Reload when the turn has finished."
+            : _resuming ? "The skills are already being reloaded." : "";
+        if (refusal.Length > 0) return new() { new Effect(Kind.Reply, ChatSessions.NoCommandsFrame(request, refusal), tag) };
+        _reload = (request, tag, Described());
+        _resuming = true;
+        return new() { Call("session/resume", new { sessionId = _session, cwd = _cwd, mcpServers = Array.Empty<object>() }, new Pending("commands", request, tag)) };
+    }
+
+    /// <summary>The commands the agent last said, each with what it says of it.</summary>
+    Dictionary<string, string> Described()
+    {
+        var known = new Dictionary<string, string>(StringComparer.Ordinal);
+        using var doc = JsonDocument.Parse(_commands);
+        foreach (var c in doc.RootElement.EnumerateArray()) known[Text(c, "name")] = Text(c, "description") + "\n" + Text(c, "hint");
+        return known;
     }
 
     /// <summary>The protocol has no rename, so the name is kept by the conversation here (<see cref="IChatNames"/>) and wins over what the agent calls it.</summary>
@@ -344,6 +389,15 @@ internal sealed class AcpChat : IChatAgent
                     _commands = JsonSerializer.Serialize(commands.EnumerateArray().Where(c => Text(c, "name").Length > 0)
                         .Select(c => new { name = Text(c, "name"), description = Text(c, "description"), hint = Get(c, "input", out var input) ? Text(input, "hint") : "" }));
                     Catalog(effects);
+                    if (_reload is { } asked)
+                    {
+                        _reload = null;
+                        var known = Described();
+                        effects.Add(new Effect(Kind.Reply, ChatSessions.CommandsFrame(asked.Request, known.Count,
+                            known.Keys.Where(n => !asked.Before.ContainsKey(n)).OrderBy(n => n, StringComparer.Ordinal),
+                            asked.Before.Keys.Where(n => !known.ContainsKey(n)).OrderBy(n => n, StringComparer.Ordinal),
+                            known.Where(c => asked.Before.TryGetValue(c.Key, out var was) && was != c.Value).Select(c => c.Key).OrderBy(n => n, StringComparer.Ordinal)), asked.Tag));
+                    }
                 }
                 break;
             case "session_info_update":
@@ -580,6 +634,7 @@ internal sealed class AcpChat : IChatAgent
                 {
                     _canLoad = Get(can, "loadSession", out var load) && load.ValueKind == JsonValueKind.True;
                     _canList = Get(can, "sessionCapabilities", out var sessions) && Get(sessions, "list", out _);
+                    _canResume = Get(can, "sessionCapabilities", out var again) && Get(again, "resume", out _);
                 }
                 effects.Add(Open());
                 break;
@@ -668,6 +723,17 @@ internal sealed class AcpChat : IChatAgent
                 Next(record, now, effects);
                 break;
             }
+            case "commands":
+                // The agent says its commands after this answer, and the asker is told then. Nothing in the answer is
+                // taken: the conversation and its settings are the ones already here.
+                _resuming = false;
+                if (!ok && _reload is { } refused && refused.Request == pending.Request)
+                {
+                    _reload = null;
+                    effects.Add(new Effect(Kind.Reply, ChatSessions.NoCommandsFrame(pending.Request, $"{NameOf(_provider)} could not reload its skills" + (why.Length > 0 ? ": " + why : ".")), pending.Tag));
+                }
+                Next(record, now, effects);
+                break;
             case "config":
                 if (ok && Get(result, "configOptions", out var options))
                 {
@@ -750,14 +816,14 @@ internal sealed class AcpChat : IChatAgent
         var models = OptionOf("model")?.Choices.Select(c => (object)new { value = c.Value, resolved = c.Value, name = c.Name, description = "", efforts }).ToList() ?? new List<object>();
         var modes = OptionOf("mode")?.Choices.Select(c => new[] { c.Value, c.Name, c.Name }).ToList() ?? new List<string[]>();
         using var commands = JsonDocument.Parse(_commands);
-        _catalog = JsonSerializer.Serialize(new { type = "catalog", agent = NameOf(_provider), models, commands = commands.RootElement, modes });
+        _catalog = JsonSerializer.Serialize(new { type = "catalog", agent = NameOf(_provider), models, commands = commands.RootElement, modes, reload = CanReload });
         effects.Add(Frame(_catalog));
     }
 
     /// <summary>What was typed while there was no turn to start: the next one, now that there is.</summary>
     void Next(HostRecord record, DateTime now, List<Effect> effects)
     {
-        if (_session.Length == 0 || _prompting || _loading != null || _waiting.Count == 0) return;
+        if (_session.Length == 0 || _prompting || _loading != null || _resuming || _waiting.Count == 0) return;
         var prompt = _waiting[0];
         _waiting.RemoveAt(0);
         Send(prompt, record, now, effects);

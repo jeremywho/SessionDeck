@@ -157,7 +157,9 @@ model, with a config folder of its own), the `+` menu also has **New Claude Swif
 under **Terminal**. Those sessions always run with `--dangerously-skip-permissions`, keep to the
 wrapper through restarts, reboots and `/resume`, and show as "Claude as swift". In any chat `/rename a name` names
 the session at once without a turn: the name goes to the agent where it keeps names (Claude,
-Codex) and is kept by Session Deck where it does not (AGY, OpenCode).
+Codex) and is kept by Session Deck where it does not (AGY, OpenCode). In an AGY chat `/skills` lists the
+commands and skills Antigravity offers and `/skills reload` has it read them from disk again, so a skill
+written or edited while the chat is open can be used without restarting it; neither is a turn.
 
 ## Docking
 Right-click the tray icon → **Dock to** → an edge or corner, and the window **snaps there on the

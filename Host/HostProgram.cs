@@ -954,6 +954,15 @@ internal static class HostProgram
                     if (_pipe == null) return;
                     Rename(client, root);
                     break;
+                case "commands":
+                {
+                    if (_pipe == null) return;
+                    string request = Text(root, "request");
+                    if (_exited) client.Out.Writer.TryWrite((true, ChatSessions.NoCommandsFrame(request, "The session has ended.")));
+                    else if (_agent != null) Agent(c => c.Commands(request, client.Tag));
+                    else client.Out.Writer.TryWrite((true, ChatSessions.NoCommandsFrame(request, "Claude cannot reload its skills in a chat.")));
+                    break;
+                }
                 case "input":
                     if (_exited) return;
                     if (_pipe != null)

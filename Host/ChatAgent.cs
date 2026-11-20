@@ -86,6 +86,8 @@ internal interface IChatAgent
     List<ChatEffect> Sessions(string request, string tag);
     /// <summary>Move to another conversation.</summary>
     List<ChatEffect> Resume(string request, string session, string tag);
+    /// <summary>Read the agent's commands and skills from disk again, where the agent can; refused to the asking viewer where it cannot.</summary>
+    List<ChatEffect> Commands(string request, string tag);
     /// <summary>Name the conversation, without a turn: the agent is asked where it keeps names, and the name is kept here where it does not.</summary>
     List<ChatEffect> Rename(string request, string name, string tag, HostRecord record);
     string CatalogFrame();

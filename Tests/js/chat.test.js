@@ -1079,3 +1079,65 @@ test('table headers and footers say their own break-inside, so the browser\'s bu
   assert.ok(selectors.includes('.chat tfoot'), 'no rule for .chat tfoot: ' + JSON.stringify(selectors));
   assert.ok(!/if\s*\(\s*media/.test(css), 'the stylesheet itself must not use if(media())');
 });
+
+// ---- the agent's skills ----
+
+test('/skills is offered only where the host can have the agent read its skills again', () => {
+  const { offeredCommands, matchCommands } = require('../../wwwroot/chat.js');
+  const agent = [{ name: 'goal', description: 'Set a goal' }, { name: 'council', description: 'Ask the council' }];
+  assert.deepEqual(offeredCommands(agent, 6, false).map(c => c.name), ['resume', 'rename', 'goal', 'council']);
+  assert.deepEqual(offeredCommands(agent, 6).map(c => c.name), ['resume', 'rename', 'goal', 'council']);
+  const offered = offeredCommands(agent, 6, true);
+  assert.deepEqual(offered.map(c => c.name), ['resume', 'rename', 'skills', 'goal', 'council']);
+  assert.equal(offered[2].hint, '[reload]');
+  // What follows its name is optional: the menu runs it on Enter instead of waiting for more.
+  assert.equal(offered[2].bare, true);
+  assert.ok(offered.filter(c => c.name !== 'skills').every(c => !c.bare));
+  assert.deepEqual(matchCommands(offered, 'sk').map(c => c.name), ['skills']);
+  // An agent's own command of that name gives way to the one that works here, as with /resume.
+  const both = offeredCommands(agent.concat([{ name: 'skills', description: 'the agent\'s' }]), 6, true);
+  assert.deepEqual(both.filter(c => c.name === 'skills').map(c => c.description), [offered[2].description]);
+  // A host too old to take requests offers none of the pane's own commands.
+  assert.deepEqual(offeredCommands(agent, 3, true).map(c => c.name), ['goal', 'council']);
+});
+
+test('the catalog says whether the agent\'s skills can be reloaded, and says no unless it says yes', () => {
+  const m = new ChatModel();
+  assert.equal(m.catalog.reload, false);
+  m.setCatalog({ agent: 'Antigravity', commands: [], models: [], reload: true });
+  assert.equal(m.catalog.reload, true);
+  for (const reload of [undefined, false, 'true', 1, null]) {
+    m.setCatalog({ agent: 'OpenCode', commands: [], models: [], reload });
+    assert.equal(m.catalog.reload, false);
+  }
+});
+
+test('/skills alone lists, /skills reload reloads, and anything else after it is shown how to ask', () => {
+  const { skillsAsked } = require('../../wwwroot/chat.js');
+  assert.equal(skillsAsked('/skills'), 'list');
+  assert.equal(skillsAsked('  /skills  '), 'list');
+  assert.equal(skillsAsked('/skills list'), 'list');
+  assert.equal(skillsAsked('/skills reload'), 'reload');
+  assert.equal(skillsAsked('/skills   RELOAD '), 'reload');
+  assert.equal(skillsAsked('/skills reload now'), 'usage');
+  assert.equal(skillsAsked('/skills enable council'), 'usage');
+  // Not this command: it goes to the agent as typed.
+  for (const other of ['/skillset', '/skill', 'run /skills', '/skills-audit reload', 'skills reload', '']) assert.equal(skillsAsked(other), null);
+});
+
+test('the list of skills is one line naming each, and says so when there are none', () => {
+  const { skillsNote } = require('../../wwwroot/chat.js');
+  assert.equal(skillsNote('Antigravity', [{ name: 'goal' }, { name: 'council' }]),
+    'Antigravity offers 2 commands and skills: /goal, /council. /skills reload reads them again from disk.');
+  assert.equal(skillsNote('Antigravity', []), 'Antigravity has said no commands or skills. /skills reload reads them from disk.');
+});
+
+test('a reload says what was added, removed and updated, or that nothing changed', () => {
+  const { reloadNote } = require('../../wwwroot/chat.js');
+  assert.equal(reloadNote({ ok: true, count: 15, added: [], removed: [], changed: [] }), 'Skills reloaded: no changes (15 commands and skills).');
+  assert.equal(reloadNote({ ok: true, count: 16, added: ['rigprobe-two'], removed: [], changed: [] }), 'Skills reloaded. Added: /rigprobe-two.');
+  assert.equal(reloadNote({ ok: true, count: 15, added: ['a', 'b'], removed: ['c'], changed: ['d'] }), 'Skills reloaded. Added: /a, /b. Removed: /c. Updated: /d.');
+  // A host that says less than this is read as having said nothing changed.
+  assert.equal(reloadNote({ ok: true }), 'Skills reloaded: no changes (0 commands and skills).');
+  assert.equal(reloadNote({ ok: true, count: 3, added: 'x', removed: null }), 'Skills reloaded: no changes (3 commands and skills).');
+});
