@@ -10,6 +10,30 @@ public class SessionPipelineTests
         new(sessions, hosts, parents ?? new(), new(), sessions.Count, 0, 0);
 
     [Fact]
+    public void A_hosts_count_of_its_agents_context_fills_a_row_that_has_none_and_never_replaces_one_read_from_a_transcript()
+    {
+        // A running chat host: it stamps its status from the moment it starts.
+        static HostRecord Running(long used, long size = 0) => new() { AgentStatus = "idle", StatusAt = DateTime.UtcNow, ContextTokens = used, ContextWindow = size };
+        var host = Running(9703, 1048576);
+        var bare = new SessionInfo();
+        SessionPipeline.ApplyHookState(host, bare);
+        Assert.Equal((9703L, 1048576L), (bare.ContextTokens, bare.ContextWindow));
+
+        var read = new SessionInfo { ContextTokens = 150_000, ContextWindow = 200_000 };
+        SessionPipeline.ApplyHookState(host, read);
+        Assert.Equal((150_000L, 200_000L), (read.ContextTokens, read.ContextWindow));
+
+        // A count with no size leaves the size to the app's own default.
+        var sized = new SessionInfo { ContextWindow = 200_000 };
+        SessionPipeline.ApplyHookState(Running(700), sized);
+        Assert.Equal((700L, 200_000L), (sized.ContextTokens, sized.ContextWindow));
+
+        var none = new SessionInfo();
+        SessionPipeline.ApplyHookState(Running(0), none);
+        Assert.Equal((0L, 0L), (none.ContextTokens, none.ContextWindow));
+    }
+
+    [Fact]
     public void Pairing_applies_the_hosts_hook_state_to_the_scanned_session()
     {
         var host = new HostRecord { Id = "h", SessionId = "s1", Provider = "Claude", ChildPid = 5, AgentStatus = "busy", LastEvent = "PreToolUse", LastTool = "Bash", StatusAt = DateTime.UtcNow, Protocol = 4 };

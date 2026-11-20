@@ -108,6 +108,14 @@ internal sealed class HostRecord
     public string PermissionMode { get; set; } = "";
     public string Effort { get; set; } = "";
 
+    /// <summary>
+    /// How much of its context an agent says the conversation uses, and how much there is, where the
+    /// agent says so itself (ACP's <c>usage_update</c>). Zero where the app reads it from a transcript
+    /// instead (Claude, Codex).
+    /// </summary>
+    public long ContextTokens { get; set; }
+    public long ContextWindow { get; set; }
+
     /// <summary>How this host derives status. 2: idle notifications no longer mean waiting; turns can end
     /// scheduled. 3: a background shell command no longer counts as scheduling a wake-up. 4: the pty size
     /// travels with the attach stream, which a phone needs.</summary>

@@ -78,6 +78,9 @@ internal sealed class AcpChat : IChatAgent
 
     bool CanReload => _canResume && RereadsCommands(_provider);
 
+    /// <summary>The context use said while a conversation was being replayed: the record's once that conversation is the one served.</summary>
+    long _replayUsed, _replayWindow;
+
     /// <summary>When the agent last said or did something.</summary>
     DateTime _heardAt;
     /// <summary>
@@ -346,6 +349,7 @@ internal sealed class AcpChat : IChatAgent
         _loading = session;
         _reload = null;
         _unasked = false;
+        (_replayUsed, _replayWindow) = (0, 0);
         _replay.Clear();
         _tools.Clear();
         EndRun();
@@ -462,6 +466,16 @@ internal sealed class AcpChat : IChatAgent
                     }
                 }
                 break;
+            case "usage_update":
+            {
+                // How full the context is, as the agent counts it (Antigravity and OpenCode both say `used` of `size`).
+                if (!Get(update, "used", out var u) || u.ValueKind != JsonValueKind.Number || !u.TryGetInt64(out long used) || used < 0) break;
+                long size = Get(update, "size", out var z) && z.ValueKind == JsonValueKind.Number && z.TryGetInt64(out long all) && all > 0 ? all : 0;
+                // Said while a conversation is replayed, it is about the one being opened, not the one still shown.
+                if (replay) (_replayUsed, _replayWindow) = (used, size);
+                else (record.ContextTokens, record.ContextWindow) = (used, size);
+                break;
+            }
             case "session_info_update":
                 if (Text(update, "title") is not { Length: > 0 } title) break;
                 // Said while a conversation is replayed, it names the one being opened, not the one still shown.
@@ -744,6 +758,9 @@ internal sealed class AcpChat : IChatAgent
                 _titled = title.Length > 0;
                 Opened(result, record, effects);
                 record.SessionId = _session;
+                // The conversation's own, or none: never the figure of the one that was open before.
+                (record.ContextTokens, record.ContextWindow) = (_replayUsed, _replayWindow);
+                (_replayUsed, _replayWindow) = (0, 0);
                 record.Title = title;
                 record.LastTool = "";
                 record.LastEvent = "";

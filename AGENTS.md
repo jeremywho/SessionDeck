@@ -421,6 +421,13 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
   - Inside a turn nothing changes: a pause there is not an end, and the turn's own answer closes the run.
   Not covered, and not measured to happen: a viewer that attaches in the middle of a turn does not see text
   already streamed in the current run until the run ends.
+- **An ACP agent's context use comes from the agent, through its host.** The app reads Claude's and Codex's
+  from their transcripts; Antigravity and OpenCode have none it reads. Both say `usage_update` (`used` of
+  `size`, measured on agy 1.5.13 and OpenCode 2.2.6), after a turn and again while a conversation is
+  replayed. The host keeps it on its record (`HostRecord.ContextTokens` / `ContextWindow`, part of
+  `ChatStream.Signature` so the record is written), and `SessionPipeline.ApplyHookState` fills a row that
+  has no figure of its own; one read from a transcript is never replaced. A count said during a replay is
+  held until that conversation is the one served, and a conversation that says none shows none.
 - **A link to a file is opened by the deck, by kind, and never run** (`OutsideLink.Decide`). Agents write
   `[name](file:///C:/…)` and `[name](C:/…)` for what they made. The pane used to strip those hrefs (only
   `http`, `https` and `mailto` survived `scrub`), leaving text styled as a link that did nothing. Now, in the

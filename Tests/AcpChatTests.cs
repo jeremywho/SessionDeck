@@ -1059,6 +1059,63 @@ public class AcpChatTests
         Assert.False(AcpChat.IsSessionId(new string('a', 129)));
     }
 
+    // ---- how full the context is ----
+
+    [Theory]
+    [InlineData("Agy", """{"sessionUpdate":"usage_update","used":9703,"size":1048576}""")]
+    [InlineData("OpenCode", """{"sessionUpdate":"usage_update","used":9703,"size":1048576,"cost":{"amount":0,"currency":"USD"}}""")]
+    public void The_agents_own_count_of_its_context_is_kept_on_the_record(string provider, string usage)
+    {
+        var (chat, record, _) = OpenWith(provider);
+        Assert.Equal((0L, 0L), (record.ContextTokens, record.ContextWindow));
+        string before = ChatStream.Signature(record);
+        Assert.Empty(chat.FromCli(J(Update(SessionOf(provider), usage)), record, T0));
+        Assert.Equal((9703L, 1048576L), (record.ContextTokens, record.ContextWindow));
+        // It is a change to the record, so the host writes it out for the app to read.
+        Assert.NotEqual(before, ChatStream.Signature(record));
+    }
+
+    [Theory]
+    [InlineData("""{"sessionUpdate":"usage_update"}""")]
+    [InlineData("""{"sessionUpdate":"usage_update","used":"many","size":1048576}""")]
+    [InlineData("""{"sessionUpdate":"usage_update","used":-5,"size":1048576}""")]
+    [InlineData("""{"sessionUpdate":"usage_update","used":1.5,"size":1048576}""")]
+    public void A_count_that_is_not_one_changes_nothing(string usage)
+    {
+        var (chat, record, _) = OpenWith("Agy");
+        chat.FromCli(J(Update(AgyId, """{"sessionUpdate":"usage_update","used":500,"size":1000}""")), record, T0);
+        chat.FromCli(J(Update(AgyId, usage)), record, T0);
+        Assert.Equal((500L, 1000L), (record.ContextTokens, record.ContextWindow));
+    }
+
+    [Fact]
+    public void A_count_with_no_size_keeps_the_count_and_says_no_size()
+    {
+        var (chat, record, _) = OpenWith("Agy");
+        chat.FromCli(J(Update(AgyId, """{"sessionUpdate":"usage_update","used":500,"size":1000}""")), record, T0);
+        chat.FromCli(J(Update(AgyId, """{"sessionUpdate":"usage_update","used":700}""")), record, T0);
+        Assert.Equal((700L, 0L), (record.ContextTokens, record.ContextWindow));
+    }
+
+    [Fact]
+    public void Moving_to_another_conversation_takes_its_count_or_none_and_never_keeps_the_old_one()
+    {
+        var (chat, record, _) = OpenWith("OpenCode");
+        chat.FromCli(J(Update(OcId, """{"sessionUpdate":"usage_update","used":90000,"size":262144}""")), record, T0);
+
+        // The one moved to says its count while it is replayed: the record still shows the one open until the move is made.
+        var load = Sent(chat.Resume("r1", OcOther, "viewer-a")).Single();
+        chat.FromCli(J(Update(OcOther, """{"sessionUpdate":"usage_update","used":1200,"size":262144}""")), record, T0);
+        Assert.Equal(90000L, record.ContextTokens);
+        chat.FromCli(J(Response(Id(load), OcConfig())), record, T0);
+        Assert.Equal((OcOther, 1200L, 262144L), (record.SessionId, record.ContextTokens, record.ContextWindow));
+
+        // One that says none has none.
+        var next = Sent(chat.Resume("r2", OcThird, "viewer-a")).Single();
+        chat.FromCli(J(Response(Id(next), OcConfig())), record, T0);
+        Assert.Equal((OcThird, 0L, 0L), (record.SessionId, record.ContextTokens, record.ContextWindow));
+    }
+
     // ---- an agent that goes on after its turn ----
 
     static (AcpChat Chat, HostRecord Record) AfterATurn(string provider = "Agy")

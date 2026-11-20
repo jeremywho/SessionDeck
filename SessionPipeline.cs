@@ -104,6 +104,12 @@ internal static class SessionPipeline
         if (info.TranscriptPath.Length == 0 && h.TranscriptPath.Length > 0) info.TranscriptPath = h.TranscriptPath;
         if (info.Model.Length == 0 && h.Model.Length > 0) info.Model = h.Model;
         if (info.Effort.Length == 0) info.Effort = SessionRow.EffortOfModel(info.Model);
+        // An agent with no transcript the app reads says its context use to its host; a figure read from a transcript stands.
+        if (info.ContextTokens == 0 && h.ContextTokens > 0)
+        {
+            info.ContextTokens = h.ContextTokens;
+            if (h.ContextWindow > 0) info.ContextWindow = h.ContextWindow;
+        }
     }
 
     /// <summary>An agy pane is named by its conversation's own /rename, like Claude and Codex panes are named by their CLIs.</summary>
