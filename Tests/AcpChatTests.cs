@@ -2395,6 +2395,14 @@ public class AcpChatTests
         Assert.Equal("result", Type(Kept(chat.Tick(record, After(740))).Single()));
         Assert.Equal("idle", record.AgentStatus);
 
+        // A thought after its words: it is not done, though it has made no call.
+        var (thinking, thinker) = AfterATurn();
+        thinking.FromCli(J(Update(AgyId, Text("agent_message_chunk", "Let me check one thing."))), thinker, After(40));
+        thinking.FromCli(J(Update(AgyId, Text("agent_thought_chunk", "Is the count right?"))), thinker, After(41));
+        Assert.DoesNotContain(Kept(thinking.Tick(thinker, After(44))), l => Type(l) == "result");
+        Assert.Empty(thinking.Tick(thinker, After(120)));
+        Assert.Equal("busy", thinker.AgentStatus);
+
         // An agent that never speaks again is not waited on for ever.
         var (silent, stuck) = AfterATurn();
         silent.FromCli(J(Update(AgyId, AgyRun)), stuck, After(41));

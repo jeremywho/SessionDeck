@@ -382,6 +382,20 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
   adding to a running turn (a message typed meanwhile is the next `session/prompt`); no
   transcript path, so an ACP chat is not restarted onto a new build by itself. A loaded
   conversation comes without its name, which is then read from `session/list`.
+- **Work with nothing said: commands left running, and long silences** (measured on a live Antigravity
+  conversation, 1.5.13). A command the agent sends to the background keeps its call open past `end_turn`
+  and reports when it ends, minutes later; the agent then goes on by itself. And after calls come back the
+  agent can be silent for minutes (5 min 24 s while it compacted its context, a `CHECKPOINT` step in its
+  transcript). Neither is "done":
+  - a turn that ends with calls open leaves the session `scheduled` (`AcpChat.Going`, up to `CallMost` a
+    call), and its `result` line names them in `running`, which the pane reads so those rows stay running;
+    a turn that was stopped or failed leaves none;
+  - a call that reports with no turn running starts work at once (`Heard`), unless it ended within
+    `Crossed` of its turn's end;
+  - work nobody asked for ends `WorkQuiet` after the agent last spoke. While it owes its words (`_owes`:
+    it made a call or was thinking, and has not spoken since) it is at work for up to `StillQuiet`.
+  Checked on the real agent through an isolated host: `scheduled` while the command ran, `busy` when it
+  reported, `idle` after. Like the bullet below, no `ChatStream.Revision` bump.
 - **A replay can outlast the answer to `session/load`.** Antigravity answers before it has finished
   replaying a long conversation (measured on 1.5.13 with 2,374 messages: 1,073 before the answer, 1,301
   over the next half second), and nothing marks the end of a replay. For `ReplayQuiet` (1 s) after the
