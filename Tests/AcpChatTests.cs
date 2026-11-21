@@ -143,10 +143,14 @@ public class AcpChatTests
         Assert.Equal(("tool_result", "acp-lab-one\n", false), (Str(Block(lines[3]), "type"), Str(Block(lines[3]), "content"), Block(lines[3]).GetProperty("is_error").GetBoolean()));
         Assert.Equal((OcId, "Do these in order, one tool call each."), (record.SessionId, record.Title));
 
-        var prompt = Sent(loaded).Single(m => Method(m) == "session/prompt");
+        // The message held during the load is sent once the replay has been quiet for a moment (more of it can follow
+        // the agent's answer), and so lands after the scrollback is reset.
+        Assert.DoesNotContain(Sent(loaded), m => Method(m) == "session/prompt");
+        Assert.Empty(chat.Tick(record, T0.AddMilliseconds(500)));
+        var released = chat.Tick(record, T0.AddSeconds(1));
+        var prompt = Sent(released).Single(m => Method(m) == "session/prompt");
         Assert.Equal(("session/prompt", OcId, "what next"), (Method(prompt), Str(Params(prompt), "sessionId"), Str(Params(prompt).GetProperty("prompt")[0], "text")));
-        int resetAt = loaded.IndexOf(reset), userAt = loaded.FindIndex(e => e.Kind == ChatEffectKind.Durable && Type(Of(e)) == "user");
-        Assert.True(resetAt < userAt, "the message held during the load must land after the scrollback is reset");
+        Assert.Equal("what next", Said(Kept(released).Single(l => Type(l) == "user")));
     }
 
     [Fact]
@@ -1321,6 +1325,7 @@ public class AcpChatTests
         moved.FromCli(J(Update(OcOther, Schedule("call_old", "in_progress"))), movedRecord, After(1));
         moved.FromCli(J(Response(Id(load), OcConfig())), movedRecord, After(2));
         Assert.Equal("idle", movedRecord.AgentStatus);
+        moved.Tick(movedRecord, After(4));
         var next = Prompt(moved, movedRecord, "hello");
         moved.FromCli(J(Response(Id(next), Stopped("end_turn"))), movedRecord, After(5));
         Assert.Equal("idle", movedRecord.AgentStatus);
@@ -1505,7 +1510,8 @@ public class AcpChatTests
         Assert.All(lines, l => Assert.True(l.GetProperty("history").GetBoolean()));
         Assert.Equal((OcOther, "Exact reply instruction"), (record.SessionId, record.Title));
         Assert.Contains(Frames(loaded), f => Type(f) == "catalog");
-        var next = Sent(loaded).Single();
+        Assert.Empty(Sent(loaded));
+        var next = Sent(chat.Tick(record, T0.AddSeconds(5))).Single();
         Assert.Equal(("session/prompt", OcOther, "after the move"), (Method(next), Str(Params(next), "sessionId"), Str(Params(next).GetProperty("prompt")[0], "text")));
 
         Assert.Empty(chat.FromCli(J(Update(OcId, Text("agent_message_chunk", "from the old one", "msg_old"))), record, T0));
@@ -2262,6 +2268,54 @@ public class AcpChatTests
             chat.FromCli(J(Update(OcOther, update)), record, T0);
         var lines = Seeded(chat.FromCli(J(Response(Id(load), OcConfig())), record, T0)).Lines.Select(L).ToList();
         Assert.Equal(new[] { "first", "second", "an answer" }, lines.Select(Said));
+    }
+
+    [Fact]
+    public void A_replay_that_goes_on_after_the_agent_said_the_conversation_was_open_is_still_the_past()
+    {
+        // Measured on Antigravity 1.5.13 with a conversation of 2,374 messages: the answer to session/load came with
+        // 1,073 of them replayed, and the other 1,301 followed over the next half second. They are not being said now.
+        var disk = new Disk();
+        disk.Kept[AgyOther] = StepsOf(
+            AgyDiskTests.Asked(0, "2026-03-04T10:00:05Z", "question 1"), AgyDiskTests.Planned(1, "2026-03-04T10:00:07Z", "answer 1"),
+            AgyDiskTests.Asked(2, "2026-03-04T18:30:00Z", "question 2"), AgyDiskTests.Planned(3, "2026-03-04T18:30:09Z", "answer 2", calls: new[] { ("run_command", "CommandLine", "\"dir\"") }));
+        var chat = new AcpChat("Agy", Cwd, "", "", "", "", disk: disk);
+        var record = new HostRecord();
+        var create = Sent(chat.FromCli(J(Response(Id(Sent(chat.Start()).Single()), AgyInit)), record, T0)).Single();
+        chat.FromCli(J(Response(Id(create), AgyNew)), record, T0);
+        var load = Sent(chat.Resume("r1", AgyOther, "viewer-a")).Single();
+        chat.FromCli(J(Update(AgyOther, Text("user_message_chunk", "question 1"))), record, T0);
+        chat.FromCli(J(Update(AgyOther, Text("agent_message_chunk", "answer 1"))), record, T0);
+        var opened = chat.FromCli(J(Response(Id(load), AgyLoaded)), record, T0);
+        Assert.Equal(new[] { "question 1", "answer 1" }, Seeded(opened).Lines.Select(L).Select(Said));
+
+        // The rest of it arrives: nothing is shown as being said, nothing is at work, and nothing is kept as said now.
+        var more = new List<ChatEffect>();
+        more.AddRange(chat.FromCli(J(Update(AgyOther, Text("user_message_chunk", "question 2"))), record, T0.AddMilliseconds(100)));
+        more.AddRange(chat.FromCli(J(Update(AgyOther, Text("agent_message_chunk", "answer 2"))), record, T0.AddMilliseconds(200)));
+        more.AddRange(chat.FromCli(J(Update(AgyOther, AgyRun)), record, T0.AddMilliseconds(300)));
+        more.AddRange(chat.FromCli(J(Update(AgyOther, """{"sessionUpdate":"usage_update","used":4321,"size":1048576}""")), record, T0.AddMilliseconds(300)));
+        Assert.Empty(more);
+        Assert.Equal("idle", record.AgentStatus);
+        // A message typed meanwhile waits: what follows a prompt sent now could not be told from the past still arriving.
+        Assert.Empty(chat.FromViewer(J(UserSays("and now?")), record, T0.AddMilliseconds(400)));
+        Assert.Empty(chat.Tick(record, T0.AddMilliseconds(900)));
+
+        // It has gone quiet: the rest is kept as the past it is, with its own times, and then the message is sent.
+        var ended = chat.Tick(record, After(2));
+        var kept = Kept(ended);
+        Assert.Equal(new[] { "user", "assistant", "assistant", "user" }, kept.Take(4).Select(Type));
+        Assert.Equal(("question 2", "answer 2", "Shell"), (Said(kept[0]), Said(kept[1]), Str(Block(kept[2]), "name")));
+        Assert.All(kept.Take(3), l => Assert.True(l.GetProperty("history").GetBoolean()));
+        Assert.Equal(new string?[] { "2026-03-04T18:30:00.000Z", "2026-03-04T18:30:09.000Z", null }, kept.Take(3).Select(When));
+        Assert.Empty(Passed(ended).Where(l => Type(l) == "stream_event"));
+        Assert.Equal("and now?", Said(kept[3]));
+        Assert.Equal("session/prompt", Method(Sent(ended).Single()));
+        Assert.Equal((4321L, "busy"), (record.ContextTokens, record.AgentStatus));
+        // From here on what the agent says is said now.
+        Assert.Contains(Passed(chat.FromCli(J(Update(AgyOther, Text("agent_message_chunk", "Now this."))), record, After(3))), l => Type(l) == "stream_event");
+        // And an earlier page holds the whole of the past, in order.
+        Assert.Equal(new[] { "question 1", "answer 1", "question 2", "answer 2" }, Earlier(chat, Str(kept[3], "uuid")).GetProperty("lines").EnumerateArray().Where(l => Type(l) != "assistant" || Str(Block(l), "type") == "text").Take(4).Select(Said));
     }
 
     [Fact]

@@ -148,7 +148,8 @@ internal sealed class AcpChat : IChatAgent
     List<Effect> Ticked(HostRecord record, DateTime now)
     {
         var effects = new List<Effect>();
-        if (_prompting || _loading != null || _session.Length == 0) return effects;
+        EndTail(record, now, effects);
+        if (_prompting || _loading != null || _tailing || _session.Length == 0) return effects;
         var quiet = now - _heardAt;
         if (_runKind.Length > 0 && quiet >= SaidQuiet)
         {
@@ -174,6 +175,41 @@ internal sealed class AcpChat : IChatAgent
     readonly IAgentDisk _disk;
     /// <summary>The open conversation's calls, while another conversation is being read to move to.</summary>
     Dictionary<string, Tool>? _held;
+    /// <summary>
+    /// The conversation was opened a moment ago and more of its past may still be arriving. Antigravity
+    /// answers <c>session/load</c> before it has finished replaying a long conversation (measured,
+    /// 1.5.13: 1,073 of 2,374 messages before the answer, the rest over the next half second), and
+    /// nothing marks the end of a replay. Until the agent has been quiet for <see cref="ReplayQuiet"/>,
+    /// what it sends for the conversation is the past: kept as read back, with its own times, never
+    /// shown as being said, and no turn is started meanwhile.
+    /// </summary>
+    bool _tailing;
+    DateTime _tailAt;
+    readonly List<byte[]> _tail = new();
+    /// <summary>What was replayed before the answer, as it came, and how many lines it made once given its times: the rest is timed after it.</summary>
+    List<byte[]>? _first;
+    int _firstTimed;
+    internal static readonly TimeSpan ReplayQuiet = TimeSpan.FromSeconds(1);
+
+    /// <summary>The replay is over once nothing has come for a while: what arrived late is kept, and a message that waited is sent.</summary>
+    void EndTail(HostRecord record, DateTime now, List<Effect> effects)
+    {
+        if (!_tailing || now - _tailAt < ReplayQuiet) return;
+        Flush(true, effects);
+        _tailing = false;
+        var late = new List<byte[]>(_tail);
+        _tail.Clear();
+        if (late.Count > 0)
+        {
+            // Times are found going forward through the conversation, so the late lines are timed after the first ones.
+            var all = Timed((_first ?? new List<byte[]>()).Concat(late).ToList(), _session);
+            if (_first != null && all.Count >= _firstTimed) late = all.GetRange(_firstTimed, all.Count - _firstTimed);
+            foreach (var line in late) effects.Add(new Effect(Kind.Durable, line));
+        }
+        _first = null;
+        Next(record, now, effects);
+    }
+
     /// <summary>The ids the agent gave to messages already kept: a viewer names a line by its id, so none is used twice.</summary>
     readonly HashSet<string> _lineIds = new(StringComparer.Ordinal);
 
@@ -260,6 +296,7 @@ internal sealed class AcpChat : IChatAgent
     List<Effect> Viewed(JsonElement line, HostRecord record, DateTime now)
     {
         var effects = new List<Effect>();
+        EndTail(record, now, effects);
         switch (Text(line, "type"))
         {
             case "user":
@@ -267,7 +304,7 @@ internal sealed class AcpChat : IChatAgent
                 var prompt = Prompt(content);
                 if (prompt.GetArrayLength() == 0) break;
                 // There is no adding to a running turn in this protocol: what is typed meanwhile is the next turn.
-                if (_session.Length == 0 || _prompting || _loading != null || _resuming) _waiting.Add(prompt);
+                if (_session.Length == 0 || _prompting || _loading != null || _tailing || _resuming) _waiting.Add(prompt);
                 else Send(prompt, record, now, effects);
                 // OpenCode's service can fail a session once and open it the next time: a message is reason to ask again.
                 if (_unopened) { _unopened = false; effects.Add(Open()); }
@@ -399,6 +436,10 @@ internal sealed class AcpChat : IChatAgent
             : _prompting ? "Stop the current turn first."
             : _loading != null || _resuming || _session.Length == 0 ? "The session is already changing." : "";
         if (refusal.Length > 0) return new() { new Effect(Kind.Reply, ChatSessions.RefusedFrame(request, refusal), tag) };
+        // Whatever of the open conversation's past was still arriving is not waited for: it is being left.
+        _tailing = false;
+        _tail.Clear();
+        _first = null;
         _loading = session;
         _reload = null;
         _unasked = false;
@@ -564,6 +605,7 @@ internal sealed class AcpChat : IChatAgent
     List<Effect> Told(JsonElement msg, HostRecord record, DateTime now)
     {
         var effects = new List<Effect>();
+        EndTail(record, now, effects);
         if (msg.ValueKind != JsonValueKind.Object) return effects;
         bool hasId = Get(msg, "id", out var id) && id.ValueKind is JsonValueKind.Number or JsonValueKind.String;
         string method = Text(msg, "method");
@@ -586,6 +628,12 @@ internal sealed class AcpChat : IChatAgent
         string about = Text(p, "sessionId");
         bool replay = _loading != null && about == _loading;
         if (!replay && about != _session) return effects;
+        // Only the conversation itself is replayed: its name, its settings and its context use are said as they are now.
+        if (!replay && _tailing && Text(update, "sessionUpdate") is "agent_message_chunk" or "agent_thought_chunk" or "user_message_chunk" or "tool_call" or "tool_call_update")
+        {
+            _tailAt = now;
+            replay = true;
+        }
         Update(update, replay, record, now, effects);
         return effects;
     }
@@ -713,7 +761,7 @@ internal sealed class AcpChat : IChatAgent
 
     void Keep(byte[] line, bool replay, List<Effect> effects)
     {
-        if (replay) _replay.Add(line);
+        if (replay) (_loading == null && _tailing ? _tail : _replay).Add(line);
         else effects.Add(new Effect(Kind.Durable, line));
     }
 
@@ -1223,8 +1271,14 @@ internal sealed class AcpChat : IChatAgent
                 _open.Clear();
                 _held = null;
                 Alone();
-                var lines = Helped(Timed(new List<byte[]>(_replay), session), session);
+                _first = new List<byte[]>(_replay);
+                var timed = Timed(_first, session);
+                _firstTimed = timed.Count;
+                var lines = Helped(timed, session);
                 _replay.Clear();
+                _tail.Clear();
+                _tailing = true;
+                _tailAt = now;
                 _opening = new List<byte[]>(lines);
                 int size = lines.Sum(l => l.Length + 1), drop = 0;
                 while (drop < lines.Count - 1 && size > _budget) size -= lines[drop++].Length + 1;
@@ -1382,7 +1436,7 @@ internal sealed class AcpChat : IChatAgent
     /// <summary>What was typed while there was no turn to start: the next one, now that there is.</summary>
     void Next(HostRecord record, DateTime now, List<Effect> effects)
     {
-        if (_session.Length == 0 || _prompting || _loading != null || _resuming || _waiting.Count == 0) return;
+        if (_session.Length == 0 || _prompting || _loading != null || _tailing || _resuming || _waiting.Count == 0) return;
         var prompt = _waiting[0];
         _waiting.RemoveAt(0);
         Send(prompt, record, now, effects);
