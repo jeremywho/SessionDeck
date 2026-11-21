@@ -161,7 +161,9 @@ model, with a config folder of its own), the `+` menu also has **New Claude Swif
 under **Terminal**. Those sessions always run with `--dangerously-skip-permissions`, keep to the
 wrapper through restarts, reboots and `/resume`, and show as "Claude as swift". In any chat `/rename a name` names
 the session at once without a turn: the name goes to the agent where it keeps names (Claude,
-Codex) and is kept by Session Deck where it does not (AGY, OpenCode). A link an agent writes to a file it made (`file:///C:/…` or `C:/…`) opens that
+Codex) and is kept by Session Deck where it does not (AGY, OpenCode). The desktop and the phone show the
+same chat the same way whenever each was opened, mid-reply included; a chat started before the update that
+brought this says so above its message box until it is restarted. A link an agent writes to a file it made (`file:///C:/…` or `C:/…`) opens that
 file from the deck: pictures, video, pages, documents and source in their usual program, anything that could
 run shown in its folder instead. In an AGY chat `/skills` lists the
 commands and skills Antigravity offers and `/skills reload` has it read them from disk again, so a skill

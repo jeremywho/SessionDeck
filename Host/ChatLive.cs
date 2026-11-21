@@ -9,12 +9,14 @@ namespace SessionDeck.Host;
 /// still being said, and (for a translated agent) that it is at work. A viewer that attaches later
 /// is given the scrollback; without this it would show less than one that had been watching, and
 /// if what was being said never became a line of the conversation, it would show less for good.
-/// <para>It follows the pane's own rules for a message being said (<c>ChatModel.live</c> and
+/// <para>It follows the pane's rules for a message being said (<c>ChatModel.live</c> and
 /// <c>assistant</c> in chat.js), so that what it hands a new viewer is what the others show: a
 /// message starts with <c>content_block_start</c>, grows with each delta, and is over when a kept
 /// line of its kind arrives. A turn that ends with one still open (an interrupt) gets it as a kept
-/// line first, so the scrollback is all there is to see. Every caller holds the lock the scrollback
-/// is appended under, which makes the two one state.</para>
+/// line first, so the scrollback is all there is to see. In one case it does not do as the pane
+/// does: at <c>message_start</c> the pane leaves what was being said on screen and this forgets it
+/// (not seen to happen: a CLI keeps every block before it starts its next message). Every caller
+/// holds the lock the scrollback is appended under, which makes the two one state.</para>
 /// </summary>
 internal sealed class ChatLive
 {
@@ -95,9 +97,7 @@ internal sealed class ChatLive
                 {
                     string kind = Text(block, "type");
                     int at = kind is "text" or "thinking" ? _drafts.FindIndex(d => d.Kind == kind) : -1;
-                    if (at < 0) continue;
-                    if (_current == _drafts[at]) _current = null;
-                    _drafts.RemoveAt(at);
+                    if (at >= 0) _drafts.RemoveAt(at);
                 }
             }
             else if (type == "result" || (type == "user" && top && Words(root).TrimStart().StartsWith(Interrupted, StringComparison.Ordinal)))
@@ -118,8 +118,9 @@ internal sealed class ChatLive
         string at = now.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
         foreach (var draft in _drafts)
         {
+            // One for each, the empty ones too: a viewer gives a kept line to the first message of its kind it has
+            // open, so a line left out would end the wrong one.
             string text = draft.Text.ToString();
-            if (text.Trim().Length == 0) continue;
             object block = draft.Kind == "text" ? new { type = "text", text } : new { type = "thinking", thinking = text };
             lines.Add(JsonSerializer.SerializeToUtf8Bytes(new Dictionary<string, object?>
             {

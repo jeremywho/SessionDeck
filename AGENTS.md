@@ -501,8 +501,34 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
     Antigravity replays the call that was still waiting as failed (measured in the deck rig).
     When a session ends the pane marks every call still running as stopped (`ChatModel.exited`): a
     call cut off mid-turn, a timer, a subagent left in the background.
-  Not covered, and not measured to happen: a viewer that attaches in the middle of a turn does not see text
-  already streamed in the current run until the run ends.
+  A viewer that attaches in the middle of a turn is told what has been said so far (next bullet).
+- **Every viewer shows the same, whenever it attached** (`Host/ChatLive.cs`, chat revision 7). The desktop
+  and the phone are two viewers of one host, and a viewer shows the scrollback plus whatever it was sent
+  live while attached. Anything that reached the screen live and never became a line (a reply cut off by an
+  interrupt; on hosts before v0.5.102 everything an agent said after its turn) stayed on the viewer that
+  watched and never reached one that attached later: that was "the phone does not show what the desktop
+  shows". The rule now: **the scrollback, plus what `ChatLive.Now()` says, is everything a viewer can show.**
+  - `ChatLive` follows the pane's own rules for a message being said (`live` and `assistant` in chat.js): it
+    begins at `content_block_start`, grows with each delta, and is over when a kept line of its kind
+    arrives. It is read and written only under `ClientsLock`, the lock the ring is appended under and a
+    viewer attaches under (`AppendChatLine`, `SayLive`, the attach path), so it and the ring are one state.
+  - A viewer that attaches gets, after the scrollback, each message being said, whole, and for a translated
+    agent the line that says it is at work.
+  - A turn that ends (`result`, or the line that says it was interrupted) or a session that ends with a
+    message still being said keeps it first, as an assistant line marked `partial`.
+  - A pane whose socket comes back keeps its model and asks for what follows the last byte it has; it drops
+    what it had of a message being said (`ChatModel.attached`), since the host says it whole again.
+  - A chat on a host from before revision 7 cannot do this, and nothing restarts an Antigravity or OpenCode
+    chat by itself: the pane says so (`.host-behind`) until the session is restarted. **A change to what a
+    host keeps or says is a `ChatStream.Revision` bump**: v0.5.98 to v0.5.104 changed hosts without one, and
+    chats started before them kept the old behaviour with nothing to say so.
+  - Checked with `C:\Temp\chatlab\sync-rig.mjs` on the machine it was written on: the real page twice against
+    one real Antigravity host, the second attached at eleven moments; and against the build before, where it
+    differs while a thought is being written.
+  Not covered: a message still being said when the model starts its next message is neither told to a new
+  viewer nor kept (not seen: every block was kept before the next `message_start` in 41 of 41 recorded
+  message starts, and none was open at 18 of 18 ends of turn); a call's input being written out is not shown
+  by any viewer until the call is kept.
 - **An ACP agent's context use comes from the agent, through its host.** The app reads Claude's and Codex's
   from their transcripts; Antigravity and OpenCode have none it reads. Both say `usage_update` (`used` of
   `size`, measured on agy 1.5.13 and OpenCode 2.2.6), after a turn and again while a conversation is

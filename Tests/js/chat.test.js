@@ -1281,7 +1281,42 @@ test('a viewer that attaches again drops what it had of a message being said, wh
   assert.deepEqual(shown(m), ['user:go', 'assistant:half said and done']);
 });
 
-test('the pane knows the host revision that replays, and it is the one the host has', () => {
+test('the revision from which a host replays is 7, and the host of this build is at least that', () => {
+  // It is a fact about hosts already running, not about the newest one: it does not move when the revision does.
   const source = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', '..', 'Host', 'ChatStream.cs'), 'utf8');
-  assert.equal(Number(/public const int Revision = (\d+);/.exec(source)[1]), HOST_REPLAYS);
+  assert.equal(HOST_REPLAYS, 7);
+  assert.ok(Number(/public const int Revision = (\d+);/.exec(source)[1]) >= HOST_REPLAYS);
+});
+
+test('a message of nothing but white space is not a message, kept or being said', () => {
+  // What a host sends when an agent begins a reply with a blank line, goes quiet, and then says it: the blank
+  // message is ended by a line of its own, so the words that follow are not shown in its place as well.
+  const blank = '\n\n';
+  const watched = new ChatModel(), later = new ChatModel();
+  for (const m of [watched, later]) m.durable(echo('go'));
+  watched.live(began('text')); watched.live(grew(blank));
+  for (const m of [watched, later]) m.durable(said(blank));
+  watched.live(began('text')); watched.live(grew('Answer'));
+  for (const m of [watched, later]) { m.durable(said('Answer')); m.durable(done()); }
+  assert.deepEqual(shown(watched), ['user:go', 'assistant:Answer']);
+  assert.deepEqual(shown(later), shown(watched));
+});
+
+test('messages left open when a turn ends are each ended by their own line, the blank ones too', () => {
+  const watched = new ChatModel(), later = new ChatModel();
+  for (const m of [watched, later]) m.durable(echo('go'));
+  watched.live(began('text')); watched.live(grew('   '));
+  watched.live(began('text')); watched.live(grew('Last words'));
+  for (const m of [watched, later]) for (const line of [Object.assign(said('   '), { partial: true }), Object.assign(said('Last words'), { partial: true }), done()]) m.durable(line);
+  assert.deepEqual(shown(watched), ['user:go', 'assistant:Last words']);
+  assert.deepEqual(shown(later), shown(watched));
+});
+
+test('the page before what is shown is asked for from a message the host can find', () => {
+  // A message kept only because its turn was cut off is in the scrollback and nowhere else.
+  const m = new ChatModel();
+  m.durable(Object.assign(said('cut off'), { uuid: 'cut-1', partial: true }));
+  assert.equal(m.historyAsk(), null);
+  m.durable(Object.assign(said('whole'), { uuid: 'a-2' }));
+  assert.deepEqual(m.historyAsk(), { uuid: 'a-2' });
 });

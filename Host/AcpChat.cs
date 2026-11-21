@@ -152,7 +152,7 @@ internal sealed class AcpChat : IChatAgent
         var quiet = now - _heardAt;
         if (_runKind.Length > 0 && quiet >= SaidQuiet)
         {
-            if (_run.ToString().Trim().Length == 0) EndRun(); else Flush(false, effects);
+            Flush(false, effects);
         }
         if (!_unasked && _runKind.Length == 0) Settle(record, now);
         if (!_unasked || _runKind.Length > 0 || quiet < WorkQuiet) return effects;
@@ -698,7 +698,8 @@ internal sealed class AcpChat : IChatAgent
         bool given = _runId.Length > 0;
         string kind = _runKind, text = _run.ToString(), id = given ? _runId + (kind == "thinking" ? ":t" : "") : (kind == "user" ? "u-" : "a-") + ++_made;
         EndRun();
-        if (text.Trim().Length == 0 && (replay || kind != "text")) return;
+        // Said now, even nothing at all is kept: viewers were told a message began, and only a line ends it for them.
+        if (text.Trim().Length == 0 && replay) return;
         // A message the agent gave an id can be kept in two parts (said, a pause, said on).
         if (given && !_lineIds.Add(id)) id += "." + ++_made;
         byte[] line = kind switch

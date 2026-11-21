@@ -248,8 +248,10 @@ public class ChatHostTests : IDisposable
             return said;
         }
         Assert.Equal("half said", Being(watching));
+        // (An answer to a request of its own comes after everything it was sent on attaching: all of that is read by then.)
         using var late = await Viewer.Attach(Record(), after: 0);
-        await late.Pump(() => late.Settings.Count > 0 && late.Live.Count >= 2);
+        await late.SendFrame("""{"type":"sessions","request":"s1"}""");
+        await late.NextAnswer();
         Assert.Equal(new[] { "content_block_start", "content_block_delta" }, late.Live.Select(l => l.GetProperty("event").GetProperty("type").GetString()));
         Assert.Equal("half said", Being(late));
         Assert.Equal(watching.Lines.Select(l => l.GetRawText()), late.Lines.Select(l => l.GetRawText()));
@@ -263,7 +265,8 @@ public class ChatHostTests : IDisposable
         await late.Until(l => Type(l) == "result");
         using var after = await Viewer.Attach(Record(), after: 0);
         await after.Until(l => Type(l) == "result");
-        await after.Pump(() => after.Settings.Count > 0);
+        await after.SendFrame("""{"type":"sessions","request":"s2"}""");
+        await after.NextAnswer();
         Assert.Equal(watching.Lines.Select(l => l.GetRawText()), late.Lines.Select(l => l.GetRawText()));
         Assert.Equal(watching.Lines.Select(l => l.GetRawText()), after.Lines.Select(l => l.GetRawText()));
         Assert.Empty(after.Live);

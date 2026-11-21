@@ -81,8 +81,11 @@ public class ChatLiveTests
         live.Said(Delta("Half of an "));
         live.Said(Start("text"));
         var kept = live.Keep(Result, Now);
-        Assert.Equal(3, kept.Count);
-        Assert.Same(Result, kept[2]);
+        // One line for each message that was open, in the order they began, the empty one too: a viewer gives a
+        // kept line to the first message of its kind it has open, so a line left out would shift every one after it.
+        Assert.Equal(4, kept.Count);
+        Assert.Same(Result, kept[3]);
+        Assert.Equal("", J(kept[2]).GetProperty("message").GetProperty("content")[0].GetProperty("text").GetString());
         var cut = kept.Take(2).Select(J).ToList();
         Assert.All(cut, l => Assert.Equal(("assistant", true, "2026-03-04T10:00:05.000Z", JsonValueKind.Null), (l.GetProperty("type").GetString(), l.GetProperty("partial").GetBoolean(), l.GetProperty("timestamp").GetString(), l.GetProperty("parent_tool_use_id").ValueKind)));
         Assert.Equal(("thinking", "Hm."), (cut[0].GetProperty("message").GetProperty("content")[0].GetProperty("type").GetString(), cut[0].GetProperty("message").GetProperty("content")[0].GetProperty("thinking").GetString()));
@@ -113,7 +116,7 @@ public class ChatLiveTests
     }
 
     [Fact]
-    public void What_was_being_said_when_the_session_ends_is_kept_and_an_empty_message_is_not()
+    public void What_was_being_said_when_the_session_ends_is_kept_one_line_for_each_message_open()
     {
         var live = new ChatLive(saysWork: false);
         live.Said(Start("text"));
@@ -121,7 +124,7 @@ public class ChatLiveTests
         live.Said(Start("text"));
         live.Said(Delta("Last words"));
         var cut = live.Ending(Now);
-        Assert.Equal("Last words", J(cut.Single()).GetProperty("message").GetProperty("content")[0].GetProperty("text").GetString());
+        Assert.Equal(new[] { "   ", "Last words" }, cut.Select(l => J(l).GetProperty("message").GetProperty("content")[0].GetProperty("text").GetString()));
         Assert.Empty(live.Ending(Now));
         Assert.Empty(live.Now());
     }
@@ -198,6 +201,9 @@ public class ChatLiveTests
         Assert.Same(Init, agent.Now().Single());
         agent.Said(Start("text"));
         Assert.Equal(2, agent.Now().Count);
+        // An interrupt is not the end of the turn: that is said by the line that follows it.
+        agent.Keep(B("""{"type":"user","message":{"role":"user","content":"[Request interrupted by user]"}}"""), Now);
+        Assert.Same(Init, agent.Now().Single());
         agent.Keep(Result, Now);
         Assert.Empty(agent.Now());
         // A CLI says the same line at the start of every turn and its turn is told by the lines kept: nothing to add.

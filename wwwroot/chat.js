@@ -256,7 +256,8 @@
     // A line kept in the host's scrollback: the conversation itself.
     durable(line) {
       if (!line || typeof line !== 'object') return;
-      if (this.oldest === null && (line.type === 'user' || line.type === 'assistant') && !line.parent_tool_use_id)
+      // (A message kept only because its turn was cut off is in the scrollback alone: no host can find the page before it.)
+      if (this.oldest === null && (line.type === 'user' || line.type === 'assistant') && !line.parent_tool_use_id && !line.partial)
         this.oldest = { at: typeof line.at === 'number' ? line.at : null, uuid: typeof line.uuid === 'string' ? line.uuid : '' };
       if ((line.type === 'user' || line.type === 'assistant') && !line.parent_tool_use_id) this.clock(stampOf(line));
       switch (line.type) {
@@ -383,7 +384,7 @@
             if (this.current === draft) this.current = null;
             draft.text = text || draft.text;
             this.settle(draft);
-          } else if (text) this.add({ kind, text });
+          } else if (text.trim()) this.add({ kind, text });
         } else if (typeof b.type === 'string' && b.type.endsWith('_tool_result') && b.tool_use_id) {
           const ran = this.tools.get(b.tool_use_id);
           if (ran) { ran.result = serverResult(b); this.touch(ran); }
@@ -407,7 +408,8 @@
     settle(draft) {
       draft.draft = false;
       this.touch(draft);
-      if (!draft.text) this.remove(draft);
+      // White space alone is not a message: an agent can begin one with a blank line and say the rest as another.
+      if (!draft.text.trim()) this.remove(draft);
     }
 
     // The socket was attached again. A host that says what is being said to whoever attaches (HOST_REPLAYS) says
@@ -954,7 +956,7 @@
     const tail = h('div', 'time-tail');
     tail.hidden = true;
     // A session started before an update keeps running on the host it was started with.
-    const behind = h('div', 'host-behind', 'This chat started on an older version of Session Deck, so the desktop and the phone can show different things. Restart it from the session list on the desktop to update it.');
+    const behind = h('div', 'host-behind', 'This chat started before the last Session Deck update. Until it restarts, a reply can show on one screen and be missing on the other. To restart it now, right-click it in the desktop\'s session list. A restart ends any timer or subagent it still has running.');
     behind.hidden = true;
     column.append(earlier, empty, working, tail, behind);
     scroll.appendChild(column);

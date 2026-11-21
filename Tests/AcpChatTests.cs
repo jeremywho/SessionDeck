@@ -1218,8 +1218,11 @@ public class AcpChatTests
         Assert.Empty(Passed(chat.FromCli(J(Update(AgyId, ThreeCommands)), record, After(4))));
         Assert.DoesNotContain(Passed(chat.FromCli(J(Update(AgyId, Text("agent_message_chunk", ""))), record, After(5))), l => Type(l) == "system");
         Assert.Equal("idle", record.AgentStatus);
-        // A chunk with nothing in it is not something said: nothing is kept for it either.
-        Assert.Empty(chat.Tick(record, After(60)));
+        // A chunk with nothing in it is not something said. Viewers were still told a message began, so it is ended
+        // for them by a line that says nothing (which a pane shows as nothing), and no work is ended, since none began.
+        var ended = chat.Tick(record, After(60));
+        Assert.Equal("", Said(Kept(ended).Single()));
+        Assert.Equal("idle", record.AgentStatus);
     }
 
     [Fact]
@@ -2225,6 +2228,28 @@ public class AcpChatTests
         Assert.Equal("idle", record.AgentStatus);
         chat.Tick(record, After(9));
         Assert.Equal("idle", record.AgentStatus);
+    }
+
+    [Fact]
+    public void A_message_that_came_to_nothing_is_still_ended_for_the_viewers_that_saw_it_begin()
+    {
+        // Antigravity can start a reply with a blank line and go on seconds later. Viewers were told a message began;
+        // with nothing to end it, the words that follow were shown in its place and again in their own.
+        var (chat, record) = AfterATurn();
+        var begun = Passed(chat.FromCli(J(Update(AgyId, Text("agent_message_chunk", "\n\n"))), record, After(40)));
+        Assert.Contains(begun, l => Type(l) == "stream_event" && Str(l.GetProperty("event"), "type") == "content_block_start");
+        var ended = Kept(chat.Tick(record, After(43))).Single();
+        Assert.Equal(("assistant", "text", "\n\n"), (Type(ended), Str(Block(ended), "type"), Str(Block(ended), "text")));
+        var next = chat.FromCli(J(Update(AgyId, Text("agent_message_chunk", "The answer."))), record, After(46));
+        Assert.Contains(Passed(next), l => Type(l) == "stream_event" && Str(l.GetProperty("event"), "type") == "content_block_start");
+        Assert.Equal("The answer.", Said(Kept(chat.Tick(record, After(49))).Single()));
+
+        // A thought that is only white space, ended by what follows it.
+        var (thinking, thinker, _) = OpenWith("Agy");
+        Prompt(thinking, thinker, "go");
+        thinking.FromCli(J(Update(AgyId, Text("agent_thought_chunk", " "))), thinker, After(1));
+        var closed = Kept(thinking.FromCli(J(Update(AgyId, Text("agent_message_chunk", "Done."))), thinker, After(2))).Single();
+        Assert.Equal(("thinking", ""), (Str(Block(closed), "type"), Str(Block(closed), "thinking")));
     }
 
     [Fact]
