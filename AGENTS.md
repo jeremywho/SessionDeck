@@ -382,6 +382,17 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
   adding to a running turn (a message typed meanwhile is the next `session/prompt`); no
   transcript path, so an ACP chat is not restarted onto a new build by itself. A loaded
   conversation comes without its name, which is then read from `session/list`.
+- **A replay can outlast the answer to `session/load`.** Antigravity answers before it has finished
+  replaying a long conversation (measured on 1.5.13 with 2,374 messages: 1,073 before the answer, 1,301
+  over the next half second), and nothing marks the end of a replay. For `ReplayQuiet` (1 s) after the
+  last of it, the conversation's messages and calls are still the past (`AcpChat._tailing`): kept as
+  read back when it goes quiet (`EndTail`), timed after the first part, never shown as being said, and
+  no prompt is sent meanwhile. Before this the second half read as said now: "working" for 30 s after a
+  restart, every message stamped with the restart. Names, settings and context use are taken as they
+  come. Not covered: a message cut in two where the answer arrived, and subagent lines for calls in the
+  late part. This did not get a `ChatStream.Revision` bump: the revision is one number for every kind
+  of chat, a bump restarts every idle Claude chat, and only reopened Antigravity or OpenCode chats
+  differ; a revision per translator is what would say this properly.
 - **An earlier page comes from the host, not the agent.** `AcpChat` keeps every line of the open
   conversation (`_log`: the replay whole, then each line as it is kept, stamped by `Logged` at
   every entry point), up to `LogMost` (64 MB, then the oldest go). `History` answers with the
