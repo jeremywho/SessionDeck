@@ -1197,15 +1197,17 @@ public class AcpChatTests
     }
 
     [Fact]
-    public void Unasked_work_is_not_over_while_a_call_is_running_until_the_call_has_been_silent_for_ten_minutes()
+    public void Unasked_work_is_not_over_while_a_call_is_running_until_nothing_has_been_heard_for_ten_minutes()
     {
         var (chat, record) = AfterATurn();
         chat.FromCli(J(Update(AgyId, AgyRun)), record, After(1));
         Assert.Empty(chat.Tick(record, After(40)));
         Assert.Empty(chat.Tick(record, After(600)));
         Assert.Equal("busy", record.AgentStatus);
-        Assert.Equal("result", Type(Kept(chat.Tick(record, After(601))).Single()));
-        Assert.Equal("idle", record.AgentStatus);
+        // The work is over; the call that never reported is a command left running, and is waited on as one.
+        var over = Kept(chat.Tick(record, After(601))).Single();
+        Assert.Equal(("result", "call_1797129992166531750"), (Type(over), StillRunning(over).Single()));
+        Assert.Equal("scheduled", record.AgentStatus);
     }
 
     [Fact]
@@ -1312,12 +1314,12 @@ public class AcpChatTests
     [Fact]
     public void Only_a_timer_of_the_process_running_now_counts()
     {
-        // Any other call left open at the end of a turn is not a promise to come back.
+        // A command left open at the end of a turn is waited on too (it was sent to the background), as a timer is.
         var (chat, record, _) = OpenWith("Agy");
         var turn = Prompt(chat, record, "run it");
         chat.FromCli(J(Update(AgyId, AgyRun)), record, After(1));
         chat.FromCli(J(Response(Id(turn), Stopped("end_turn"))), record, After(2));
-        Assert.Equal("idle", record.AgentStatus);
+        Assert.Equal("scheduled", record.AgentStatus);
 
         // A timer read back from an earlier process died with it: the conversation it is replayed into is not waiting on it.
         var (moved, movedRecord, _) = OpenWith("OpenCode");
@@ -2321,6 +2323,119 @@ public class AcpChatTests
         Assert.Contains(Passed(chat.FromCli(J(Update(AgyOther, Text("agent_message_chunk", "Now this."))), record, After(3))), l => Type(l) == "stream_event");
         // And an earlier page holds the whole of the past, in order.
         Assert.Equal(new[] { "question 1", "answer 1", "question 2", "answer 2" }, Earlier(chat, Str(kept[3], "uuid")).GetProperty("lines").EnumerateArray().Where(l => Type(l) != "assistant" || Str(Block(l), "type") == "text").Take(4).Select(Said));
+    }
+
+    // ---- work that goes on with nothing said: commands in the background, and long silences ----
+
+    static string Running(string id, string status, bool update = false) =>
+        "{\"sessionUpdate\":\"" + (update ? "tool_call_update" : "tool_call") + "\",\"toolCallId\":\"" + id + "\",\"name\":\"run_command\",\"status\":\"" + status + "\",\"kind\":\"execute\",\"title\":\"a long job\",\"rawInput\":{\"CommandLine\":\"a long job\"}" + (status == "completed" ? ",\"rawOutput\":{\"output\":\"done\",\"exit_code\":0}" : "") + "}";
+
+    static string[] StillRunning(JsonElement result) =>
+        result.TryGetProperty("running", out var ids) ? ids.EnumerateArray().Select(i => i.GetString()!).ToArray() : Array.Empty<string>();
+
+    [Fact]
+    public void A_turn_that_ends_with_commands_still_running_is_waiting_on_them_and_goes_on_when_each_reports()
+    {
+        // Measured on Antigravity 1.5.13: three commands sent to the background, the turn ended at once with their calls
+        // still open, and each call reported two to six minutes later, after which the agent spoke again each time.
+        var (chat, record, _) = OpenWith("Agy");
+        var turn = Prompt(chat, record, "run the three reviewers");
+        chat.FromCli(J(Update(AgyId, Running("call_a", "in_progress"))), record, After(1));
+        chat.FromCli(J(Update(AgyId, Running("call_b", "in_progress"))), record, After(2));
+        chat.FromCli(J(Update(AgyId, Text("agent_message_chunk", "I will wait for both."))), record, After(3));
+        var ended = Kept(chat.FromCli(J(Response(Id(turn), Stopped("end_turn"))), record, After(4)));
+        // The end of the turn says which calls are still going, so a pane does not show them as cut off.
+        Assert.Equal(new[] { "call_a", "call_b" }, StillRunning(ended.Single(l => Type(l) == "result")));
+        Assert.Equal(("scheduled", "Stop"), (record.AgentStatus, record.LastEvent));
+        Assert.Empty(chat.Tick(record, After(100)));
+        Assert.Equal("scheduled", record.AgentStatus);
+
+        // One reports: the agent is about to go on, and does.
+        var back = chat.FromCli(J(Update(AgyId, Running("call_a", "completed", update: true))), record, After(130));
+        Assert.Equal("busy", record.AgentStatus);
+        Assert.Contains(Passed(back), l => Type(l) == "system" && Str(l, "subtype") == "init");
+        chat.FromCli(J(Update(AgyId, Text("agent_message_chunk", "The first is done."))), record, After(140));
+        Assert.Equal("The first is done.", Said(Kept(chat.Tick(record, After(142))).Single()));
+        // It has said its piece and the other is still going: waiting again, not done.
+        var paused = Kept(chat.Tick(record, After(171))).Single();
+        Assert.Equal(("result", "call_b"), (Type(paused), StillRunning(paused).Single()));
+        Assert.Equal("scheduled", record.AgentStatus);
+
+        chat.FromCli(J(Update(AgyId, Running("call_b", "completed", update: true))), record, After(300));
+        Assert.Equal("busy", record.AgentStatus);
+        chat.FromCli(J(Update(AgyId, Text("agent_message_chunk", "Both are done."))), record, After(305));
+        chat.Tick(record, After(307));
+        var done = Kept(chat.Tick(record, After(336))).Single();
+        Assert.Empty(StillRunning(done));
+        Assert.Equal("idle", record.AgentStatus);
+    }
+
+    [Fact]
+    public void Work_that_goes_silent_after_a_call_is_still_work_until_the_agent_has_spoken()
+    {
+        // Measured: nine edits came back, then nothing for 5 minutes 24 seconds (the agent was compacting its context),
+        // then it went on. What a call came back with is always answered: silence after it is the model at work.
+        var (chat, record) = AfterATurn();
+        chat.FromCli(J(Update(AgyId, Text("agent_message_chunk", "One more thing."))), record, After(40));
+        chat.FromCli(J(Update(AgyId, AgyRun)), record, After(41));
+        chat.FromCli(J(Update(AgyId, AgyRunDone)), record, After(43));
+        Assert.Equal("busy", record.AgentStatus);
+        foreach (double later in new[] { 75, 200, 366, 600 })
+        {
+            Assert.DoesNotContain(Kept(chat.Tick(record, After(later))), l => Type(l) == "result");
+            Assert.Equal("busy", record.AgentStatus);
+        }
+        // A thought is not the end of it either.
+        chat.FromCli(J(Update(AgyId, Text("agent_thought_chunk", "Now the summary."))), record, After(610));
+        Assert.DoesNotContain(Kept(chat.Tick(record, After(700))), l => Type(l) == "result");
+        // Its words are: 30 quiet seconds after them the work is over.
+        chat.FromCli(J(Update(AgyId, Text("agent_message_chunk", "All done."))), record, After(710));
+        chat.Tick(record, After(712));
+        Assert.Empty(chat.Tick(record, After(739)));
+        Assert.Equal("result", Type(Kept(chat.Tick(record, After(740))).Single()));
+        Assert.Equal("idle", record.AgentStatus);
+
+        // An agent that never speaks again is not waited on for ever.
+        var (silent, stuck) = AfterATurn();
+        silent.FromCli(J(Update(AgyId, AgyRun)), stuck, After(41));
+        silent.FromCli(J(Update(AgyId, AgyRunDone)), stuck, After(43));
+        Assert.Empty(silent.Tick(stuck, After(43 + 599)));
+        Assert.Equal("result", Type(Kept(silent.Tick(stuck, After(43 + 600))).Single()));
+        Assert.Equal("idle", stuck.AgentStatus);
+    }
+
+    [Fact]
+    public void A_call_that_ends_a_moment_after_its_turn_or_in_a_turn_that_was_stopped_is_not_work_in_the_background()
+    {
+        // The end of the call and the end of the turn can cross: nothing follows from that.
+        var (chat, record, _) = OpenWith("Agy");
+        var turn = Prompt(chat, record, "run it");
+        chat.FromCli(J(Update(AgyId, Running("call_a", "in_progress"))), record, After(1));
+        chat.FromCli(J(Response(Id(turn), Stopped("end_turn"))), record, After(2));
+        Assert.Empty(Passed(chat.FromCli(J(Update(AgyId, Running("call_a", "completed", update: true))), record, After(2.5))));
+        chat.Tick(record, After(3));
+        Assert.Equal("idle", record.AgentStatus);
+
+        // A turn the person stopped: its calls were cut off, and are not waited on.
+        var (stopped, stoppedRecord, _) = OpenWith("Agy");
+        var cut = Prompt(stopped, stoppedRecord, "run it");
+        stopped.FromCli(J(Update(AgyId, Running("call_a", "in_progress"))), stoppedRecord, After(1));
+        stopped.FromViewer(J(Interrupt("i1")), stoppedRecord, After(2));
+        var end = Kept(stopped.FromCli(J(Response(Id(cut), Stopped("cancelled"))), stoppedRecord, After(3)));
+        Assert.Empty(StillRunning(end.Single(l => Type(l) == "result")));
+        Assert.Equal("idle", stoppedRecord.AgentStatus);
+        stopped.Tick(stoppedRecord, After(10));
+        Assert.Equal("idle", stoppedRecord.AgentStatus);
+
+        // And a command is not waited on for ever: one that has not reported in two hours is taken to be lost.
+        var (old, oldRecord, _) = OpenWith("Agy");
+        var long_ = Prompt(old, oldRecord, "run it");
+        old.FromCli(J(Update(AgyId, Running("call_a", "in_progress"))), oldRecord, After(1));
+        old.FromCli(J(Response(Id(long_), Stopped("end_turn"))), oldRecord, After(2));
+        old.Tick(oldRecord, After(7199));
+        Assert.Equal("scheduled", oldRecord.AgentStatus);
+        old.Tick(oldRecord, After(7202));
+        Assert.Equal("idle", oldRecord.AgentStatus);
     }
 
     [Fact]

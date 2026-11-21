@@ -38,6 +38,8 @@ internal sealed class AcpChat : IChatAgent
         public string Id = "", Title = "", Kind = "", Name = "", Status = "";
         public JsonElement Input, Content, Output;
         public bool Shown, Done;
+        /// <summary>When it was first shown, for one made by this process.</summary>
+        public DateTime At;
         /// <summary>A call that starts a subagent, counted once among those waiting for theirs to show up on disk.</summary>
         public bool Spawned;
         /// <summary>Made by the process running now, not read back from an earlier one.</summary>
@@ -102,8 +104,27 @@ internal sealed class AcpChat : IChatAgent
     /// </summary>
     bool Waking => _tools.Values.Any(t => t.Live && t.Shown && !t.Done && t.Name == "schedule");
 
+    /// <summary>
+    /// The calls still going with no turn running: commands the agent sent to the background.
+    /// Measured on Antigravity 1.5.13: such a call stays open past <c>end_turn</c> and reports when the
+    /// command ends (minutes later), and the agent then goes on by itself. One that has not reported in
+    /// <see cref="CallMost"/> is taken to be lost.
+    /// </summary>
+    IEnumerable<Tool> Going(DateTime now) => _tools.Values.Where(t => t.Live && t.Shown && !t.Done && t.Name != "schedule" && now - t.At < CallMost);
+
+    /// <summary>The ids of every call a turn leaves running, timers too: said in the line that ends it, so a pane does not show them as cut off.</summary>
+    string[] LeftRunning(DateTime now) => _tools.Values.Where(t => t.Live && t.Shown && !t.Done && (t.Name == "schedule" || now - t.At < CallMost)).Select(t => t.Id).ToArray();
+
+    object Over(DateTime now)
+    {
+        var running = LeftRunning(now);
+        return running.Length > 0
+            ? new { type = "result", subtype = "success", is_error = false, result = "", running }
+            : new { type = "result", subtype = "success", is_error = false, result = "" };
+    }
+
     /// <summary>What a session with no turn running is: waiting for the person, or for a timer or a subagent of its own.</summary>
-    string Rest(DateTime now) => Waking || Helping(now) ? "scheduled" : "idle";
+    string Rest(DateTime now) => Waking || Going(now).Any() || Helping(now) ? "scheduled" : "idle";
 
     /// <summary>A session at rest is what <see cref="Rest"/> says now: a subagent can finish, or go quiet, with the agent saying nothing.</summary>
     void Settle(HostRecord record, DateTime now)
@@ -115,8 +136,23 @@ internal sealed class AcpChat : IChatAgent
     internal static readonly TimeSpan SaidQuiet = TimeSpan.FromSeconds(2);
     /// <summary>How long with nothing heard and no call running before work nobody asked for is taken to be over.</summary>
     internal static readonly TimeSpan WorkQuiet = TimeSpan.FromSeconds(30);
-    /// <summary>A call that never reports back does not keep the session "working" for ever.</summary>
-    internal static readonly TimeSpan CallQuiet = TimeSpan.FromMinutes(10);
+    /// <summary>
+    /// How long work nobody asked for is taken to go on with nothing heard, when the last thing heard
+    /// was not the agent's words. What a call came back with is always answered, so silence after it
+    /// is the model at work (measured: 5 min 24 s while it compacted its context); it is not for ever.
+    /// </summary>
+    internal static readonly TimeSpan StillQuiet = TimeSpan.FromMinutes(10);
+    /// <summary>How long a command left running is waited on.</summary>
+    internal static readonly TimeSpan CallMost = TimeSpan.FromHours(2);
+    /// <summary>A call that ends this soon after its turn did crossed with the end of the turn: nothing follows from it.</summary>
+    internal static readonly TimeSpan Crossed = TimeSpan.FromSeconds(2);
+    /// <summary>
+    /// The agent has yet to speak: it made a call (whose answer it will be given) or was thinking, and has said
+    /// nothing to the person since. Its work is not over while it does. A timer that fires or a command left
+    /// running that ends does not set it: the agent may have nothing to say to that.
+    /// </summary>
+    bool _owes;
+    DateTime _turnEnded;
 
     Effect Working() => Live(new { type = "system", subtype = "init", session_id = _session, model = Current("model"), permissionMode = Current("mode") });
 
@@ -125,12 +161,15 @@ internal sealed class AcpChat : IChatAgent
     {
         bool said = (kind is "agent_message_chunk" or "agent_thought_chunk") && Get(update, "content", out var content) && Text(content, "text").Length > 0;
         bool began = kind == "tool_call" || (kind == "tool_call_update" && Text(update, "status") is "pending" or "in_progress");
-        // A timer that fires is the agent starting on what the timer was for: it speaks a few seconds later (measured).
+        // A timer that fires, or a command left running that ends, is the agent starting on what comes of it: it speaks
+        // a few seconds later (measured). One that ends within a moment of its turn only crossed with the turn's end.
         if (kind == "tool_call_update" && Text(update, "status") is "completed" or "failed"
-            && _tools.TryGetValue(Text(update, "toolCallId"), out var timer) && timer is { Live: true, Done: false, Name: "schedule" }) began = true;
+            && _tools.TryGetValue(Text(update, "toolCallId"), out var left) && left is { Live: true, Done: false }
+            && (left.Name == "schedule" || now - _turnEnded >= Crossed)) began = true;
         if (!said && !began && kind != "tool_call_update") return;
         _heardAt = now;
-        // Any other call that only now reports it finished is the end of something, not the start of more.
+        if (kind == "tool_call" || (kind == "agent_thought_chunk" && said)) _owes = true;
+        else if (kind == "agent_message_chunk" && said) _owes = false;
         if (!(said || began) || _prompting || _unasked) return;
         _unasked = true;
         effects.Add(Working());
@@ -157,10 +196,14 @@ internal sealed class AcpChat : IChatAgent
         }
         if (!_unasked && _runKind.Length == 0) Settle(record, now);
         if (!_unasked || _runKind.Length > 0 || quiet < WorkQuiet) return effects;
-        // A timer waiting to fire is not work going on: the session rests, scheduled, until it does.
-        if (_tools.Values.Any(t => t.Live && t.Shown && !t.Done && t.Name != "schedule") && quiet < CallQuiet) return effects;
+        // Its work is over when it has spoken and said no more. After anything else (what a call came back with, a
+        // thought) it has yet to speak, however long it takes. A timer or a command still going is not work going
+        // on: the session rests, scheduled, until it reports.
+        if (_owes && quiet < StillQuiet) return effects;
         _unasked = false;
-        effects.Add(Durable(new { type = "result", subtype = "success", is_error = false, result = "" }));
+        _owes = false;
+        _turnEnded = now;
+        effects.Add(Durable(Over(now)));
         record.LastEvent = "Stop";
         Status(record, Rest(now), now);
         return effects;
@@ -1089,6 +1132,8 @@ internal sealed class AcpChat : IChatAgent
         if (!replay && tool.Spawned && _unclaimed.Count > 0) Claim(now, effects);
         if (!ended || tool.Done) return;
         tool.Done = true;
+        // With no work going on, a command or timer that was being waited on and is over changes what the session is.
+        if (!replay && !_prompting && !_unasked) Settle(record, now);
         // OpenCode runs a call it was waiting to ask about once an "always" given meanwhile covers it, and never
         // takes the question back: the card would stay up over a call that is over.
         foreach (var (key, asked) in _open.Where(o => o.Value.Tool == tool.Id).ToList())
@@ -1110,6 +1155,7 @@ internal sealed class AcpChat : IChatAgent
     void Show(Tool tool, bool replay, HostRecord record, List<Effect> effects)
     {
         tool.Shown = true;
+        if (!replay) tool.At = record.StatusAt is { } since && _heardAt < since ? since : _heardAt;
         if (!replay) record.LastTool = NameOfTool(tool);
         Keep(Assistant(tool.Id, new { type = "tool_use", id = tool.Id, name = NameOfTool(tool), input = Input(tool) }, replay), replay, effects);
     }
@@ -1328,8 +1374,15 @@ internal sealed class AcpChat : IChatAgent
                 if (stop == "cancelled" && _stopping) effects.Add(Durable(new { type = "user", message = new { role = "user", content = "[Request interrupted by user]" }, parent_tool_use_id = (string?)null }));
                 _stopping = false;
                 bool failed = !ok || stop == "refusal";
+                _turnEnded = now;
+                _owes = false;
+                // A turn that was stopped or failed leaves nothing running: its calls were cut off.
+                if (failed || stop == "cancelled")
+                    foreach (var tool in _tools.Values.Where(t => t.Live && !t.Done)) tool.Live = false;
                 string said = !ok ? (why.Length > 0 ? why : $"{NameOf(_provider)} did not finish the turn") : stop == "refusal" ? "The model declined to answer." : stop == "max_tokens" ? "The reply was cut off at the model's length limit." : "";
-                effects.Add(Durable(new { type = "result", subtype = failed ? "error" : stop == "cancelled" ? "error_during_execution" : "success", is_error = failed, result = said }));
+                effects.Add(Durable(failed || stop == "cancelled" || said.Length > 0
+                    ? new { type = "result", subtype = failed ? "error" : stop == "cancelled" ? "error_during_execution" : "success", is_error = failed, result = said }
+                    : Over(now)));
                 if (!failed && said.Length > 0) effects.Add(Durable(new { type = "host", subtype = "note", text = said }));
                 record.LastEvent = "Stop";
                 Status(record, Rest(now), now);

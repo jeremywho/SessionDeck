@@ -1327,3 +1327,18 @@ test('a chat at work with nothing new for a while says since when', () => {
   assert.equal(workingText(at, at + 4 * 60000), 'Working… last activity 4 minutes ago, 9:52 AM');
   assert.equal(workingText(at, at + 26 * 3600000), 'Working… last activity 1 day ago, yesterday 9:52 AM');
 });
+
+test('calls the end of a turn says are still running are not cut off, and the rest are', () => {
+  // Antigravity ends a turn with a command it sent to the background still going, and says so in the line that ends it.
+  const m = new ChatModel();
+  for (const line of [echo('run both'), used('b1', 'Shell', { command: 'long job' }), used('c1', 'Shell', { command: 'cut off' }), said('Waiting.'), done({ running: ['b1'] })]) m.durable(line);
+  const [going, cut] = ['b1', 'c1'].map(id => calls(m).find(c => c.id === id));
+  assert.deepEqual([!!going.stopped, cut.stopped], [false, true]);
+  assert.equal(runOverview(calls(m)).running, true);
+  m.durable(returned('b1', 'finished'));
+  assert.deepEqual(going.result, { text: 'finished', error: false });
+  // A line that says nothing of it, or something that is not a list, leaves the rule as it was.
+  const plain = new ChatModel();
+  for (const line of [used('x1', 'Shell', {}), done({ running: 'x1' })]) plain.durable(line);
+  assert.equal(calls(plain)[0].stopped, true);
+});

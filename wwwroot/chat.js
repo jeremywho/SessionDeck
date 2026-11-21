@@ -479,10 +479,12 @@
       this.pending = this.pending.filter(p => !p.settled);
       for (const p of this.pending) { p.pending = false; p.settled = true; this.touch(p); }
       for (const [id, req] of this.requests) if (req.open) this.close(id, 'cancelled');
+      // The host can say which calls the turn leaves running (a command an agent sent to the background).
+      const running = new Set(Array.isArray(line.running) ? line.running : []);
       for (const tool of this.tools.values()) {
         // A subagent left running in the background outlives the turn, and so do its calls. So does a timer
         // (Antigravity's Schedule): the turn ends with it still to fire, and it reports when it has.
-        if (tool.result || tool.stopped || (tool.parent && taskRunning(tool.parent)) || OUTLIVES_TURN.has(tool.name)) continue;
+        if (tool.result || tool.stopped || (tool.parent && taskRunning(tool.parent)) || OUTLIVES_TURN.has(tool.name) || running.has(tool.id)) continue;
         tool.stopped = true;
         this.touch(tool);
       }
