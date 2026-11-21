@@ -135,7 +135,9 @@ internal sealed class AcpChat : IChatAgent
     /// typed) until the next message was sent. A pause is the only end it has, so a pause makes it a
     /// line; and a longer one, with no call running, ends the work as the end of a turn does.
     /// </summary>
-    public List<Effect> Tick(HostRecord record, DateTime now)
+    public List<Effect> Tick(HostRecord record, DateTime now) => Logged(Ticked(record, now), now);
+
+    List<Effect> Ticked(HostRecord record, DateTime now)
     {
         var effects = new List<Effect>();
         if (_prompting || _loading != null || _session.Length == 0) return effects;
@@ -159,9 +161,27 @@ internal sealed class AcpChat : IChatAgent
     /// <summary>The name given to the conversation open now, or empty: nothing the agent calls it replaces one.</summary>
     string _given = "";
 
-    public AcpChat(string provider, string cwd, string session, string model, string effort, string mode, int budget = 2 * 1024 * 1024, IChatNames? names = null)
+    /// <summary>What the agent keeps on disk about a conversation, where its protocol does not say it.</summary>
+    readonly IAgentDisk _disk;
+
+    /// <summary>
+    /// Every line of the open conversation, oldest first: what was replayed, then what has been kept
+    /// since. The scrollback holds only the end of it, and the protocol cannot be asked for a part
+    /// of a conversation, so this is what an earlier page is read from.
+    /// </summary>
+    readonly List<byte[]> _log = new();
+    readonly List<string> _logIds = new();
+    long _logBytes;
+    /// <summary>What a conversation being opened replayed, all of it: the log once that conversation is the one served.</summary>
+    List<byte[]>? _opening;
+    /// <summary>The most the log holds. Past it the oldest lines go, and there is no page before them.</summary>
+    internal long LogMost = 64L * 1024 * 1024;
+    internal const int PageBytes = 256 * 1024, PageLines = 400;
+
+    public AcpChat(string provider, string cwd, string session, string model, string effort, string mode, int budget = 2 * 1024 * 1024, IChatNames? names = null, IAgentDisk? disk = null)
     {
         _names = names ?? new MemoryChatNames();
+        _disk = disk ?? new NoAgentDisk();
         _provider = provider;
         _cwd = cwd;
         _resume = session;
@@ -221,7 +241,9 @@ internal sealed class AcpChat : IChatAgent
 
     // ---- from a viewer ----
 
-    public List<Effect> FromViewer(JsonElement line, HostRecord record, DateTime now)
+    public List<Effect> FromViewer(JsonElement line, HostRecord record, DateTime now) => Logged(Viewed(line, record, now), now);
+
+    List<Effect> Viewed(JsonElement line, HostRecord record, DateTime now)
     {
         var effects = new List<Effect>();
         switch (Text(line, "type"))
@@ -417,12 +439,74 @@ internal sealed class AcpChat : IChatAgent
     }
 
     /// <summary>The protocol replays a conversation whole or not at all: there is never an earlier page to give.</summary>
-    public List<Effect> History(string request, string uuid, string tag) =>
-        new() { new Effect(Kind.Reply, ChatStream.HistoryFrame(new ChatTranscript.Page(new List<byte[]>(), -1), request), tag) };
+    /// <summary>
+    /// The conversation before the message a viewer names (the oldest it shows), as much as makes a
+    /// page. Nothing when the message is not known, or is the first there is.
+    /// </summary>
+    public List<Effect> History(string request, string uuid, string tag)
+    {
+        int before = uuid.Length > 0 ? _logIds.IndexOf(uuid) : -1, start = Math.Max(before, 0);
+        long size = 0;
+        while (start > 0 && before - start < PageLines && (start == before || size + _log[start - 1].Length + 1 <= PageBytes)) size += _log[--start].Length + 1;
+        var lines = before > 0 ? _log.GetRange(start, before - start) : new List<byte[]>();
+        return new() { new Effect(Kind.Reply, ChatStream.HistoryFrame(new ChatTranscript.Page(lines, before > 0 && start > 0 ? start : -1), request), tag) };
+    }
 
     // ---- from the agent ----
 
-    public List<Effect> FromCli(JsonElement msg, HostRecord record, DateTime now)
+    public List<Effect> FromCli(JsonElement msg, HostRecord record, DateTime now) => Logged(Told(msg, record, now), now);
+
+    /// <summary>
+    /// What is about to be kept is given its time and remembered, in the order it is kept. A message
+    /// with no time of its own is being said now; one read back from an earlier process keeps what
+    /// it has.
+    /// </summary>
+    List<Effect> Logged(List<Effect> effects, DateTime now)
+    {
+        for (int i = 0; i < effects.Count; i++)
+        {
+            var effect = effects[i];
+            if (effect.Kind == Kind.Reset)
+            {
+                _log.Clear();
+                _logIds.Clear();
+                _logBytes = 0;
+                foreach (var line in _opening ?? effect.Seed!.Lines) Remember(line);
+                _opening = null;
+            }
+            else if (effect.Kind == Kind.Durable)
+            {
+                byte[] line = ChatLines.StampedNow(effect.Data, now);
+                effects[i] = effect with { Data = line };
+                Remember(line);
+            }
+        }
+        return effects;
+    }
+
+    void Remember(byte[] line)
+    {
+        _log.Add(line);
+        _logIds.Add(IdOf(line));
+        _logBytes += line.Length;
+        int gone = 0;
+        while (_logBytes > LogMost && gone < _log.Count - 1) _logBytes -= _log[gone++].Length;
+        if (gone == 0) return;
+        _log.RemoveRange(0, gone);
+        _logIds.RemoveRange(0, gone);
+    }
+
+    static string IdOf(byte[] line)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(line);
+            return Text(doc.RootElement, "uuid");
+        }
+        catch (JsonException) { return ""; }
+    }
+
+    List<Effect> Told(JsonElement msg, HostRecord record, DateTime now)
     {
         var effects = new List<Effect>();
         if (msg.ValueKind != JsonValueKind.Object) return effects;
@@ -514,6 +598,18 @@ internal sealed class AcpChat : IChatAgent
         }
     }
 
+    /// <summary>
+    /// A replayed conversation with the times its messages were said, where the agent keeps them:
+    /// Antigravity replays none and writes one for every step to disk (<see cref="AgyTimes"/>).
+    /// What it keeps is its own business and can change, so anything unexpected leaves the lines as they came.
+    /// </summary>
+    List<byte[]> Timed(List<byte[]> lines, string session)
+    {
+        if (_provider != "Agy" || lines.Count == 0) return lines;
+        try { return AgyTimes.Stamp(lines, _disk.Steps(session)); }
+        catch (Exception e) when (e is JsonException or InvalidOperationException or FormatException or ArgumentException) { return lines; }
+    }
+
     // ---- text: chunks with no end mark ----
 
     void Chunk(string kind, JsonElement update, bool replay, List<Effect> effects)
@@ -600,7 +696,8 @@ internal sealed class AcpChat : IChatAgent
         }
         Keep(Line(new Dictionary<string, object?>
         {
-            ["type"] = "user", ["uuid"] = tool.Id,
+            // Not the call's own id: a viewer names the oldest line it shows to ask for the page before it.
+            ["type"] = "user", ["uuid"] = tool.Id + ":r",
             ["message"] = new { role = "user", content = new[] { new { type = "tool_result", tool_use_id = tool.Id, content = Result(tool), is_error = Failed(tool) } } },
             ["parent_tool_use_id"] = null,
         }, replay), replay, effects);
@@ -740,6 +837,9 @@ internal sealed class AcpChat : IChatAgent
                     break;
                 }
                 _session = Text(result, "sessionId");
+                _log.Clear();
+                _logIds.Clear();
+                _logBytes = 0;
                 Opened(result, record, effects);
                 record.SessionId = _session;
                 Next(record, now, effects);
@@ -764,8 +864,9 @@ internal sealed class AcpChat : IChatAgent
                 Flush(true, effects);
                 _session = session;
                 _open.Clear();
-                var lines = new List<byte[]>(_replay);
+                var lines = Timed(new List<byte[]>(_replay), session);
                 _replay.Clear();
+                _opening = new List<byte[]>(lines);
                 int size = lines.Sum(l => l.Length + 1), drop = 0;
                 while (drop < lines.Count - 1 && size > _budget) size -= lines[drop++].Length + 1;
                 lines.RemoveRange(0, drop);
@@ -782,7 +883,7 @@ internal sealed class AcpChat : IChatAgent
                 record.LastTool = "";
                 record.LastEvent = "";
                 Status(record, "idle", now);
-                effects.Add(new Effect(Kind.Reset, Array.Empty<byte>(), Seed: new ChatSeed(_session, title, "", lines, false)));
+                effects.Add(new Effect(Kind.Reset, Array.Empty<byte>(), Seed: new ChatSeed(_session, title, "", lines, drop > 0)));
                 // A conversation is replayed without its name: the agent's list has it.
                 if (!named && _canList) effects.Add(Call("session/list", new { cwd = _cwd }, new Pending("title", Session: _session)));
                 Next(record, now, effects);

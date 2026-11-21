@@ -263,7 +263,7 @@ internal static class HostProgram
         if (chat) _pipe = new PipeChild(commandLine, spec.Cwd);
         int seedBytes = Math.Max(spec.RingBytes, 64 * 1024) / 2;
         if (chat && spec.Provider == "Codex") _agent = new CodexChat(spec.Cwd, spec.SessionId, spec.RestoreModel, spec.RestoreEffort, spec.RestoreMode, seedBytes);
-        else if (chat && AcpChat.Speaks(spec.Provider)) _agent = new AcpChat(spec.Provider, spec.Cwd, spec.SessionId, spec.RestoreModel, spec.RestoreEffort, spec.RestoreMode, seedBytes, new ChatNames(Path.GetDirectoryName(spec.HostsDir)!, spec.Provider));
+        else if (chat && AcpChat.Speaks(spec.Provider)) _agent = new AcpChat(spec.Provider, spec.Cwd, spec.SessionId, spec.RestoreModel, spec.RestoreEffort, spec.RestoreMode, seedBytes, new ChatNames(Path.GetDirectoryName(spec.HostsDir)!, spec.Provider), spec.Provider == "Agy" ? new AgyDisk() : null);
         // A terminal only: a chat's CLI is the one on the pipes, whoever speaks its protocol.
         if (!chat)
         {

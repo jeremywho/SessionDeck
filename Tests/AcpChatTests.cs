@@ -135,7 +135,7 @@ public class AcpChatTests
         var seed = reset.Seed!;
         Assert.Equal((OcId, "Do these in order, one tool call each.", "", false), (seed.Session, seed.Title, seed.Path, seed.Earlier));
         var lines = seed.Lines.Select(l => J(Encoding.UTF8.GetString(l))).ToList();
-        Assert.Equal(new[] { ("user", "msg_1d5188c07001fdiBvEW46G1J9u"), ("assistant", "msg_1d5188c24001bKuq4rxATpy9ex"), ("assistant", "call_b9ca73159a9d4bf9862d79cc"), ("user", "call_b9ca73159a9d4bf9862d79cc"), ("assistant", "msg_1d518aac6001wQC1v4NzTuijhq") },
+        Assert.Equal(new[] { ("user", "msg_1d5188c07001fdiBvEW46G1J9u"), ("assistant", "msg_1d5188c24001bKuq4rxATpy9ex"), ("assistant", "call_b9ca73159a9d4bf9862d79cc"), ("user", "call_b9ca73159a9d4bf9862d79cc:r"), ("assistant", "msg_1d518aac6001wQC1v4NzTuijhq") },
             lines.Select(l => (Type(l), Str(l, "uuid"))));
         Assert.All(lines, l => Assert.True(l.GetProperty("history").GetBoolean()));
         Assert.Equal(("Do these in order, one tool call each.", "I'll do these three steps in order.", "done"), (Said(lines[0]), Said(lines[1]), Said(lines[4])));
@@ -611,7 +611,7 @@ public class AcpChatTests
         Assert.Equal("Shell", record.LastTool);
         Assert.Empty(chat.FromCli(J(Update(OcId, OcShellRunning)), record, T0));
         var result = Kept(chat.FromCli(J(Update(OcId, OcShellDone)), record, T0)).Single();
-        Assert.Equal(("user", "call_b9ca73159a9d4bf9862d79cc"), (Type(result), Str(result, "uuid")));
+        Assert.Equal(("user", "call_b9ca73159a9d4bf9862d79cc:r"), (Type(result), Str(result, "uuid")));
         Assert.Equal(("tool_result", "call_b9ca73159a9d4bf9862d79cc", "acp-lab-one\n", false), (Str(Block(result), "type"), Str(Block(result), "tool_use_id"), Str(Block(result), "content"), Block(result).GetProperty("is_error").GetBoolean()));
         Assert.Empty(chat.FromCli(J(Update(OcId, OcShellDone)), record, T0));
 
@@ -1569,5 +1569,204 @@ public class AcpChatTests
             Assert.Empty(chat.FromCli(J(odd), record, T0));
         foreach (string odd in new[] { "{\"type\":\"user\"}", "{\"type\":\"user\",\"message\":7}", "{\"type\":\"control_response\",\"response\":5}", "{\"type\":\"control_request\",\"request\":[]}", "{}" })
             Assert.Empty(Sent(chat.FromViewer(J(odd), record, T0)));
+    }
+
+    // ---- the conversation before what the scrollback holds, and when it was said ----
+
+    sealed class Disk : IAgentDisk
+    {
+        public readonly Dictionary<string, List<AgyStep>> Kept = new(StringComparer.Ordinal);
+        public IReadOnlyList<AgyStep> Steps(string conversation) => Kept.TryGetValue(conversation, out var steps) ? steps : new List<AgyStep>();
+    }
+
+    const string AgyOther = "7c1d2e3f-4a5b-4c6d-8e7f-0a1b2c3d4e5f";
+    static readonly string AgyLoaded = "{\"configOptions\":" + AgyOptions + "}";
+
+    static JsonElement L(byte[] line) => J(Encoding.UTF8.GetString(line));
+    static ChatSeed Seeded(List<ChatEffect> effects) => effects.Single(e => e.Kind == ChatEffectKind.Reset).Seed!;
+    static JsonElement Earlier(AcpChat chat, string before) => Of(chat.History("h1", before, "viewer-a").Single());
+    static string? When(JsonElement line) => line.TryGetProperty("timestamp", out var t) ? t.GetString() : null;
+
+    /// <summary>A conversation of <paramref name="turns"/> short exchanges, replayed into a chat that then serves it.</summary>
+    static (AcpChat Chat, HostRecord Record, ChatSeed Seed) Reopened(string provider, int turns, int budget, IAgentDisk? disk = null)
+    {
+        var chat = new AcpChat(provider, Cwd, "", "", "", "", budget, disk: disk);
+        var record = new HostRecord();
+        var create = Sent(chat.FromCli(J(Response(Id(Sent(chat.Start()).Single()), provider == "Agy" ? AgyInit : OcInit)), record, T0)).Single();
+        chat.FromCli(J(Response(Id(create), provider == "Agy" ? AgyNew : OcNew)), record, T0);
+        string other = provider == "Agy" ? AgyOther : OcOther;
+        var load = Sent(chat.Resume("r1", other, "viewer-a")).Single();
+        for (int i = 1; i <= turns; i++)
+        {
+            chat.FromCli(J(Update(other, Text("user_message_chunk", $"question {i}"))), record, T0);
+            chat.FromCli(J(Update(other, Text("agent_message_chunk", $"answer {i}"))), record, T0);
+        }
+        var loaded = chat.FromCli(J(Response(Id(load), provider == "Agy" ? AgyLoaded : OcConfig())), record, T0);
+        return (chat, record, Seeded(loaded));
+    }
+
+    [Fact]
+    public void A_conversation_too_long_for_the_scrollback_says_there_is_more_and_hands_it_over_a_page_at_a_time()
+    {
+        // 1,000 lines of about 140 bytes: the scrollback takes the end of them, and the rest is two pages and a bit.
+        var (chat, _, seed) = Reopened("OpenCode", 500, budget: 6_000);
+        Assert.True(seed.Earlier);
+        var shown = seed.Lines.Select(L).ToList();
+        Assert.InRange(shown.Count, 20, 60);
+        Assert.Equal("answer 500", Said(shown[^1]));
+
+        var page = Earlier(chat, Str(shown[0], "uuid"));
+        Assert.Equal(("history", "h1"), (Type(page), Str(page, "request")));
+        var lines = page.GetProperty("lines").EnumerateArray().ToList();
+        Assert.Equal(AcpChat.PageLines, lines.Count);
+        Assert.Equal(JsonValueKind.Number, page.GetProperty("next").ValueKind);
+        // It ends where what is shown begins, and is in order.
+        int first = shown.Count;
+        string Nth(int fromEnd) { int line = 1000 - fromEnd; return (line % 2 == 0 ? "question " : "answer ") + (line / 2 + 1); }
+        Assert.Equal(Nth(first + 1), Said(lines[^1]));
+        Assert.Equal(Nth(first + 2), Said(lines[^2]));
+        Assert.Equal(Nth(first + AcpChat.PageLines), Said(lines[0]));
+
+        // The page before that one, and then the one that reaches the start.
+        var second = Earlier(chat, Str(lines[0], "uuid")).GetProperty("lines").EnumerateArray().ToList();
+        Assert.Equal(AcpChat.PageLines, second.Count);
+        Assert.Equal(Nth(first + AcpChat.PageLines + 1), Said(second[^1]));
+        var last = Earlier(chat, Str(second[0], "uuid"));
+        Assert.Equal(JsonValueKind.Null, last.GetProperty("next").ValueKind);
+        var start = last.GetProperty("lines").EnumerateArray().ToList();
+        Assert.Equal(("question 1", 1000 - first - 2 * AcpChat.PageLines), (Said(start[0]), start.Count));
+
+        // Before the first line there is nothing, and a message nobody has is not a place.
+        foreach (string none in new[] { Str(start[0], "uuid"), "no-such-message", "" })
+        {
+            var empty = Earlier(chat, none);
+            Assert.Equal((0, JsonValueKind.Null), (empty.GetProperty("lines").GetArrayLength(), empty.GetProperty("next").ValueKind));
+        }
+        var asked = chat.History("h7", Str(shown[0], "uuid"), "viewer-b").Single();
+        Assert.Equal((ChatEffectKind.Reply, "viewer-b", "h7"), (asked.Kind, asked.Tag, Str(Of(asked), "request")));
+    }
+
+    [Fact]
+    public void A_page_is_as_many_lines_as_fit_and_never_none_while_there_are_some()
+    {
+        var chat = new AcpChat("OpenCode", Cwd, "", "", "", "", budget: 2_000);
+        var record = new HostRecord();
+        var create = Sent(chat.FromCli(J(Response(Id(Sent(chat.Start()).Single()), OcInit)), record, T0)).Single();
+        chat.FromCli(J(Response(Id(create), OcNew)), record, T0);
+        var load = Sent(chat.Resume("r1", OcOther, "viewer-a")).Single();
+        string big = new('x', AcpChat.PageBytes * 3 / 5);
+        foreach (string said in new[] { "start", big, big, big, "end" })
+        {
+            chat.FromCli(J(Update(OcOther, Text("user_message_chunk", "q"))), record, T0);
+            chat.FromCli(J(Update(OcOther, Text("agent_message_chunk", said))), record, T0);
+        }
+        var shown = Seeded(chat.FromCli(J(Response(Id(load), OcConfig())), record, T0)).Lines.Select(L).ToList();
+        Assert.Equal("end", Said(shown[^1]));
+        Assert.Equal("q", Said(shown[0]));
+
+        // One big answer and the question after it fit; a second big answer does not.
+        var page = Earlier(chat, Str(shown[0], "uuid")).GetProperty("lines").EnumerateArray().ToList();
+        Assert.Equal(new[] { 1, big.Length }, page.Select(l => Said(l).Length));
+        // A line bigger than a page is still a page.
+        var huge = new AcpChat("OpenCode", Cwd, "", "", "", "", budget: 2_000);
+        create = Sent(huge.FromCli(J(Response(Id(Sent(huge.Start()).Single()), OcInit)), record, T0)).Single();
+        huge.FromCli(J(Response(Id(create), OcNew)), record, T0);
+        load = Sent(huge.Resume("r1", OcOther, "viewer-a")).Single();
+        huge.FromCli(J(Update(OcOther, Text("agent_message_chunk", new string('y', AcpChat.PageBytes * 2)))), record, T0);
+        huge.FromCli(J(Update(OcOther, Text("user_message_chunk", "after it"))), record, T0);
+        huge.FromCli(J(Update(OcOther, Text("agent_message_chunk", new string('z', 3_000)))), record, T0);
+        shown = Seeded(huge.FromCli(J(Response(Id(load), OcConfig())), record, T0)).Lines.Select(L).ToList();
+        Assert.Single(shown);
+        var two = Earlier(huge, Str(shown[0], "uuid")).GetProperty("lines").EnumerateArray().ToList();
+        Assert.Equal("after it", Said(two.Single()));
+        Assert.Equal(AcpChat.PageBytes * 2, Said(Earlier(huge, Str(two[0], "uuid")).GetProperty("lines").EnumerateArray().Single()).Length);
+    }
+
+    [Fact]
+    public void What_is_said_after_a_conversation_is_opened_is_remembered_with_its_time_for_the_pages_to_come()
+    {
+        var (chat, record, seed) = Reopened("OpenCode", 2, budget: 1_000_000);
+        Assert.False(seed.Earlier);
+        var turn = Sent(chat.FromViewer(J(UserSays("and now?")), record, After(60))).Single(m => Method(m) == "session/prompt");
+        chat.FromCli(J(Update(OcOther, Text("agent_message_chunk", "Now this."))), record, After(62));
+        chat.FromCli(J(Update(OcOther, AgyRun)), record, After(63));
+        chat.FromCli(J(Update(OcOther, AgyRunDone)), record, After(64));
+        chat.FromCli(J(Update(OcOther, Text("agent_message_chunk", "All done."))), record, After(65));
+        var ended = Kept(chat.FromCli(J(Response(Id(turn), Stopped("end_turn"))), record, After(66)));
+        Assert.Equal("All done.", Said(ended[0]));
+
+        // The whole conversation before its last message: the replay, then what was said here, with the times it was said.
+        var page = Earlier(chat, Str(ended[0], "uuid")).GetProperty("lines").EnumerateArray().ToList();
+        Assert.Equal(new[] { "question 1", "answer 1", "question 2", "answer 2", "and now?", "Now this." }, page.Take(6).Select(Said));
+        Assert.Equal(new[] { "assistant", "user" }, page.Skip(6).Select(Type));
+        // (What the agent says is whole, and so kept, when the next thing follows it: the call a second later.)
+        Assert.Equal(new string?[] { null, null, null, null, "2026-11-13T13:01:00.000Z", "2026-11-13T13:01:03.000Z", "2026-11-13T13:01:03.000Z", "2026-11-13T13:01:04.000Z" }, page.Select(When));
+        // A call and what it came back with are two lines a viewer can tell apart.
+        Assert.Equal(Str(page[6], "uuid") + ":r", Str(page[7], "uuid"));
+        // And what a viewer is handed as it happens carries the time a page will give it.
+        Assert.Equal("2026-11-13T13:01:06.000Z", When(ended[0]));    }
+
+    [Fact]
+    public void Moving_to_another_conversation_or_starting_one_leaves_nothing_of_the_last_ones_past()
+    {
+        var (chat, record, seed) = Reopened("OpenCode", 30, budget: 1_500);
+        Assert.True(seed.Earlier);
+        string oldest = Str(L(seed.Lines[0]), "uuid");
+        Assert.NotEqual(0, Earlier(chat, oldest).GetProperty("lines").GetArrayLength());
+
+        var load = Sent(chat.Resume("r2", OcThird, "viewer-a")).Single();
+        chat.FromCli(J(Update(OcThird, Text("user_message_chunk", "another one"))), record, T0);
+        // Until it is the one served, the pages are still the open conversation's.
+        Assert.NotEqual(0, Earlier(chat, oldest).GetProperty("lines").GetArrayLength());
+        var next = Seeded(chat.FromCli(J(Response(Id(load), OcConfig())), record, T0));
+        Assert.False(next.Earlier);
+        Assert.Equal(0, Earlier(chat, oldest).GetProperty("lines").GetArrayLength());
+        Assert.Equal(0, Earlier(chat, Str(L(next.Lines[0]), "uuid")).GetProperty("lines").GetArrayLength());
+    }
+
+    [Fact]
+    public void The_past_is_kept_up_to_a_size_and_the_oldest_of_it_goes_first()
+    {
+        var (chat, record, _) = Reopened("OpenCode", 0, budget: 1_000_000);
+        chat.LogMost = 1_200;
+        string last = "";
+        for (int i = 1; i <= 20; i++)
+        {
+            var turn = Sent(chat.FromViewer(J(UserSays($"question {i}")), record, After(i))).Single(m => Method(m) == "session/prompt");
+            chat.FromCli(J(Update(OcOther, Text("agent_message_chunk", $"answer {i}"))), record, After(i));
+            last = Str(Kept(chat.FromCli(J(Response(Id(turn), Stopped("end_turn"))), record, After(i)))[0], "uuid");
+        }
+        var page = Earlier(chat, last);
+        var lines = page.GetProperty("lines").EnumerateArray().Where(l => Type(l) != "result").ToList();
+        Assert.Equal(JsonValueKind.Null, page.GetProperty("next").ValueKind);
+        Assert.Equal("question 20", Said(lines[^1]));
+        Assert.InRange(lines.Count, 2, 12);
+        Assert.DoesNotContain(lines, l => Said(l) is "question 1" or "answer 1" or "question 10");
+    }
+
+    [Fact]
+    public void A_replayed_Antigravity_conversation_gets_the_times_its_transcript_on_disk_has()
+    {
+        var disk = new Disk();
+        disk.Kept[AgyOther] = new[]
+        {
+            AgyDiskTests.Asked(0, "2026-03-04T10:00:05Z", "question 1"), AgyDiskTests.Planned(1, "2026-03-04T10:00:07Z", "answer 1"),
+            AgyDiskTests.Asked(2, "2026-03-04T18:30:00Z", "question 2"), AgyDiskTests.Planned(3, "2026-03-04T18:30:09Z", "answer 2"),
+        }.Select(l => AgyStep.Parse(Encoding.UTF8.GetBytes(l))!).ToList();
+
+        var (chat, _, seed) = Reopened("Agy", 3, budget: 1_000_000, disk);
+        var lines = seed.Lines.Select(L).ToList();
+        // The third exchange is not on disk: it has no time, and is not given one.
+        Assert.Equal(new string?[] { "2026-03-04T10:00:05.000Z", "2026-03-04T10:00:07.000Z", "2026-03-04T18:30:00.000Z", "2026-03-04T18:30:09.000Z", null, null }, lines.Select(When));
+        Assert.All(lines, l => Assert.True(l.GetProperty("history").GetBoolean()));
+        // An earlier page has them too.
+        Assert.Equal("2026-03-04T10:00:05.000Z", When(Earlier(chat, Str(lines[1], "uuid")).GetProperty("lines")[0]));
+
+        // The same steps under a conversation of another agent are not its transcript.
+        var elsewhere = new Disk();
+        elsewhere.Kept[OcOther] = disk.Kept[AgyOther];
+        Assert.All(Reopened("OpenCode", 2, budget: 1_000_000, elsewhere).Seed.Lines.Select(L), l => Assert.Null(When(l)));
+        // And with nothing on disk the replay is as it came.
+        Assert.All(Reopened("Agy", 2, budget: 1_000_000, new Disk()).Seed.Lines.Select(L), l => Assert.Null(When(l)));
     }
 }
