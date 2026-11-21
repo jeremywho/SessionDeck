@@ -2300,10 +2300,15 @@ public class AcpChatTests
         // A message typed meanwhile waits: what follows a prompt sent now could not be told from the past still arriving.
         Assert.Empty(chat.FromViewer(J(UserSays("and now?")), record, T0.AddMilliseconds(400)));
         Assert.Empty(chat.Tick(record, T0.AddMilliseconds(900)));
+        // Quiet is counted from the last of it, and a message still arriving is not taken to be said and done.
+        Assert.Empty(chat.FromCli(J(Update(AgyOther, Text("agent_message_chunk", "the last of it"))), record, T0.AddMilliseconds(950)));
+        Assert.Empty(chat.Tick(record, T0.AddMilliseconds(1500)));
 
         // It has gone quiet: the rest is kept as the past it is, with its own times, and then the message is sent.
         var ended = chat.Tick(record, After(2));
         var kept = Kept(ended);
+        Assert.Equal(("the last of it", true), (Said(kept[3]), kept[3].GetProperty("history").GetBoolean()));
+        kept.RemoveAt(3);
         Assert.Equal(new[] { "user", "assistant", "assistant", "user" }, kept.Take(4).Select(Type));
         Assert.Equal(("question 2", "answer 2", "Shell"), (Said(kept[0]), Said(kept[1]), Str(Block(kept[2]), "name")));
         Assert.All(kept.Take(3), l => Assert.True(l.GetProperty("history").GetBoolean()));
