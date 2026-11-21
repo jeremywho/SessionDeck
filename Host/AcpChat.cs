@@ -455,7 +455,6 @@ internal sealed class AcpChat : IChatAgent
         return effects;
     }
 
-    /// <summary>The protocol replays a conversation whole or not at all: there is never an earlier page to give.</summary>
     /// <summary>
     /// The conversation before the message a viewer names (the oldest it shows), as much as makes a
     /// page. Nothing when the message is not known, or is the first there is.

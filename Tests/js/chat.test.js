@@ -1199,3 +1199,34 @@ test('a subagent that has reported and is set going again is at work again', () 
   assert.equal(taskRunning(agent), true);
   assert.equal(runOverview([agent]).running, true);
 });
+
+test('a page that is a subagent and its work moves the place to ask from, and puts the work under its call', () => {
+  // What an Antigravity or OpenCode host sends for "earlier": it starts at the call, so that the lines under it have
+  // somewhere to go and the next page is asked for from a message of the conversation itself.
+  const m = new ChatModel();
+  m.durable(Object.assign(said('It ran them all.'), { uuid: 'a-9' }));
+  assert.equal(m.oldest.uuid, 'a-9');
+  m.prepend([
+    Object.assign(used('c1', 'Agent', { description: 'File Lister', prompt: 'p' }), { uuid: 'c1' }),
+    Object.assign(returned('c1', ''), { uuid: 'c1:r' }),
+    task('task_started', 'c1', { description: 'File Lister', is_backgrounded: true }),
+    Object.assign(under('c1', used('s1', 'Shell', { command: 'dir' })), { uuid: 's1' }),
+    Object.assign(under('c1', returned('s1', 'a.txt')), { uuid: 's1:r' }),
+    task('task_notification', 'c1', { status: 'completed' }),
+  ], 7);
+  assert.equal(m.oldest.uuid, 'c1');
+  assert.equal(m.earlier, true);
+  assert.deepEqual(m.historyAsk(), { uuid: 'c1' });
+  const agent = calls(m).find(c => c.id === 'c1');
+  assert.equal(agent.children.length, 1);
+  assert.deepEqual(agent.children[0].result, { text: 'a.txt', error: false });
+  assert.equal(taskRunning(agent), false);
+
+  // The same lines without their call (a page cut inside the subagent's work) are under nothing, and leave the place
+  // to ask from where it was: which is why a host never sends such a page.
+  const cut = new ChatModel();
+  cut.durable(Object.assign(said('It ran them all.'), { uuid: 'a-9' }));
+  cut.prepend([Object.assign(under('c1', used('s1', 'Shell', { command: 'dir' })), { uuid: 's1' }), task('task_notification', 'c1', { status: 'completed' })], 7);
+  assert.equal(cut.oldest.uuid, 'a-9');
+  assert.equal(calls(cut).length, 0);
+});
