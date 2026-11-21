@@ -24,8 +24,11 @@ internal sealed class ChatStream
     /// 5: names the session when a viewer asks (<c>rename</c>), without a turn.
     /// 6: runs the CLI once. From the build that brought Codex chats, a Claude chat host also started a second
     /// copy of it in a console nobody saw; a host from before this is restarted when idle to be rid of it.
+    /// 7: a viewer that attaches is given what is being said right now, and a turn that ends with something
+    /// half said keeps it (<see cref="ChatLive"/>): every viewer shows the same whenever it attached. A host
+    /// from before this can show a viewer that was watching more than one that was not; the pane says so.
     /// </summary>
-    public const int Revision = 6;
+    public const int Revision = 7;
 
     /// <summary>Flags every chat launch carries; the session flags and the hook settings follow them.</summary>
     public const string ProtocolFlags = "-p --input-format stream-json --output-format stream-json --verbose --include-partial-messages --replay-user-messages --permission-prompt-tool stdio";

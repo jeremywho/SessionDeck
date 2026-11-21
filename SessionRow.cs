@@ -378,7 +378,10 @@ internal sealed class SessionRow : INotifyPropertyChanged
             });
             if (UpdatePending) lines.Add($"Update installed: v{InstalledVersions.For(_s.Provider)} · restarts when idle, or right-click to restart now");
             if (HostBehind) lines.Add(Host.IsChat && Host.Protocol >= SessionDeck.Host.HostRecord.CurrentProtocol
-                ? "Deck updated: this chat is missing newer features until it restarts · restarts when idle, or right-click to restart now"
+                ? SessionScanner.CanResume(TranscriptPath, true)
+                    ? "Deck updated: this chat is missing newer features until it restarts · restarts when idle, or right-click to restart now"
+                    // Nothing restarts it by itself: a restart ends an agent's timers and subagents, and is the person's to choose.
+                    : "Deck updated: this chat can show different things here and on the phone until it restarts · right-click to restart now"
                 : "Deck updated: this pane cannot open on the phone until it restarts · restarts when idle, or right-click to restart now");
             if (OnOtherDesktop) lines.Add($"On {DesktopLabel}");
             if (_s.SubagentsActive > 0) lines.Add($"Subagents: {_s.SubagentsActive} working / {_s.SubagentsTotal} this session");

@@ -1230,3 +1230,58 @@ test('a page that is a subagent and its work moves the place to ask from, and pu
   assert.equal(cut.oldest.uuid, 'a-9');
   assert.equal(calls(cut).length, 0);
 });
+
+// ---- every viewer shows the same, whenever it attached ----
+
+const { HOST_REPLAYS } = require('../../wwwroot/chat.js');
+
+const began = kind => ({ type: 'stream_event', event: { type: 'content_block_start', content_block: { type: kind } }, parent_tool_use_id: null });
+const grew = text => ({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text } }, parent_tool_use_id: null });
+const shown = m => m.items.filter(i => i.kind === 'assistant' || i.kind === 'user' || i.kind === 'note').map(i => `${i.kind}${i.draft ? '*' : ''}:${i.text}`);
+
+test('a viewer told what is being said, whole, shows what one that watched it grow shows, and one message when it is kept', () => {
+  const watched = new ChatModel(), late = new ChatModel();
+  for (const m of [watched, late]) m.durable(echo('go'));
+  watched.live(began('text')); watched.live(grew('half ')); watched.live(grew('said'));
+  // What the host tells a viewer that attaches now (ChatLive.Now): the message begun, and all of it so far.
+  late.live(began('text')); late.live(grew('half said'));
+  assert.deepEqual(shown(late), shown(watched));
+  assert.deepEqual(shown(late), ['user:go', 'assistant*:half said']);
+  // Both then get the rest as it comes, and the line that keeps it: one message, the same in both.
+  for (const m of [watched, late]) { m.live(grew(' and done')); m.durable(said('half said and done')); m.durable(done()); }
+  assert.deepEqual(shown(late), shown(watched));
+  assert.deepEqual(shown(late), ['user:go', 'assistant:half said and done']);
+});
+
+test('a turn interrupted mid-reply leaves the same in a viewer that watched and one that reads the lines later', () => {
+  // The host keeps what was half said ahead of the end of the turn (ChatLive.Keep).
+  const lines = [echo('go'), Object.assign(said('half said'), { partial: true }), { type: 'user', message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user]' }] } }, done({ subtype: 'error_during_execution', is_error: true })];
+  const watched = new ChatModel(), later = new ChatModel();
+  watched.durable(lines[0]);
+  watched.live(began('text')); watched.live(grew('half ')); watched.live(grew('said'));
+  for (const line of lines.slice(1)) watched.durable(line);
+  for (const line of lines) later.durable(line);
+  assert.deepEqual(shown(later), shown(watched));
+  assert.deepEqual(shown(later), ['user:go', 'assistant:half said', 'note:Interrupted']);
+});
+
+test('a viewer that attaches again drops what it had of a message being said, when the host will say it whole', () => {
+  const m = new ChatModel();
+  m.durable(echo('go'));
+  m.live(began('text')); m.live(grew('half '));
+  // An older host says nothing on attach: what was shown stays.
+  m.attached(HOST_REPLAYS - 1);
+  assert.deepEqual(shown(m), ['user:go', 'assistant*:half ']);
+  // The socket dropped, " said and" was missed, and the host tells it all again.
+  m.attached(HOST_REPLAYS);
+  assert.deepEqual(shown(m), ['user:go']);
+  m.live(began('text')); m.live(grew('half said and'));
+  m.live(grew(' done'));
+  m.durable(said('half said and done'));
+  assert.deepEqual(shown(m), ['user:go', 'assistant:half said and done']);
+});
+
+test('the pane knows the host revision that replays, and it is the one the host has', () => {
+  const source = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', '..', 'Host', 'ChatStream.cs'), 'utf8');
+  assert.equal(Number(/public const int Revision = (\d+);/.exec(source)[1]), HOST_REPLAYS);
+});

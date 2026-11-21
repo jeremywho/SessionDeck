@@ -5,6 +5,9 @@
   'use strict';
 
   const INTERRUPTED = '[Request interrupted by user';
+  // The host revision (ChatStream.Revision) from which a viewer that attaches is given what is being said, and a turn
+  // keeps what it left half said. Before it, a viewer that was watching can show more than one that was not.
+  const HOST_REPLAYS = 7;
   const SOLO_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode', 'Agent', 'Task', 'Advisor']);
   // Tools the service runs for the model, by the name the pane shows: the advisor is a second model asked for a
   // review, and reads as a step of its own. Any other keeps the name it came with.
@@ -405,6 +408,16 @@
       draft.draft = false;
       this.touch(draft);
       if (!draft.text) this.remove(draft);
+    }
+
+    // The socket was attached again. A host that says what is being said to whoever attaches (HOST_REPLAYS) says
+    // it whole, so what this viewer had of it is dropped: it may have missed part while it was away. From an older
+    // host nothing would replace it, and it stays.
+    attached(hostRevision) {
+      if (hostRevision < HOST_REPLAYS) return;
+      for (const d of this.drafts) this.remove(d);
+      this.drafts = [];
+      this.current = null;
     }
 
     // Drafts whose finished message never came (an interrupt) stay as what was said so far.
@@ -845,7 +858,7 @@
     return modes;
   }
 
-  const api = { ChatModel, timeLabel, since, pauseBefore, PAUSE_MS, LineReader, Wire, toolBrief, textOf, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText, liveStep, taskRunning, asks, offeredCommands, renameAsked, skillsAsked, skillsNote, reloadNote, modelLabel, Recall, filterSessions, ago, startsOver, clampWide, diffKind };
+  const api = { HOST_REPLAYS, ChatModel, timeLabel, since, pauseBefore, PAUSE_MS, LineReader, Wire, toolBrief, textOf, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText, liveStep, taskRunning, asks, offeredCommands, renameAsked, skillsAsked, skillsNote, reloadNote, modelLabel, Recall, filterSessions, ago, startsOver, clampWide, diffKind };
   if (typeof module !== 'undefined' && module.exports) { module.exports = api; return; }
 
   // ================= the page side =================
@@ -940,7 +953,10 @@
     // without scrolling. Shown once it has been quiet for a minute and nothing is running.
     const tail = h('div', 'time-tail');
     tail.hidden = true;
-    column.append(earlier, empty, working, tail);
+    // A session started before an update keeps running on the host it was started with.
+    const behind = h('div', 'host-behind', 'This chat started on an older version of Session Deck, so the desktop and the phone can show different things. Restart it from the session list on the desktop to update it.');
+    behind.hidden = true;
+    column.append(earlier, empty, working, tail, behind);
     scroll.appendChild(column);
 
     // The composer is one card: what is attached, the message, and under it the session's settings and the send button.
@@ -2054,6 +2070,8 @@
             if ((msg.epoch || 0) !== epoch) resuming = '';
             epoch = msg.epoch || 0;
             hostRevision = msg.chat || 0;
+            model.attached(hostRevision);
+            behind.hidden = hostRevision >= HOST_REPLAYS;
             seq = msg.start;
             // `start` says nothing about what came before: a viewer that reattaches asks for what follows the
             // last byte it has, and is answered from there. The host says whether its transcript goes back further.

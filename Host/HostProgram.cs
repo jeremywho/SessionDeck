@@ -166,6 +166,8 @@ internal static class HostProgram
     static readonly ChatStream _chat = new();
     /// <summary>Set for a chat whose agent has no stream-json mode (Codex's app server, an ACP agent): this turns its protocol into the lines a viewer reads.</summary>
     static IChatAgent? _agent;
+    /// <summary>What attached viewers show that the scrollback does not hold. Read and written under <see cref="ClientsLock"/> only.</summary>
+    static ChatLive? _live;
     static System.Threading.Timer? _agentTick;
     static System.Threading.Timer? _agentWatch;
     static int _agentWatching;
@@ -302,6 +304,7 @@ internal static class HostProgram
         }
         if (chat)
         {
+            _live = new ChatLive(saysWork: _agent != null);
             // The CLI reports nothing until it is spoken to: a chat session starts out waiting for the person.
             _record.AgentStatus = "idle";
             _record.StatusAt = _record.StartedAt;
@@ -344,6 +347,9 @@ internal static class HostProgram
         {
             string errors;
             lock (_chatErrors) errors = _chatErrors.ToString().Trim();
+            // Nothing more will be said: what was half said is kept, so a viewer that comes later reads it too.
+            lock (ClientsLock)
+                foreach (var cut in _live!.Ending(DateTime.UtcNow)) AppendChatLine(cut);
             if (errors.Length > 0) AppendChatLine(ChatStream.HostLine("stderr", errors));
         }
         _record.ExitCode = _exitCode;
@@ -436,12 +442,31 @@ internal static class HostProgram
         }
     }
 
+    /// <summary>A line of the conversation: into the scrollback and to every viewer, after whatever was half said when it ends a turn.</summary>
     static void AppendChatLine(byte[] line)
     {
-        var framed = new byte[line.Length + 1];
-        line.CopyTo(framed, 0);
-        framed[^1] = (byte)'\n';
-        AppendAndSend(framed);
+        lock (ClientsLock)
+            foreach (var kept in _live?.Keep(line, DateTime.UtcNow) ?? new List<byte[]> { line })
+            {
+                var framed = new byte[kept.Length + 1];
+                kept.CopyTo(framed, 0);
+                framed[^1] = (byte)'\n';
+                AppendAndSend(framed);
+            }
+    }
+
+    /// <summary>
+    /// A line for the viewers attached now. It is noted and sent under the lock a viewer attaches
+    /// under, so one that attaches is told of it exactly once: in what is being said, or as it is sent.
+    /// </summary>
+    static void SayLive(byte[] line)
+    {
+        byte[] frame = ChatStream.LiveFrame(line);
+        lock (ClientsLock)
+        {
+            _live?.Said(line);
+            foreach (var c in Clients) c.Out.Writer.TryWrite((true, frame));
+        }
     }
 
     /// <summary>The conversation a chat host's CLI runs: its id, the command that starts the CLI on it, its transcript, and what to call it.</summary>
@@ -623,6 +648,7 @@ internal static class HostProgram
         lock (ClientsLock)
         {
             _chatEarlier = seed.Next >= 0;
+            _live?.Reset();
             _ringFloor = _ring.Clear();
             _chatEpoch++;
             byte[] snapshot = Encoding.UTF8.GetBytes(SnapshotJson(_ringFloor, _ringFloor, c.Title, 0, 0, ChatStream.Kind, ChatStream.Revision, c.Session, _chatEarlier, _chatEpoch));
@@ -640,6 +666,7 @@ internal static class HostProgram
         lock (ClientsLock)
         {
             _chatEarlier = seed.Earlier;
+            _live?.Reset();
             _ringFloor = _ring.Clear();
             _chatEpoch++;
             byte[] snapshot = Encoding.UTF8.GetBytes(SnapshotJson(_ringFloor, _ringFloor, seed.Title, 0, 0, ChatStream.Kind, ChatStream.Revision, seed.Session, _chatEarlier, _chatEpoch));
@@ -673,7 +700,7 @@ internal static class HostProgram
                     // A message with no time of its own is being said now. Stamped before it is kept, so a viewer that
                     // attaches later reads the same time.
                     case ChatEffectKind.Durable: AppendChatLine(ChatLines.StampedNow(effect.Data, DateTime.UtcNow)); break;
-                    case ChatEffectKind.Live: Broadcast(true, ChatStream.LiveFrame(effect.Data)); break;
+                    case ChatEffectKind.Live: SayLive(effect.Data); break;
                     case ChatEffectKind.Frame: Broadcast(true, effect.Data); break;
                     case ChatEffectKind.Reset: Serve(effect.Seed!); break;
                     case ChatEffectKind.Reply:
@@ -782,7 +809,7 @@ internal static class HostProgram
         if (catalog != null) Broadcast(true, Encoding.UTF8.GetBytes(catalog));
         if (settings != null) Broadcast(true, Encoding.UTF8.GetBytes(settings));
         if (durable) AppendChatLine(ChatStream.ForRing(line));
-        else if (!ownAnswer) Broadcast(true, ChatStream.LiveFrame(line));
+        else if (!ownAnswer) SayLive(line);
         if (decline != null) WriteChatInput(decline);
         if (change.Refresh) WriteChatInput(ChatStream.SettingsLine());
     }
@@ -930,6 +957,8 @@ internal static class HostProgram
                     lock (_record) { catalog = _agent?.CatalogFrame() ?? _chat.CatalogFrame(); settings = _agent?.SettingsFrame() ?? _chat.SettingsFrame(); }
                     if (catalog.Length > 0) client.Out.Writer.TryWrite((true, Encoding.UTF8.GetBytes(catalog)));
                     client.Out.Writer.TryWrite((true, Encoding.UTF8.GetBytes(settings)));
+                    // After the scrollback, what is being said right now: this viewer then shows what the others do.
+                    foreach (var said in _live?.Now() ?? new List<byte[]>()) client.Out.Writer.TryWrite((true, ChatStream.LiveFrame(said)));
                 }
                 Clients.Add(client);
             }

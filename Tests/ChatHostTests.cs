@@ -51,6 +51,14 @@ public class ChatHostTests : IDisposable
                 if ($text -eq 'quit') { [Console]::Error.WriteLine('fake cli: told to quit'); exit 3 }
                 if ($text -eq 'ask') { $out.WriteLine('{"type":"control_request","request_id":"r1","request":{"subtype":"can_use_tool","tool_name":"Write","input":{},"tool_use_id":"t1"}}'); continue }
                 if ($text -eq 'mcp') { $out.WriteLine('{"type":"control_request","request_id":"m1","request":{"subtype":"mcp_message"}}'); continue }
+                # A reply that is still being said: it begins, and nothing more comes until the turn is interrupted.
+                if ($text -eq 'stall') {
+                    $out.WriteLine('{"type":"stream_event","event":{"type":"message_start"}}')
+                    $out.WriteLine('{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text"}}}')
+                    $out.WriteLine('{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"half "}}}')
+                    $out.WriteLine('{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"said"}}}')
+                    continue
+                }
                 $out.WriteLine('{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"echo"}}}')
                 $said = if ($text -eq 'who') { "i am $session" } elseif ($text -eq 'args') { "args: $($args -join ' ')" } else { "echo: $text" }
                 $out.WriteLine((@{ type = 'assistant'; message = @{ role = 'assistant'; content = @(@{ type = 'text'; text = $said }) } } | ConvertTo-Json -Compress -Depth 6))
@@ -62,6 +70,12 @@ public class ChatHostTests : IDisposable
                 elseif ($m.request.subtype -eq 'get_settings') { $out.WriteLine('{"type":"control_response","response":{"subtype":"success","request_id":"' + $id + '","response":{"applied":{"model":"fake-model","effort":"' + $effort + '"}}}}') }
                 elseif ($m.request.subtype -eq 'set_permission_mode') { $mode = $m.request.mode; $out.WriteLine('{"type":"control_response","response":{"subtype":"success","request_id":"' + $id + '","response":{"mode":"' + $mode + '"}}}') }
                 elseif ($m.request.subtype -eq 'apply_flag_settings') { $effort = $m.request.settings.effortLevel; $out.WriteLine('{"type":"control_response","response":{"subtype":"success","request_id":"' + $id + '"}}') }
+                elseif ($m.request.subtype -eq 'interrupt') {
+                    # As the real CLI: no line for what it was saying, only that it was interrupted and that the turn is over.
+                    $out.WriteLine('{"type":"control_response","response":{"subtype":"success","request_id":"' + $id + '"}}')
+                    $out.WriteLine('{"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}')
+                    $out.WriteLine('{"type":"result","subtype":"error_during_execution","is_error":true}')
+                }
                 elseif ($m.request.subtype -eq 'rename_session') {
                     # As the real CLI: the new name first, then the answer; a name it will not take is an error and no name.
                     if ($m.request.title -eq 'taken') { $out.WriteLine('{"type":"control_response","response":{"subtype":"error","request_id":"' + $id + '","error":"that name is taken"}}') }
@@ -203,6 +217,60 @@ public class ChatHostTests : IDisposable
         Assert.Equal(3, await viewer.Exited());
         Assert.True(_host.WaitForExit(15000), "host did not exit after its child did");
         Assert.Equal(3u, Record().ExitCode);
+    }
+
+    [Fact]
+    public async Task Every_viewer_shows_the_same_whenever_it_attached()
+    {
+        string script = Path.Combine(_dir, "fake-claude.ps1");
+        File.WriteAllText(script, FakeCli);
+        await Start(new HostSpec
+        {
+            Id = "chattest0001", SessionId = "live-session", Provider = "Claude", Kind = ChatStream.Kind,
+            CommandLine = $"\"{SessionLauncher.ResolvePowerShell()}\" -NoLogo -NoProfile -File \"{script}\" live-session",
+            Cwd = _dir, HostsDir = Path.Combine(_dir, "hosts"), RingBytes = 256 * 1024,
+        });
+        var record = await RecordWhen(r => r.ChildPid > 0);
+        using var watching = await Viewer.Attach(record, after: 0);
+        Assert.Equal(ChatStream.Revision, watching.Snapshot.GetProperty("chat").GetInt32());
+        await watching.Send(ChatStream.UserLine("stall"));
+        await watching.Pump(() => watching.Live.Count(l => Type(l) == "stream_event") >= 4);
+
+        // One that attaches while the reply is being said is told all of it so far, once, after the scrollback.
+        static string Being(Viewer v)
+        {
+            string said = "";
+            foreach (var ev in v.Live.Where(l => Type(l) == "stream_event").Select(l => l.GetProperty("event")))
+            {
+                if (ev.GetProperty("type").GetString() is "content_block_start" or "message_start") said = "";
+                else if (ev.GetProperty("type").GetString() == "content_block_delta") said += ev.GetProperty("delta").GetProperty("text").GetString();
+            }
+            return said;
+        }
+        Assert.Equal("half said", Being(watching));
+        using var late = await Viewer.Attach(Record(), after: 0);
+        await late.Pump(() => late.Settings.Count > 0 && late.Live.Count >= 2);
+        Assert.Equal(new[] { "content_block_start", "content_block_delta" }, late.Live.Select(l => l.GetProperty("event").GetProperty("type").GetString()));
+        Assert.Equal("half said", Being(late));
+        Assert.Equal(watching.Lines.Select(l => l.GetRawText()), late.Lines.Select(l => l.GetRawText()));
+
+        // The turn is interrupted with the reply never finished: it is kept as far as it got, ahead of the end, for
+        // both of them and for one that attaches when it is all over.
+        await watching.Send("""{"type":"control_request","request_id":"i1","request":{"subtype":"interrupt"}}""");
+        var end = (await watching.Until(l => Type(l) == "result")).TakeLast(3).ToList();
+        Assert.Equal(new[] { "assistant", "user", "result" }, end.Select(Type));
+        Assert.Equal(("half said", true), (Said(end[0]), end[0].GetProperty("partial").GetBoolean()));
+        await late.Until(l => Type(l) == "result");
+        using var after = await Viewer.Attach(Record(), after: 0);
+        await after.Until(l => Type(l) == "result");
+        await after.Pump(() => after.Settings.Count > 0);
+        Assert.Equal(watching.Lines.Select(l => l.GetRawText()), late.Lines.Select(l => l.GetRawText()));
+        Assert.Equal(watching.Lines.Select(l => l.GetRawText()), after.Lines.Select(l => l.GetRawText()));
+        Assert.Empty(after.Live);
+
+        await watching.SendFrame("""{"type":"kill"}""");
+        await watching.Exited();
+        Assert.True(_host!.WaitForExit(15000), "host did not exit after it was told to end");
     }
 
     [Fact]

@@ -89,6 +89,7 @@
 /* When something was said: where the conversation starts or picks up after a pause, and under its last message. The
    time belongs to what follows it, so it sits close above that and well clear of what came before. */
 .chat .time-mark, .chat .time-tail { color: var(--fg3); font-size: 0.875em; text-align: center; }
+.chat .host-behind { color: var(--pr-amber); font-size: 0.875em; margin-top: 14px; max-width: 74ch; }
 .chat-column > * + .time-mark { margin-top: 38px; }
 /* At the top there is nothing to stand clear of (the two before it there are the button for earlier messages and the empty note). */
 .chat-column > .chat-empty + .time-mark { margin-top: 22px; }
