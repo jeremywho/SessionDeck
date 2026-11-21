@@ -2253,6 +2253,18 @@ public class AcpChatTests
     }
 
     [Fact]
+    public void A_blank_message_read_back_from_an_earlier_process_is_left_out()
+    {
+        // Nobody was told it began, so nothing has to end it, and a pane would show nothing for it.
+        var (chat, record, _) = OpenWith("OpenCode");
+        var load = Sent(chat.Resume("r1", OcOther, "viewer-a")).Single();
+        foreach (string update in new[] { Text("user_message_chunk", "first"), Text("agent_message_chunk", " \n"), Text("agent_thought_chunk", "  "), Text("user_message_chunk", "second"), Text("agent_message_chunk", "an answer") })
+            chat.FromCli(J(Update(OcOther, update)), record, T0);
+        var lines = Seeded(chat.FromCli(J(Response(Id(load), OcConfig())), record, T0)).Lines.Select(L).ToList();
+        Assert.Equal(new[] { "first", "second", "an answer" }, lines.Select(Said));
+    }
+
+    [Fact]
     public void No_two_lines_of_a_conversation_have_one_id()
     {
         // A message that carries an id and is kept in two parts (said, a pause, said on): a viewer names a line by its id.
