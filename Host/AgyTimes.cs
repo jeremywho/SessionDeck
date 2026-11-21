@@ -80,7 +80,9 @@ internal static class AgyTimes
         {
             if (steps[i].Type != AgyStep.UserInput) continue;
             string asked = Plain(Request(steps[i].Content));
-            if (asked == told || asked.StartsWith(told, StringComparison.Ordinal) || (told.Length >= Telling && asked.Contains(told, StringComparison.Ordinal))) return i;
+            // The agent can append to what was typed (measured: a command's name, after a slash). Anything else after
+            // the words makes it another request that only begins the same way.
+            if (asked == told || (asked.StartsWith(told, StringComparison.Ordinal) && asked[told.Length] == '/')) return i;
         }
         return -1;
     }
@@ -124,7 +126,8 @@ internal static class AgyTimes
             if (steps[i].Type != AgyStep.Planner) continue;
             string said = Plain(steps[i].Content);
             if (said.Length == 0) continue;
-            if (rest.StartsWith(said, StringComparison.Ordinal))
+            // Once a message has been passed over, a step is only taken for the start if its own words are enough to tell.
+            if (rest.StartsWith(said, StringComparison.Ordinal) && (parts.Count > 0 || looked == 0 || said.Length >= Telling))
             {
                 parts.Add(i);
                 rest = rest[said.Length..].TrimStart();

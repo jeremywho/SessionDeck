@@ -377,11 +377,72 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
   Antigravity sends no `session/request_permission`, so an AGY chat started here never asks; the npm
   `opencode.cmd` shim is followed to the exe behind it). The same command starts a conversation and comes back to one: the session id goes in
   `HostSpec.SessionId` and the translator loads it.
-- **What ACP does not have, by measurement:** no earlier page (`session/load` replays the whole
-  conversation, trimmed to half the ring, and `History` always answers empty); no adding to a
-  running turn (a message typed meanwhile is the next `session/prompt`); no transcript path, so
-  an ACP chat is not restarted onto a new build by itself. A loaded conversation comes without
-  its name, which is then read from `session/list`.
+- **What ACP does not have, by measurement:** no part of a conversation on request
+  (`session/load` replays the whole of it, and the scrollback takes its end, half the ring); no
+  adding to a running turn (a message typed meanwhile is the next `session/prompt`); no
+  transcript path, so an ACP chat is not restarted onto a new build by itself. A loaded
+  conversation comes without its name, which is then read from `session/list`.
+- **An earlier page comes from the host, not the agent.** `AcpChat` keeps every line of the open
+  conversation (`_log`: the replay whole, then each line as it is kept, stamped by `Logged` at
+  every entry point), up to `LogMost` (64 MB, then the oldest go). `History` answers with the
+  page before the message a viewer names by `uuid`: at most `PageLines` lines and `PageBytes`
+  bytes, never none while there is one. So no two lines have one id: a call's result is
+  `<call>:r`, and a message the agent gave an id that is kept in two parts gets a second id
+  for the second (`Flush`). `ChatSeed.Earlier` is true when the replay was cut.
+  A page, and what the scrollback starts with, begins at a message of the conversation itself
+  and holds the call of every subagent line in it (`Whole`, and the cut at `session/load`): a
+  viewer moves on from a page by the first such message in it, so a page of subagent lines
+  alone would be asked for again and again, and it shows a subagent's line only under a call
+  it has. That can make a page as long as a subagent's whole work. Not covered: lines that
+  leave the ring while a session runs can leave a viewer that attaches later with subagent
+  lines whose call is in the page before.
+- **What Antigravity keeps on disk, and what is read from it** (`Host/AgyDisk.cs`; measured on
+  1.5.13, with `C:\Temp\chatlab\acp-subagent-files.mjs` and `acp-replay-vs-disk.mjs` on the
+  machine it was measured on). Under `%USERPROFILE%\.gemini\antigravity-cli\brain\<conversation>\.system_generated`:
+  `logs\transcript.jsonl`, one JSON object per step (`USER_INPUT`, `PLANNER_RESPONSE`, `GENERIC`
+  for what a call came back with, `SYSTEM_MESSAGE`), appended when the step happens and never
+  rewritten, each with `created_at` to the second; and `subagents\<id>.json` for every subagent
+  the conversation started, each subagent being a conversation with a transcript of its own.
+  The format is the agent's own and is read as such: only a UUID is ever made into a path, a
+  line that does not parse is skipped, and nothing found means today's behaviour, not an error.
+  `HostRecord.TranscriptPath` stays empty for these chats: the app restarts a chat that has
+  one after an update, which would end the agent's timers and subagents.
+  - **Times** (`AgyTimes.Stamp`, at `session/load`): each replayed message gets the time of the
+    step that holds its words. What was typed is found between the `<USER_REQUEST>` marks (the
+    agent adds its context after them and can append to the request itself); what the agent said
+    is a step's `content`. The replay runs together what the agent said in steps that had only a
+    system message between them (a timer's reply 40 s after the message that set it): those are
+    cut apart again, each with its time (`<uuid>.1`). A wrong time is worse than none, so the
+    search only goes forward, never past the next thing asked, short words are matched whole or
+    from the start and never inside longer ones, a time is never earlier than the one before it,
+    and a line whose words are not found keeps no time. OpenCode's replay is left as it comes.
+  - **Subagents.** `invoke_subagent` ends within a second and nothing about the subagent is
+    ever said over the protocol; its steps are on disk within a second of happening.
+    `AgyWatch` (a timer of its own in `HostProgram`, once a second, files read outside every
+    lock) hands what is new to `AcpChat.Outside`. A subagent is put under the oldest call still
+    without one whose role is its own (`Claim`). The two wait for each other for `SpawnWait`
+    (60 s; the file is there 0.1 to 1.6 s after the call is announced): a call that failed, or
+    that nothing came for, started nothing, and a subagent no call came for is not this
+    conversation's to show. Without that limit one unmatched call or subagent would shift every
+    pairing after it by one. A subagent is shown as Claude's are: the call reads as
+    `Agent` (role, task), its calls and words are lines with `parent_tool_use_id`, and
+    `task_started` / `task_progress` / `task_notification` say whether it is at work. Its file
+    says `ALIVE` for ever (it can be spoken to again), so its turn is over when its last step
+    is words with no call; `KILLED` ends it too. While one is at work and no turn runs the
+    session is `scheduled` (`Rest`); when one has its say it has reported to the agent, which
+    speaks a second or so later, so the session is busy at once and ends on the usual quiet;
+    one that writes nothing for `HelperQuiet` (30 min: a step is written when it ENDS, so a long
+    command is silence) is no longer waited on. Only subagents that appear while the process is
+    watching are followed: files of an earlier process still say `ALIVE`.
+    What a subagent's call came back with belongs to a call of the step just before it (the
+    agent speaks again only when every call of its last step is back).
+    A reopened conversation shows what its subagents did, read from the same files (`Helped`),
+    only when every such call has its subagent and the roles agree; none is shown as at work.
+    Moving to another conversation (`Resume`) sets the open one's calls aside and keeps
+    following its subagents until the other one is open: if it cannot be opened, the timers
+    and subagents of the one still open are as they were.
+    Not covered: a subagent's own subagents (they show as its calls), its thinking, and
+    `/swarm`, `/teamwork` and `/boost`, which were not run (Antigravity marks them quota-heavy).
 - **Quirks each agent has, each with a test in `AcpChatTests`:** Antigravity lists every
   folder's conversations whatever folder is asked for, writes a real folder as `/C:/…`, and
   gives the ones it has no folder for its own working folder, so where any folder is written
@@ -545,11 +606,12 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
 - **Every message line carries when it was said, as `timestamp` (ISO 8601, UTC), and the pane reads only that.**
   Claude writes it itself, on live lines and in the transcript (`ChatTranscript.Line` copies it into history
   lines). Codex records `startedAtMs`/`completedAtMs` on every item and repeats them when turns are read back
-  (`CodexChat.When`). ACP says no times at all, live or in `session/load` (checked against OpenCode 11-17), so
-  for any agent's message that has none the host writes its own clock on it as it is kept
-  (`ChatLines.StampedNow` in `HostProgram.Agent`), and never on a `history` line: an ACP chat's times are
-  lost when its host restarts and replays the conversation. This needs no `ChatStream.Revision` bump; a
-  line without a time just shows none.
+  (`CodexChat.When`). ACP says no times at all, live or in `session/load` (checked against OpenCode 11-17 and
+  Antigravity 11-20), so for any agent's message that has none the host writes its own clock on it as it is
+  kept (`ChatLines.StampedNow`, in `AcpChat.Logged` and again in `HostProgram.Agent`), and never on a
+  `history` line. An OpenCode chat's times are lost when its host restarts and replays the conversation; an
+  Antigravity chat gets them back from the agent's own transcript on disk (`AgyTimes`, above). This needs
+  no `ChatStream.Revision` bump; a line without a time just shows none.
   In the pane (`chat.js`) the model keeps a clock (`lastAt`) and puts a `time` item ahead of whatever is
   shown next after a pause (`pauseBefore`: the start, an hour, a new day). Times that go backwards do not
   move it (queued messages and parallel results arrive out of order in real transcripts). What is sent or

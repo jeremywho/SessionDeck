@@ -15,7 +15,7 @@ namespace SessionDeck.Host;
 /// <c>session/prompt</c> request answered when the turn ends, with <c>session/update</c>
 /// notifications in between; text arrives in chunks with no end mark, so a message is whole when
 /// something else follows it; a past conversation is reopened with <c>session/load</c>, which
-/// replays all of it as updates before answering, so there is no paging of earlier turns; the
+/// replays all of it as updates before answering, so an earlier page is read from what is kept here; the
 /// model, effort and mode are <c>configOptions</c> the agent lists and the client sets; there is
 /// no adding to a running turn, so a message typed mid-turn waits for the turn to end.</para>
 /// </summary>
@@ -52,7 +52,7 @@ internal sealed class AcpChat : IChatAgent
     bool _stopping;
     /// <summary>The agent would not open a session, and has not been asked again.</summary>
     bool _unopened;
-    readonly Dictionary<string, Tool> _tools = new(StringComparer.Ordinal);
+    Dictionary<string, Tool> _tools = new(StringComparer.Ordinal);
     readonly Dictionary<string, string> _titles = new(StringComparer.Ordinal);
     readonly List<JsonElement> _waiting = new();
     readonly List<byte[]> _replay = new();
@@ -108,7 +108,6 @@ internal sealed class AcpChat : IChatAgent
     /// <summary>A session at rest is what <see cref="Rest"/> says now: a subagent can finish, or go quiet, with the agent saying nothing.</summary>
     void Settle(HostRecord record, DateTime now)
     {
-        if (_prompting || _unasked || _loading != null || _session.Length == 0) return;
         if (record.AgentStatus is "idle" or "scheduled") Status(record, Rest(now), now);
     }
 
@@ -173,6 +172,10 @@ internal sealed class AcpChat : IChatAgent
 
     /// <summary>What the agent keeps on disk about a conversation, where its protocol does not say it.</summary>
     readonly IAgentDisk _disk;
+    /// <summary>The open conversation's calls, while another conversation is being read to move to.</summary>
+    Dictionary<string, Tool>? _held;
+    /// <summary>The ids the agent gave to messages already kept: a viewer names a line by its id, so none is used twice.</summary>
+    readonly HashSet<string> _lineIds = new(StringComparer.Ordinal);
 
     /// <summary>
     /// Every line of the open conversation, oldest first: what was replayed, then what has been kept
@@ -180,7 +183,8 @@ internal sealed class AcpChat : IChatAgent
     /// of a conversation, so this is what an earlier page is read from.
     /// </summary>
     readonly List<byte[]> _log = new();
-    readonly List<string> _logIds = new();
+    /// <summary>For each line of the log: its id, the call it is under, and whether it is a message of the conversation itself.</summary>
+    readonly List<(string Id, string Under, bool Top)> _logShape = new();
     long _logBytes;
     /// <summary>What a conversation being opened replayed, all of it: the log once that conversation is the one served.</summary>
     List<byte[]>? _opening;
@@ -244,7 +248,6 @@ internal sealed class AcpChat : IChatAgent
             _loading = _resume;
             _replay.Clear();
             _tools.Clear();
-            Alone();
             return Call("session/load", new { sessionId = _resume, cwd = _cwd, mcpServers = Array.Empty<object>() }, new Pending("load", Session: _resume));
         }
         return Call("session/new", new { cwd = _cwd, mcpServers = Array.Empty<object>() }, new Pending("new"));
@@ -401,8 +404,10 @@ internal sealed class AcpChat : IChatAgent
         _unasked = false;
         (_replayUsed, _replayWindow) = (0, 0);
         _replay.Clear();
-        _tools.Clear();
-        Alone();
+        // The replay fills these with the other conversation's calls. Until that one is the one open, this one's
+        // calls (its timers) are set aside, not forgotten, and its subagents are still followed.
+        _held = _tools;
+        _tools = new Dictionary<string, Tool>(StringComparer.Ordinal);
         EndRun();
         return new() { Call("session/load", new { sessionId = session, cwd = _cwd, mcpServers = Array.Empty<object>() }, new Pending("load", request, tag, session)) };
     }
@@ -457,9 +462,10 @@ internal sealed class AcpChat : IChatAgent
     /// </summary>
     public List<Effect> History(string request, string uuid, string tag)
     {
-        int before = uuid.Length > 0 ? _logIds.IndexOf(uuid) : -1, start = Math.Max(before, 0);
+        int before = uuid.Length > 0 ? _logShape.FindIndex(s => s.Id == uuid) : -1, start = Math.Max(before, 0);
         long size = 0;
         while (start > 0 && before - start < PageLines && (start == before || size + _log[start - 1].Length + 1 <= PageBytes)) size += _log[--start].Length + 1;
+        start = Whole(start, before);
         var lines = before > 0 ? _log.GetRange(start, before - start) : new List<byte[]>();
         return new() { new Effect(Kind.Reply, ChatStream.HistoryFrame(new ChatTranscript.Page(lines, before > 0 && start > 0 ? start : -1), request), tag) };
     }
@@ -467,6 +473,40 @@ internal sealed class AcpChat : IChatAgent
     // ---- from the agent ----
 
     public List<Effect> FromCli(JsonElement msg, HostRecord record, DateTime now) => Logged(Told(msg, record, now), now);
+
+    /// <summary>
+    /// Where a page that was to start at <paramref name="start"/> has to start for a viewer to use it.
+    /// A viewer asks for the page before the first message of the conversation itself that it shows,
+    /// so a page that holds none would be asked for again and again; and it shows a subagent's line
+    /// only under a call it has, so the page takes in the call of every such line in it. That can
+    /// make it longer than a page is meant to be: as long as the subagent's work.
+    /// </summary>
+    int Whole(int start, int before)
+    {
+        for (bool moved = true; moved && start > 0;)
+        {
+            moved = false;
+            var here = new HashSet<string>(StringComparer.Ordinal);
+            for (int i = start; i < before; i++) here.Add(_logShape[i].Id);
+            var asked = new HashSet<string>(StringComparer.Ordinal);
+            for (int i = start; i < before; i++)
+            {
+                string under = _logShape[i].Under;
+                if (under.Length == 0 || here.Contains(under) || !asked.Add(under)) continue;
+                int call = _logShape.FindLastIndex(start - 1, start, s => s.Id == under);
+                if (call < 0) continue;
+                start = call;
+                moved = true;
+                break;
+            }
+            while (start > 0 && !_logShape[start].Top)
+            {
+                start--;
+                moved = true;
+            }
+        }
+        return start;
+    }
 
     /// <summary>
     /// What is about to be kept is given its time and remembered, in the order it is kept. A message
@@ -481,7 +521,7 @@ internal sealed class AcpChat : IChatAgent
             if (effect.Kind == Kind.Reset)
             {
                 _log.Clear();
-                _logIds.Clear();
+                _logShape.Clear();
                 _logBytes = 0;
                 foreach (var line in _opening ?? effect.Seed!.Lines) Remember(line);
                 _opening = null;
@@ -499,23 +539,27 @@ internal sealed class AcpChat : IChatAgent
     void Remember(byte[] line)
     {
         _log.Add(line);
-        _logIds.Add(IdOf(line));
+        _logShape.Add(Shape(line));
         _logBytes += line.Length;
         int gone = 0;
         while (_logBytes > LogMost && gone < _log.Count - 1) _logBytes -= _log[gone++].Length;
         if (gone == 0) return;
         _log.RemoveRange(0, gone);
-        _logIds.RemoveRange(0, gone);
+        _logShape.RemoveRange(0, gone);
     }
 
-    static string IdOf(byte[] line)
+    /// <summary>A line's id, the call it is under (a subagent's line, or word of the subagent's task), and whether it is a message of the conversation itself.</summary>
+    static (string Id, string Under, bool Top) Shape(byte[] line)
     {
         try
         {
             using var doc = JsonDocument.Parse(line);
-            return Text(doc.RootElement, "uuid");
+            var root = doc.RootElement;
+            string type = Text(root, "type"), under = Text(root, "parent_tool_use_id");
+            if (under.Length == 0 && type == "system") under = Text(root, "tool_use_id");
+            return (Text(root, "uuid"), under, type is "user" or "assistant" && under.Length == 0);
         }
-        catch (JsonException) { return ""; }
+        catch (JsonException) { return ("", "", false); }
     }
 
     List<Effect> Told(JsonElement msg, HostRecord record, DateTime now)
@@ -652,9 +696,12 @@ internal sealed class AcpChat : IChatAgent
     void Flush(bool replay, List<Effect> effects)
     {
         if (_runKind.Length == 0) return;
-        string kind = _runKind, text = _run.ToString(), id = _runId.Length > 0 ? _runId + (kind == "thinking" ? ":t" : "") : (kind == "user" ? "u-" : "a-") + ++_made;
+        bool given = _runId.Length > 0;
+        string kind = _runKind, text = _run.ToString(), id = given ? _runId + (kind == "thinking" ? ":t" : "") : (kind == "user" ? "u-" : "a-") + ++_made;
         EndRun();
         if (text.Trim().Length == 0 && (replay || kind != "text")) return;
+        // A message the agent gave an id can be kept in two parts (said, a pause, said on).
+        if (given && !_lineIds.Add(id)) id += "." + ++_made;
         byte[] line = kind switch
         {
             "user" => UserLine(id, JsonSerializer.SerializeToElement(new[] { new { type = "text", text } }), replay),
@@ -689,7 +736,7 @@ internal sealed class AcpChat : IChatAgent
     sealed class Helper
     {
         public string Id = "", Call = "", Tag = "", Role = "", Last = "";
-        public int Uses;
+        public int Uses, Made;
         /// <summary>Its turn has ended, or it was killed.</summary>
         public bool Over;
         /// <summary>Viewers have been told it is at work, and not yet that it stopped.</summary>
@@ -699,9 +746,19 @@ internal sealed class AcpChat : IChatAgent
     }
 
     /// <summary>The calls of this process that started a subagent not yet seen on disk, oldest first.</summary>
-    readonly List<string> _spawns = new();
+    readonly List<(string Call, DateTime At)> _spawns = new();
     /// <summary>Subagents seen on disk with no call yet to put them under, and what they have done meanwhile.</summary>
-    readonly List<(AgySubagent Subagent, List<AgyStep> Steps)> _unclaimed = new();
+    readonly List<(AgySubagent Subagent, List<AgyStep> Steps, DateTime At)> _unclaimed = new();
+    /// <summary>Subagents no call asked for in time: not this conversation's to show, whatever is called for later.</summary>
+    readonly HashSet<string> _strangers = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// How long a call and a subagent wait for each other. Measured: the subagent's file is there 0.1
+    /// to 1.6 s after its call is announced. A call nothing came for in this long started nothing, and
+    /// a subagent no call came for was not started here; without the limit either would be paired with
+    /// the next of the other kind, and every pairing after it would be off by one.
+    /// </summary>
+    internal static readonly TimeSpan SpawnWait = TimeSpan.FromSeconds(60);
     readonly Dictionary<string, Helper> _helpers = new(StringComparer.Ordinal);
 
     /// <summary>
@@ -719,6 +776,7 @@ internal sealed class AcpChat : IChatAgent
         _helpers.Clear();
         _spawns.Clear();
         _unclaimed.Clear();
+        _strangers.Clear();
     }
 
     /// <summary>What the open conversation's subagents wrote to disk since the last look.</summary>
@@ -727,7 +785,7 @@ internal sealed class AcpChat : IChatAgent
     List<Effect> Seen(AgyNews news, HostRecord record, DateTime now)
     {
         var effects = new List<Effect>();
-        if (news.Conversation != _session || _loading != null) return effects;
+        if (news.Conversation != _session) return effects;
         bool reported = false;
         foreach (var one in news.Subagents)
         {
@@ -738,13 +796,14 @@ internal sealed class AcpChat : IChatAgent
                 reported |= !was && helper.Over && one.Subagent.State != Killed;
                 continue;
             }
+            if (_strangers.Contains(one.Subagent.Id)) continue;
             int waiting = _unclaimed.FindIndex(u => u.Subagent.Id == one.Subagent.Id);
             if (waiting >= 0)
             {
                 _unclaimed[waiting].Steps.AddRange(one.Steps);
-                _unclaimed[waiting] = (one.Subagent, _unclaimed[waiting].Steps);
+                _unclaimed[waiting] = (one.Subagent, _unclaimed[waiting].Steps, _unclaimed[waiting].At);
             }
-            else if (_unclaimed.Count < 64) _unclaimed.Add((one.Subagent, new List<AgyStep>(one.Steps)));
+            else _unclaimed.Add((one.Subagent, new List<AgyStep>(one.Steps), now));
         }
         Claim(now, effects);
         // A subagent that has had its say has reported to the agent, which goes on from there (measured: it speaks
@@ -768,12 +827,19 @@ internal sealed class AcpChat : IChatAgent
     /// </summary>
     void Claim(DateTime now, List<Effect> effects)
     {
+        _spawns.RemoveAll(s => now - s.At > SpawnWait);
         for (int i = 0; i < _unclaimed.Count; i++)
         {
-            var (subagent, steps) = _unclaimed[i];
-            int call = _spawns.FindIndex(id => _tools.TryGetValue(id, out var tool) && tool.Shown && (RoleOf(tool).Length == 0 || subagent.Role.Length == 0 || RoleOf(tool) == subagent.Role));
+            var (subagent, steps, seen) = _unclaimed[i];
+            if (now - seen > SpawnWait)
+            {
+                _strangers.Add(subagent.Id);
+                _unclaimed.RemoveAt(i--);
+                continue;
+            }
+            int call = _spawns.FindIndex(s => _tools.TryGetValue(s.Call, out var tool) && tool.Shown && (RoleOf(tool).Length == 0 || subagent.Role.Length == 0 || RoleOf(tool) == subagent.Role));
             if (call < 0) continue;
-            var helper = new Helper { Id = subagent.Id, Call = _spawns[call], Tag = "sub-" + subagent.Id[..8], Role = subagent.Role.Length > 0 ? subagent.Role : NoRole, HeardAt = now };
+            var helper = new Helper { Id = subagent.Id, Call = _spawns[call].Call, Tag = "sub-" + subagent.Id[..8], Role = subagent.Role.Length > 0 ? subagent.Role : NoRole, HeardAt = now };
             _spawns.RemoveAt(call);
             _unclaimed.RemoveAt(i--);
             _helpers[subagent.Id] = helper;
@@ -800,13 +866,14 @@ internal sealed class AcpChat : IChatAgent
             if (step.Type == AgyStep.Planner)
             {
                 bool said = step.Content.Trim().Length > 0;
-                if (said) lines.Add(At(Assistant($"{helper.Tag}-{step.Index}", new { type = "text", text = step.Content }, history, helper.Call)));
-                for (int k = 0; k < step.Calls.Count; k++)
+                // The agent speaks again once every call of its last step has come back: one still open then never will.
+                helper.Open.Clear();
+                if (said) lines.Add(At(Assistant($"{helper.Tag}-{++helper.Made}", new { type = "text", text = step.Content }, history, helper.Call)));
+                foreach (var made in step.Calls)
                 {
-                    var made = step.Calls[k];
                     // A call the pane has no reading for is told by the first thing it was given (a message's words).
                     string about = made.Args.Values.FirstOrDefault(v => v.Length > 0) ?? "";
-                    var tool = new Tool { Id = $"{helper.Tag}-{step.Index}-{k}", Name = made.Name, Title = about.Length > 120 ? about[..120] : about, Kind = KindOf(made.Name), Input = JsonSerializer.SerializeToElement(made.Args) };
+                    var tool = new Tool { Id = $"{helper.Tag}-{++helper.Made}", Name = made.Name, Title = about.Length > 120 ? about[..120] : about, Kind = KindOf(made.Name), Input = JsonSerializer.SerializeToElement(made.Args) };
                     var input = Input(tool);
                     helper.Open.Enqueue(tool.Id);
                     helper.Uses++;
@@ -964,11 +1031,13 @@ internal sealed class AcpChat : IChatAgent
         if (!replay && tool.Name == Spawn && !tool.Spawned)
         {
             tool.Spawned = true;
-            _spawns.Add(tool.Id);
+            _spawns.Add((tool.Id, now));
         }
         bool ended = tool.Status is "completed" or "failed";
         // OpenCode announces a call before it knows what the call is ("shell", no command yet): it is shown once it runs.
         if (!tool.Shown && (ended || tool.Status == "in_progress")) Show(tool, replay, record, effects);
+        // A call that failed started nothing: the next subagent to show up is not its.
+        if (ended && tool.Spawned && Failed(tool)) _spawns.RemoveAll(s => s.Call == tool.Id);
         if (!replay && tool.Spawned && _unclaimed.Count > 0) Claim(now, effects);
         if (!ended || tool.Done) return;
         tool.Done = true;
@@ -1008,7 +1077,8 @@ internal sealed class AcpChat : IChatAgent
         "move" => "Move",
         "fetch" => "Fetch",
         "think" => "Think",
-        _ => tool.Name.Length > 0 ? char.ToUpperInvariant(tool.Name[0]) + tool.Name[1..] : tool.Title.Length > 0 ? tool.Title : "Tool",
+        // Its own name, as words: "send_message" is how the agent's code spells it.
+        _ => tool.Name.Length > 0 ? char.ToUpperInvariant(tool.Name[0]) + tool.Name[1..].Replace('_', ' ') : tool.Title.Length > 0 ? tool.Title : "Tool",
     };
 
     /// <summary>
@@ -1126,10 +1196,6 @@ internal sealed class AcpChat : IChatAgent
                     break;
                 }
                 _session = Text(result, "sessionId");
-                _log.Clear();
-                _logIds.Clear();
-                _logBytes = 0;
-                Alone();
                 Opened(result, record, effects);
                 record.SessionId = _session;
                 Next(record, now, effects);
@@ -1142,6 +1208,7 @@ internal sealed class AcpChat : IChatAgent
                 if (!ok)
                 {
                     _replay.Clear();
+                    (_tools, _held) = (_held ?? _tools, null);
                     EndRun();
                     string note = "Could not resume that conversation" + (why.Length > 0 ? ": " + why : ".");
                     if (!startup) { effects.Add(new Effect(Kind.Reply, ChatSessions.RefusedFrame(pending.Request, note), pending.Tag)); break; }
@@ -1154,11 +1221,16 @@ internal sealed class AcpChat : IChatAgent
                 Flush(true, effects);
                 _session = session;
                 _open.Clear();
+                _held = null;
+                Alone();
                 var lines = Helped(Timed(new List<byte[]>(_replay), session), session);
                 _replay.Clear();
                 _opening = new List<byte[]>(lines);
                 int size = lines.Sum(l => l.Length + 1), drop = 0;
                 while (drop < lines.Count - 1 && size > _budget) size -= lines[drop++].Length + 1;
+                // What is shown begins at a message of the conversation itself: a subagent's lines stay with their
+                // call, in the page before.
+                while (drop < lines.Count - 1 && !Shape(lines[drop]).Top) drop++;
                 lines.RemoveRange(0, drop);
                 _given = _names.Of(session);
                 string title = _given.Length > 0 ? _given : _titles.GetValueOrDefault(session, "");

@@ -1366,7 +1366,8 @@
         : item.result ? (item.result.error ? 'failed' : 'done') : req && req.decision === 'deny' ? 'failed' : over ? 'stopped' : 'running';
       fresh.dataset.state = state;
       const summary = h('summary');
-      const word = { asking: 'answer required', failed: req && req.decision === 'deny' ? 'declined' : 'failed', stopped: 'stopped', running: 'running' }[state];
+      // A timer that has been set is not doing anything: it is waiting to fire.
+      const word = { asking: 'answer required', failed: req && req.decision === 'deny' ? 'declined' : 'failed', stopped: 'stopped', running: OUTLIVES_TURN.has(item.name) ? 'waiting' : 'running' }[state];
       summary.append(h('span', 'tool-name', item.name), h('span', 'tool-brief', toolBrief(item.name, item.input)));
       if (word) summary.appendChild(h('span', 'tool-state', word));
       const step = liveStep(item);

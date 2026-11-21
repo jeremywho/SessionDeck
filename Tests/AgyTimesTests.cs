@@ -57,6 +57,58 @@ public class AgyTimesTests
             Planned(1, At("09:00:04"), "Done:\n\n- a.txt moved"));
         var stamped = AgyTimes.Stamp(new[] { User("u-1", "please tidy the notes folder and tell me what moved"), Text("a-1", "Done:\n- a.txt moved") }, steps);
         Assert.Equal(new[] { Stamp("09:00:00"), Stamp("09:00:04") }, stamped.Select(When));
+        // Short words too: what the agent appended comes after them.
+        var brief = Steps(JsonSerializer.Serialize(new { step_index = 0, type = "USER_INPUT", created_at = At("09:30:00"), content = "<USER_REQUEST>\ndo it/boost\n</USER_REQUEST>" }));
+        Assert.Equal(Stamp("09:30:00"), When(AgyTimes.Stamp(new[] { User("u-1", "do it") }, brief).Single()));
+    }
+
+    [Fact]
+    public void A_thought_is_looked_for_only_in_the_turn_it_was_thought_in()
+    {
+        var steps = Steps(Asked(0, At("10:00:00"), "first"), Planned(1, At("10:00:01"), "Hm."), Asked(2, At("10:30:00"), "second"), Planned(3, At("10:30:02"), thinking: "Let me weigh the two options carefully."));
+        var stamped = AgyTimes.Stamp(new[] { User("u-1", "first"), Thought("a-1", "Let me weigh the two options carefully."), User("u-2", "second"), Thought("a-2", "Let me weigh the two options carefully.") }, steps);
+        Assert.Equal(new[] { Stamp("10:00:00"), null, Stamp("10:30:00"), Stamp("10:30:02") }, stamped.Select(When));
+        // And it is the step that thought these words, not the first that thought anything.
+        var two = Steps(Asked(0, At("11:00:00"), "go"), Planned(1, At("11:00:01"), thinking: "Something else entirely, at length."), Planned(2, At("11:00:07"), thinking: "Let me weigh the two options carefully."));
+        Assert.Equal(Stamp("11:00:07"), When(AgyTimes.Stamp(new[] { User("u-1", "go"), Thought("a-1", "Let me weigh the two options carefully.") }, two)[1]));
+    }
+
+    [Fact]
+    public void Words_after_the_first_have_to_be_the_next_thing_said()
+    {
+        var steps = Steps(Asked(0, At("10:00:00"), "go"), Planned(1, At("10:00:01"), "Set for later."), Notice(2, At("10:00:40"), "fired"), Planned(3, At("10:00:41"), "Something the replay does not have."), Planned(4, At("10:00:50"), "It rings now, loudly."));
+        var stamped = AgyTimes.Stamp(new[] { User("u-1", "go"), Text("a-1", "Set for later.\n\nIt rings now, loudly.") }, steps);
+        Assert.Equal(new[] { ("u-1", Stamp("10:00:00")), ("a-1", Stamp("10:00:01")) }, stamped.Select(l => (Id(l), When(l))));
+    }
+
+    [Fact]
+    public void Short_words_are_not_taken_for_the_start_of_a_later_longer_request()
+    {
+        // A line the transcript does not have, and a later request that happens to begin with its words.
+        var steps = Steps(Asked(0, At("10:00:00"), "first"), Planned(1, At("10:00:02"), "Right."), Asked(2, At("11:00:00"), "go ahead and deploy it now"), Planned(3, At("11:00:05"), "Deployed."));
+        Assert.Equal(new string?[] { Stamp("10:00:00"), null, null }, AgyTimes.Stamp(new[] { User("u-1", "first"), User("u-2", "go"), Text("a-2", "Deployed, all of it, to every region.") }, steps).Select(When));
+    }
+
+    [Fact]
+    public void After_passing_over_a_message_only_a_step_with_words_enough_to_tell_is_taken()
+    {
+        var steps = Steps(Asked(0, At("10:00:00"), "go"), Planned(1, At("10:00:01"), "A remark the replay does not have."), Planned(2, At("10:00:05"), "Done."));
+        Assert.Equal(new[] { Stamp("10:00:00"), null }, AgyTimes.Stamp(new[] { User("u-1", "go"), Text("a-1", "Done. Everything was deployed as planned.") }, steps).Select(When));
+        // What follows the first words can be as short as it likes.
+        var parts = Steps(Asked(0, At("10:00:00"), "go"), Planned(1, At("10:00:01"), "A remark the replay does not have."), Planned(2, At("10:00:05"), "The timer is set for forty seconds."), Notice(3, At("10:00:45"), "fired"), Planned(4, At("10:00:46"), "DING"));
+        Assert.Equal(new[] { Stamp("10:00:00"), Stamp("10:00:05"), Stamp("10:00:46") }, AgyTimes.Stamp(new[] { User("u-1", "go"), Text("a-1", "The timer is set for forty seconds.\n\nDING") }, parts).Select(When));
+        // With nothing passed over, the same short step is where the message began.
+        var plain = Steps(Asked(0, At("10:00:00"), "go"), Planned(1, At("10:00:05"), "Done."));
+        Assert.Equal(new[] { Stamp("10:00:00"), Stamp("10:00:05") }, AgyTimes.Stamp(new[] { User("u-1", "go"), Text("a-1", "Done. Everything was deployed as planned.") }, plain).Select(When));
+    }
+
+    [Fact]
+    public void A_message_only_partly_found_is_not_cut()
+    {
+        var steps = Steps(Asked(0, At("10:00:00"), "go"), Planned(1, At("10:00:01"), "Set."), Notice(2, At("10:00:40"), "fired"), Planned(3, At("10:00:41"), "DING"));
+        var stamped = AgyTimes.Stamp(new[] { User("u-1", "go"), Text("a-1", "Set.\n\nDING and something more") }, steps);
+        Assert.Equal(new[] { ("u-1", Stamp("10:00:00")), ("a-1", Stamp("10:00:01")) }, stamped.Select(l => (Id(l), When(l))));
+        Assert.Equal("Set.\n\nDING and something more", Words(stamped[1]));
     }
 
     [Fact]
@@ -137,6 +189,10 @@ public class AgyTimesTests
         var steps = Steps(Asked(0, At("10:00:00"), "go"), Planned(1, At("10:00:01"), "A remark the replay does not have."), Planned(2, At("10:00:05"), "The long answer that the replay does have."), Planned(3, At("10:00:09"), "Fine."));
         Assert.Equal(new[] { Stamp("10:00:00"), Stamp("10:00:05") }, AgyTimes.Stamp(new[] { User("u-1", "go"), Text("a-1", "The long answer that the replay does have.") }, steps).Select(When));
         Assert.Equal(new[] { Stamp("10:00:00"), null }, AgyTimes.Stamp(new[] { User("u-1", "go"), Text("a-1", "Fine.") }, steps).Select(When));
+        // And not for ever: past a handful of them, the words are somewhere else.
+        var many = Steps(new[] { Asked(0, At("11:00:00"), "go") }.Concat(Enumerable.Range(1, 6).Select(i => Planned(i, At("11:00:0" + i), $"Remark number {i} that the replay lacks."))).Append(Planned(7, At("11:00:09"), "The long answer that the replay does have.")).ToArray());
+        Assert.Equal(new[] { Stamp("11:00:00"), null }, AgyTimes.Stamp(new[] { User("u-1", "go"), Text("a-1", "The long answer that the replay does have.") }, many).Select(When));
+        Assert.Equal(Stamp("11:00:09"), When(AgyTimes.Stamp(new[] { User("u-1", "go"), Text("a-1", "The long answer that the replay does have.") }, many.Where(s => s.Index != 3).ToList())[1]));
     }
 
     [Fact]

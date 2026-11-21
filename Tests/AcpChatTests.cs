@@ -1849,6 +1849,9 @@ public class AcpChatTests
         Assert.Equal("The subagent found two files.", Said(Kept(chat.Tick(record, After(24))).Single()));
         Assert.Equal("result", Type(Kept(chat.Tick(record, After(52))).Single()));
         Assert.Equal("idle", record.AgentStatus);
+        // Looked at again with nothing new, nothing is said and nothing changes.
+        Assert.Empty(chat.Outside(News(AgyId, (Sub1, "File Lister", Alive, new List<AgyStep>())), record, After(60)));
+        Assert.Equal("idle", record.AgentStatus);
 
         // Spoken to again it goes back to work, and is said to.
         var again = Kept(chat.Outside(News(AgyId, (Sub1, "File Lister", Alive, StepsOf(AgyDiskTests.Notice(4, "2026-03-04T10:05:00Z", "one more thing")))), record, After(300)));
@@ -1888,6 +1891,7 @@ public class AcpChatTests
         var (chat, record, _) = OpenWith("Agy");
         Prompt(chat, record, "two helpers");
         chat.FromCli(J(Update(AgyId, Spawning("call_a", "in_progress", "Reader"))), record, After(1));
+        chat.FromCli(J(Update(AgyId, Spawning("call_a", "completed", "Reader", update: true))), record, After(1));
         chat.FromCli(J(Update(AgyId, Spawning("call_b", "in_progress", "Writer"))), record, After(2));
         chat.FromCli(J(Update(AgyId, Spawning("call_c", "in_progress", "Reader"))), record, After(3));
         // The writer is seen first; then two readers, which are told apart by which was started first.
@@ -1898,6 +1902,52 @@ public class AcpChatTests
         Assert.Equal(new[] { ("call_a", Sub1), ("call_c", Sub3) }, readers.Select(l => (Str(l, "tool_use_id"), Str(l, "task_id"))));
         // Told again of ones already placed, nothing is said twice.
         Assert.Empty(Kept(chat.Outside(News(AgyId, (Sub1, "Reader", Alive, new List<AgyStep>())), record, After(6))));
+        // A call made later starts with nothing of theirs.
+        Assert.Equal("Agent", Str(Block(Kept(chat.FromCli(J(Update(AgyId, Spawning("call_d", "in_progress", "Writer"))), record, After(7))).Single()), "name"));
+    }
+
+    [Fact]
+    public void A_subagents_turn_ends_only_with_words_and_no_call()
+    {
+        var (chat, record, turn) = Delegated(ended: false);
+        // Words with a call, and a step that is only thought: it goes on.
+        var lines = Kept(chat.Outside(News(AgyId, (Sub1, "File Lister", Alive, StepsOf(
+            AgyDiskTests.Planned(1, "2026-03-04T10:00:02Z", "First I will write the note.", calls: new[] { ("write_file", "Path", "\"C:\\\\x\\\\note.txt\"") })))), record, After(6)));
+        Assert.Equal(new[] { "task_started", null, null, "task_progress" }, lines.Select(l => Type(l) == "system" ? Str(l, "subtype") : null));
+        // What the call came back with, and a step that is only thought: it goes on, and no end is said.
+        var next = Kept(chat.Outside(News(AgyId, (Sub1, "File Lister", Alive, StepsOf(
+            AgyDiskTests.Outcome(2, "2026-03-04T10:00:03Z", "Created At: then\nCommand: whatever\nCommand output:\nwritten"),
+            AgyDiskTests.Planned(3, "2026-03-04T10:00:04Z", thinking: "What next?")))), record, After(6)));
+        Assert.Equal(new[] { null, "task_progress" }, next.Select(l => Type(l) == "system" ? Str(l, "subtype") : null));
+        Assert.Equal(("First I will write the note.", "Edit", @"C:\x\note.txt", "written"), (Said(lines[1]), Str(Block(lines[2]), "name"), Str(Block(lines[2]).GetProperty("input"), "file_path"), Str(Block(next[0]), "content")));
+        // A call the pane has no reading for is its own name in plain words, with the first thing it was given.
+        var sent = Kept(chat.Outside(News(AgyId, (Sub1, "File Lister", Alive, StepsOf(AgyDiskTests.Planned(4, "2026-03-04T10:00:05Z", calls: new[] { ("send_message", "Message", "\"All written.\"") })))), record, After(7)));
+        Assert.Equal(("Send message", "All written."), (Str(Block(sent[0]), "name"), Str(Block(sent[0]).GetProperty("input"), "description")));
+
+        // It finishes while the turn that started it is still running: nothing is waited on when the turn ends, and
+        // nothing more comes of it.
+        var over = chat.Outside(News(AgyId, (Sub1, "File Lister", Alive, StepsOf(AgyDiskTests.Outcome(5, "2026-03-04T10:00:06Z", "sent"), AgyDiskTests.Planned(6, "2026-03-04T10:00:07Z", "Done.")))), record, After(8));
+        Assert.Equal("task_notification", Str(Kept(over)[^1], "subtype"));
+        Assert.Empty(Passed(over));
+        Assert.Equal("busy", record.AgentStatus);
+        chat.FromCli(J(Response(turn, Stopped("end_turn"))), record, After(9));
+        Assert.Equal("idle", record.AgentStatus);
+        Assert.Empty(chat.Tick(record, After(60)));
+        Assert.Equal("idle", record.AgentStatus);
+    }
+
+    [Fact]
+    public void A_subagent_waits_for_its_call_to_be_shown_with_all_it_has_done_meanwhile()
+    {
+        var (chat, record, _) = OpenWith("Agy");
+        Prompt(chat, record, "a helper");
+        // Announced, not yet shown: there is nothing to put the subagent under.
+        Assert.Empty(Kept(chat.FromCli(J(Update(AgyId, Spawning("call_a", "pending", "Reader"))), record, After(1))));
+        Assert.Empty(Kept(chat.Outside(News(AgyId, (Sub1, "Reader", Alive, StepsOf(AgyDiskTests.Planned(1, "2026-03-04T10:00:02Z", "On it.", calls: new[] { ("run_command", "CommandLine", "\"dir\"") })))), record, After(2))));
+        Assert.Empty(Kept(chat.Outside(News(AgyId, (Sub1, "Reader", Alive, StepsOf(AgyDiskTests.Outcome(2, "2026-03-04T10:00:03Z", "a.txt")))), record, After(3))));
+        var shown = Kept(chat.FromCli(J(Update(AgyId, Spawning("call_a", "in_progress", "Reader", update: true))), record, After(4)));
+        Assert.Equal(new[] { "assistant", "system", "assistant", "assistant", "user", "system" }, shown.Select(Type));
+        Assert.Equal(("Agent", "task_started", "On it.", "Shell", "a.txt", "task_progress"), (Str(Block(shown[0]), "name"), Str(shown[1], "subtype"), Said(shown[2]), Str(Block(shown[3]), "name"), Str(Block(shown[4]), "content"), Str(shown[5], "subtype")));
     }
 
     [Fact]
@@ -1986,5 +2036,256 @@ public class AcpChatTests
         Assert.Equal(new[] { "user", "assistant", "user", "assistant", "user", "assistant" }, Reopen(disk, calls: 2).Select(Type));
         Assert.Equal(new[] { "user", "assistant", "user", "assistant" }, Reopen(disk, role: "Somebody Else").Select(Type));
         Assert.Equal(new[] { "user", "assistant", "user", "assistant" }, Reopen(new Disk()).Select(Type));
+        // One whose file names no role goes under the one call there is.
+        var plain = new Disk();
+        plain.Helpers[AgyOther] = new() { new AgySubagent(Sub1, "", "self", Alive, 2) };
+        plain.Kept[Sub1] = disk.Kept[Sub1];
+        Assert.Contains(Reopen(plain), l => Type(l) == "system" && Str(l, "subtype") == "task_started");
+        // Nor a subagent too many.
+        disk.Helpers[AgyOther].Add(new AgySubagent(Sub2, "File Lister", "self", Alive, 5));
+        Assert.Equal(new[] { "user", "assistant", "user", "assistant" }, Reopen(disk).Select(Type));
+    }
+
+    // ---- pages, calls and subagents at the edges ----
+
+    static string? Under(JsonElement line) => line.TryGetProperty("parent_tool_use_id", out var under) && under.ValueKind == JsonValueKind.String ? under.GetString() : null;
+    static bool Top(JsonElement line) => Type(line) is "user" or "assistant" && Under(line) == null;
+
+    [Fact]
+    public void A_page_begins_at_a_message_of_the_conversation_and_holds_the_call_of_every_subagent_line_in_it()
+    {
+        // A subagent that does more than a page holds, then the agent's word on it. A viewer moves on from a page by
+        // the first message of the conversation itself in it, and shows a subagent's line only under a call it has.
+        var (chat, record, _) = Delegated();
+        var steps = new List<string>();
+        for (int i = 0; i < 260; i++)
+        {
+            steps.Add(AgyDiskTests.Planned(2 * i + 1, "2026-03-04T10:00:02Z", calls: new[] { ("run_command", "CommandLine", "\"step " + i + "\"") }));
+            steps.Add(AgyDiskTests.Outcome(2 * i + 2, "2026-03-04T10:00:03Z", "ok"));
+        }
+        chat.Outside(News(AgyId, (Sub1, "File Lister", Alive, StepsOf(steps.ToArray()))), record, After(20));
+        chat.FromCli(J(Update(AgyId, Text("agent_message_chunk", "It ran them all."))), record, After(30));
+        var said = Kept(chat.Tick(record, After(33))).Single();
+
+        var page = Earlier(chat, Str(said, "uuid"));
+        var lines = page.GetProperty("lines").EnumerateArray().ToList();
+        Assert.True(lines.Count > AcpChat.PageLines, "the subagent's lines are more than a page");
+        Assert.True(Top(lines[0]));
+        Assert.Equal(("call_sp1", "Agent"), (Str(lines[0], "uuid"), Str(Block(lines[0]), "name")));
+        Assert.All(lines.Where(l => Type(l) != "system" && Under(l) != null), l => Assert.Equal("call_sp1", Under(l)));
+        Assert.Equal(520, lines.Count(l => Under(l) == "call_sp1"));
+        // And the page before it is the rest, to the start.
+        var first = Earlier(chat, Str(lines[0], "uuid"));
+        Assert.Equal(JsonValueKind.Null, first.GetProperty("next").ValueKind);
+        Assert.Equal("have a subagent list the files", Said(first.GetProperty("lines").EnumerateArray().First(l => Type(l) == "user")));
+    }
+
+    [Fact]
+    public void A_page_of_subagent_lines_whose_call_is_no_longer_kept_reaches_back_to_the_start_and_ends_there()
+    {
+        // The past is kept up to a size. With the call gone from it, its subagent's lines are under nothing a viewer
+        // can be given: the page takes all of them and says there is no more, so it is not asked for for ever.
+        var (chat, record, _) = Delegated();
+        chat.LogMost = 40_000;
+        var steps = new List<string>();
+        for (int i = 0; i < 300; i++)
+        {
+            steps.Add(AgyDiskTests.Planned(2 * i + 1, "2026-03-04T10:00:02Z", calls: new[] { ("run_command", "CommandLine", "\"step " + i + "\"") }));
+            steps.Add(AgyDiskTests.Outcome(2 * i + 2, "2026-03-04T10:00:03Z", "ok"));
+        }
+        chat.Outside(News(AgyId, (Sub1, "File Lister", Alive, StepsOf(steps.ToArray()))), record, After(20));
+        chat.LogMost = 64L * 1024 * 1024;
+        for (int i = 300; i < 520; i++)
+            chat.Outside(News(AgyId, (Sub1, "File Lister", Alive, StepsOf(AgyDiskTests.Planned(2 * i + 1, "2026-03-04T10:00:02Z", calls: new[] { ("run_command", "CommandLine", "\"step " + i + "\"") }), AgyDiskTests.Outcome(2 * i + 2, "2026-03-04T10:00:03Z", "ok")))), record, After(21));
+        chat.FromCli(J(Update(AgyId, Text("agent_message_chunk", "It ran them all."))), record, After(30));
+        var said = Kept(chat.Tick(record, After(33))).Single();
+
+        var page = Earlier(chat, Str(said, "uuid"));
+        var lines = page.GetProperty("lines").EnumerateArray().ToList();
+        Assert.DoesNotContain(lines, l => Type(l) == "assistant" && Under(l) == null);
+        Assert.True(lines.Count > AcpChat.PageLines);
+        Assert.Equal(JsonValueKind.Null, page.GetProperty("next").ValueKind);
+    }
+
+    [Fact]
+    public void A_reopened_conversation_never_begins_in_the_middle_of_what_a_subagent_did()
+    {
+        var disk = new Disk();
+        disk.Helpers[AgyOther] = new() { new AgySubagent(Sub1, "File Lister", "self", Alive, 2) };
+        var steps = new List<string>();
+        for (int i = 0; i < 30; i++)
+        {
+            steps.Add(AgyDiskTests.Planned(2 * i + 1, "2026-03-04T10:00:02Z", calls: new[] { ("run_command", "CommandLine", "\"step " + i + "\"") }));
+            steps.Add(AgyDiskTests.Outcome(2 * i + 2, "2026-03-04T10:00:03Z", "ok"));
+        }
+        disk.Kept[Sub1] = StepsOf(steps.ToArray());
+
+        var chat = new AcpChat("Agy", Cwd, "", "", "", "", budget: 3_000, disk: disk);
+        var record = new HostRecord();
+        var create = Sent(chat.FromCli(J(Response(Id(Sent(chat.Start()).Single()), AgyInit)), record, T0)).Single();
+        chat.FromCli(J(Response(Id(create), AgyNew)), record, T0);
+        var load = Sent(chat.Resume("r1", AgyOther, "viewer-a")).Single();
+        chat.FromCli(J(Update(AgyOther, Text("user_message_chunk", "have a subagent list the files"))), record, T0);
+        chat.FromCli(J(Update(AgyOther, Spawning("call_old", "completed", "File Lister"))), record, T0);
+        chat.FromCli(J(Update(AgyOther, Text("agent_message_chunk", "It ran them all."))), record, T0);
+        var seed = Seeded(chat.FromCli(J(Response(Id(load), AgyLoaded)), record, T0));
+        var shown = seed.Lines.Select(L).ToList();
+        Assert.True(seed.Earlier);
+        Assert.True(Top(shown[0]), "what is shown begins at a message of the conversation itself");
+        Assert.Equal("It ran them all.", Said(shown[^1]));
+
+        var page = Earlier(chat, Str(shown[0], "uuid")).GetProperty("lines").EnumerateArray().ToList();
+        Assert.Equal("call_old", Str(page.First(l => Type(l) == "assistant"), "uuid"));
+        Assert.Equal(60, page.Count(l => Type(l) != "system" && Under(l) == "call_old"));
+    }
+
+    [Fact]
+    public void A_call_that_started_no_subagent_is_not_given_the_next_ones()
+    {
+        // It failed: the subagent that shows up next was started by the call after it.
+        var (chat, record, _) = OpenWith("Agy");
+        Prompt(chat, record, "a helper");
+        chat.FromCli(J(Update(AgyId, Spawning("call_a", "in_progress", "Reader"))), record, After(1));
+        chat.FromCli(J(Update(AgyId, Spawning("call_a", "failed", "Reader", update: true))), record, After(2));
+        chat.FromCli(J(Update(AgyId, Spawning("call_b", "in_progress", "Reader"))), record, After(3));
+        Assert.Equal("call_b", Str(Kept(chat.Outside(News(AgyId, (Sub1, "Reader", Alive, new List<AgyStep>())), record, After(4))).Single(), "tool_use_id"));
+
+        // It ended well and nothing ever showed up for it (the file is there within two seconds of the call, measured):
+        // a subagent seen minutes later is the next call's.
+        var (late, lateRecord, _) = OpenWith("Agy");
+        Prompt(late, lateRecord, "a helper");
+        late.FromCli(J(Update(AgyId, Spawning("call_a", "in_progress", "Reader"))), lateRecord, After(1));
+        late.FromCli(J(Update(AgyId, Spawning("call_a", "completed", "Reader", update: true))), lateRecord, After(2));
+        late.FromCli(J(Update(AgyId, Spawning("call_b", "in_progress", "Reader"))), lateRecord, After(200));
+        Assert.Equal("call_b", Str(Kept(late.Outside(News(AgyId, (Sub1, "Reader", Alive, new List<AgyStep>())), lateRecord, After(201))).Single(), "tool_use_id"));
+    }
+
+    [Fact]
+    public void A_subagent_that_was_there_long_before_a_call_was_not_started_by_it()
+    {
+        var (chat, record, _) = OpenWith("Agy");
+        Prompt(chat, record, "a helper");
+        // Nobody's: no call of this conversation asked for it.
+        Assert.Empty(Kept(chat.Outside(News(AgyId, (Sub1, "Reader", Alive, StepsOf(AgyDiskTests.Planned(1, "2026-03-04T10:00:02Z", "Hello.")))), record, After(10))));
+        // It goes on writing: how long it has been there is counted from when it was first seen.
+        Assert.Empty(Kept(chat.Outside(News(AgyId, (Sub1, "Reader", Alive, StepsOf(AgyDiskTests.Planned(2, "2026-03-04T10:02:00Z", "Still nobody's.")))), record, After(150))));
+        // Minutes later a call asks for one of that role, or for one of no role in particular: the old one is not it.
+        Assert.Equal("Agent", Str(Block(Kept(chat.FromCli(J(Update(AgyId, Spawning("call_a", "in_progress", ""))), record, After(200))).Single()), "name"));
+        Assert.Empty(Kept(chat.Outside(News(AgyId, (Sub1, "Reader", Alive, StepsOf(AgyDiskTests.Planned(3, "2026-03-04T10:03:00Z", "Still here.")))), record, After(201))));
+        // Its own shows up, and is.
+        var own = Kept(chat.Outside(News(AgyId, (Sub2, "", Alive, new List<AgyStep>())), record, After(202))).Single();
+        Assert.Equal(("task_started", "call_a", Sub2), (Str(own, "subtype"), Str(own, "tool_use_id"), Str(own, "task_id")));
+    }
+
+    [Fact]
+    public void A_move_that_fails_leaves_the_open_conversation_its_subagents_and_its_timers()
+    {
+        var (chat, record, _) = Delegated();
+        chat.Outside(News(AgyId, (Sub1, "File Lister", Alive, new List<AgyStep>())), record, After(10));
+        Assert.Equal("scheduled", record.AgentStatus);
+        var load = Sent(chat.Resume("r1", AgyOther, "viewer-a")).Single();
+        // While the other conversation is being read, what the subagent does is still this one's.
+        var during = Kept(chat.Outside(News(AgyId, (Sub1, "File Lister", Alive, StepsOf(AgyDiskTests.Planned(1, "2026-03-04T10:00:02Z", calls: new[] { ("run_command", "CommandLine", "\"dir\"") })))), record, After(11)));
+        Assert.Equal("call_sp1", Under(during[0]));
+        var refused = chat.FromCli(J(Failure(Id(load), "no such conversation")), record, After(12));
+        Assert.Contains(refused, e => e.Kind == ChatEffectKind.Reply);
+        chat.Tick(record, After(13));
+        Assert.Equal("scheduled", record.AgentStatus);
+        var after = Kept(chat.Outside(News(AgyId, (Sub1, "File Lister", Alive, StepsOf(AgyDiskTests.Outcome(2, "2026-03-04T10:00:09Z", "a.txt")))), record, After(14)));
+        Assert.Equal(("call_sp1", "a.txt"), (Under(after[0]), Str(Block(after[0]), "content")));
+
+        // A timer the same.
+        var (timed, timedRecord, _) = OpenWith("Agy");
+        var turn = Prompt(timed, timedRecord, "in a minute, say it");
+        timed.FromCli(J(Update(AgyId, Schedule("call_s1", "in_progress"))), timedRecord, After(3));
+        timed.FromCli(J(Response(Id(turn), Stopped("end_turn"))), timedRecord, After(6));
+        Assert.Equal("scheduled", timedRecord.AgentStatus);
+        var move = Sent(timed.Resume("r1", AgyOther, "viewer-a")).Single();
+        timed.FromCli(J(Update(AgyOther, Schedule("call_other", "in_progress"))), timedRecord, After(7));
+        timed.FromCli(J(Failure(Id(move), "no such conversation")), timedRecord, After(8));
+        timed.Tick(timedRecord, After(9));
+        Assert.Equal("scheduled", timedRecord.AgentStatus);
+        // And it still ends the wait when it fires.
+        timed.FromCli(J(Update(AgyId, Schedule("call_s1", "completed", update: true))), timedRecord, After(60));
+        Assert.Equal("busy", timedRecord.AgentStatus);
+        Assert.Equal("result", Type(Kept(timed.Tick(timedRecord, After(91))).Single()));
+        Assert.Equal("idle", timedRecord.AgentStatus);
+    }
+
+    [Fact]
+    public void A_timer_of_the_conversation_moved_away_from_is_not_waited_on_in_the_one_moved_to()
+    {
+        var (chat, record, _) = OpenWith("Agy");
+        var turn = Prompt(chat, record, "in a minute, say it");
+        chat.FromCli(J(Update(AgyId, Schedule("call_s1", "in_progress"))), record, After(3));
+        chat.FromCli(J(Response(Id(turn), Stopped("end_turn"))), record, After(6));
+        Assert.Equal("scheduled", record.AgentStatus);
+        var load = Sent(chat.Resume("r1", AgyOther, "viewer-a")).Single();
+        chat.FromCli(J(Response(Id(load), AgyLoaded)), record, After(8));
+        Assert.Equal("idle", record.AgentStatus);
+        chat.Tick(record, After(9));
+        Assert.Equal("idle", record.AgentStatus);
+    }
+
+    [Fact]
+    public void No_two_lines_of_a_conversation_have_one_id()
+    {
+        // A message that carries an id and is kept in two parts (said, a pause, said on): a viewer names a line by its id.
+        var (chat, record) = AfterATurn("OpenCode");
+        chat.FromCli(J(Update(OcId, Text("agent_message_chunk", "One more thing.", "msg_late"))), record, After(40));
+        var first = Kept(chat.Tick(record, After(43))).Single();
+        chat.FromCli(J(Update(OcId, Text("agent_message_chunk", "And another.", "msg_late"))), record, After(44));
+        var second = Kept(chat.Tick(record, After(47))).Single();
+        Assert.Equal(("One more thing.", "And another."), (Said(first), Said(second)));
+        Assert.NotEqual(Str(first, "uuid"), Str(second, "uuid"));
+        Assert.Equal("One more thing.", Said(Earlier(chat, Str(second, "uuid")).GetProperty("lines").EnumerateArray().Last(l => Type(l) == "assistant")));
+
+        // A subagent's steps that say no place of their own.
+        var (helped, helpedRecord, _) = Delegated();
+        var lines = Kept(helped.Outside(News(AgyId, (Sub1, "File Lister", Alive, StepsOf(
+            "{\"type\":\"PLANNER_RESPONSE\",\"content\":\"First.\",\"tool_calls\":[{\"name\":\"run_command\",\"args\":{\"CommandLine\":\"\\\"dir\\\"\"}}]}",
+            "{\"type\":\"GENERIC\",\"content\":\"ok\"}",
+            "{\"type\":\"PLANNER_RESPONSE\",\"content\":\"Second.\",\"tool_calls\":[{\"name\":\"run_command\",\"args\":{\"CommandLine\":\"\\\"dir\\\"\"}}]}"))), helpedRecord, After(10)));
+        var ids = lines.Where(l => Type(l) != "system").Select(l => Str(l, "uuid")).ToList();
+        Assert.Equal(5, ids.Count);
+        Assert.Equal(ids.Count, ids.Distinct().Count());
+    }
+
+    [Fact]
+    public void What_a_subagents_call_came_back_with_belongs_to_a_call_of_the_step_before_it()
+    {
+        // A call with nothing written for what it came back with: the next step's result is not it.
+        var (chat, record, _) = Delegated();
+        var lines = Kept(chat.Outside(News(AgyId, (Sub1, "File Lister", Alive, StepsOf(
+            AgyDiskTests.Planned(1, "2026-03-04T10:00:02Z", calls: new[] { ("run_command", "CommandLine", "\"first\"") }),
+            AgyDiskTests.Planned(2, "2026-03-04T10:00:03Z", calls: new[] { ("run_command", "CommandLine", "\"second\"") }),
+            AgyDiskTests.Outcome(3, "2026-03-04T10:00:04Z", "from the second")))), record, After(10)));
+        var calls = lines.Where(l => Type(l) == "assistant").ToList();
+        var result = lines.Single(l => Type(l) == "user");
+        Assert.Equal(new[] { "first", "second" }, calls.Select(c => Str(Block(c).GetProperty("input"), "command")));
+        Assert.Equal(Str(Block(calls[1]), "id"), Str(Block(result), "tool_use_id"));
+    }
+
+    [Fact]
+    public void A_page_with_word_of_a_subagents_task_holds_the_call_it_is_about()
+    {
+        // The subagent is started, a long stretch of conversation follows, and only then is it said to be over: a viewer
+        // can do nothing with that word without the call it is about.
+        var (chat, record, _) = Delegated();
+        chat.Outside(News(AgyId, (Sub1, "File Lister", Alive, new List<AgyStep>())), record, After(10));
+        for (int i = 1; i <= 150; i++)
+        {
+            var turn = Prompt(chat, record, $"question {i}");
+            chat.FromCli(J(Update(AgyId, Text("agent_message_chunk", $"answer {i}"))), record, After(20));
+            chat.FromCli(J(Response(Id(turn), Stopped("end_turn"))), record, After(20));
+        }
+        chat.Outside(News(AgyId, (Sub1, "File Lister", "SUBAGENT_STATE_KILLED", new List<AgyStep>())), record, After(30));
+        var last = Prompt(chat, record, "and then?");
+        chat.FromCli(J(Update(AgyId, Text("agent_message_chunk", "That is all."))), record, After(31));
+        var said = Kept(chat.FromCli(J(Response(Id(last), Stopped("end_turn"))), record, After(32)))[0];
+
+        var lines = Earlier(chat, Str(said, "uuid")).GetProperty("lines").EnumerateArray().ToList();
+        Assert.Contains(lines, l => Type(l) == "system" && Str(l, "subtype") == "task_notification");
+        Assert.Equal("call_sp1", Str(lines[0], "uuid"));
     }
 }

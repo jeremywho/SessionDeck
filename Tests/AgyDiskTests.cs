@@ -114,6 +114,11 @@ public class AgyDiskTests : IDisposable
         Transcript(Talk, Asked(0, "2026-03-04T10:00:05Z", "hello") + "\n");
         Directory.CreateDirectory(Path.Combine(_root, ".system_generated", "logs"));
         File.Copy(Kept(Talk, "logs", "transcript.jsonl"), Path.Combine(_root, ".system_generated", "logs", "transcript.jsonl"));
+        foreach (string folder in new[] { Path.Combine(_root, ".system_generated", "subagents"), Kept(Talk, "subagents") })
+        {
+            Directory.CreateDirectory(folder);
+            File.WriteAllText(Path.Combine(folder, Helper + ".json"), "{\"conversationId\":\"" + Helper + "\", \"state\":\"SUBAGENT_STATE_ALIVE\", \"spawnStepIndex\":1}");
+        }
         var disk = new AgyDisk(Path.Combine(_root, Talk));
         Assert.Empty(disk.Steps(id));
         Assert.Empty(disk.Subagents(id));
