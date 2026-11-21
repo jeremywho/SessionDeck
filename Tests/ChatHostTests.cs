@@ -274,6 +274,28 @@ public class ChatHostTests : IDisposable
     }
 
     [Fact]
+    public async Task What_was_being_said_when_a_session_is_ended_is_kept()
+    {
+        string script = Path.Combine(_dir, "fake-claude.ps1");
+        File.WriteAllText(script, FakeCli);
+        await Start(new HostSpec
+        {
+            Id = "chattest0001", SessionId = "live-session", Provider = "Claude", Kind = ChatStream.Kind,
+            CommandLine = $"\"{SessionLauncher.ResolvePowerShell()}\" -NoLogo -NoProfile -File \"{script}\" live-session",
+            Cwd = _dir, HostsDir = Path.Combine(_dir, "hosts"), RingBytes = 256 * 1024,
+        });
+        var record = await RecordWhen(r => r.ChildPid > 0);
+        using var viewer = await Viewer.Attach(record, after: 0);
+        await viewer.Send(ChatStream.UserLine("stall"));
+        await viewer.Pump(() => viewer.Live.Count(l => Type(l) == "stream_event") >= 4);
+        await viewer.SendFrame("""{"type":"kill"}""");
+        await viewer.Exited();
+        var cut = viewer.Lines.Last(l => Type(l) == "assistant");
+        Assert.Equal(("half said", true), (Said(cut), cut.GetProperty("partial").GetBoolean()));
+        Assert.True(_host!.WaitForExit(15000), "host did not exit after it was told to end");
+    }
+
+    [Fact]
     public async Task A_rename_is_asked_of_the_cli_by_its_own_request_and_is_never_a_message()
     {
         string script = Path.Combine(_dir, "fake-cli.ps1");
