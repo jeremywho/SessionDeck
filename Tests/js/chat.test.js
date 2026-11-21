@@ -1320,3 +1320,10 @@ test('the page before what is shown is asked for from a message the host can fin
   m.durable(Object.assign(said('whole'), { uuid: 'a-2' }));
   assert.deepEqual(m.historyAsk(), { uuid: 'a-2' });
 });
+
+test('a chat at work with nothing new for a while says since when', () => {
+  const { workingText } = require('../../wwwroot/chat.js');
+  const at = new Date(2026, 10, 21, 9, 52, 0).getTime();
+  assert.equal(workingText(at, at + 4 * 60000), 'Working… last activity 4 minutes ago, 9:52 AM');
+  assert.equal(workingText(at, at + 26 * 3600000), 'Working… last activity 1 day ago, yesterday 9:52 AM');
+});

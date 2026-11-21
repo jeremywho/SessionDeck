@@ -860,7 +860,10 @@
     return modes;
   }
 
-  const api = { HOST_REPLAYS, ChatModel, timeLabel, since, pauseBefore, PAUSE_MS, LineReader, Wire, toolBrief, textOf, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText, liveStep, taskRunning, asks, offeredCommands, renameAsked, skillsAsked, skillsNote, reloadNote, modelLabel, Recall, filterSessions, ago, startsOver, clampWide, diffKind };
+  // What the line under a chat at work says once nothing has come for a while.
+  function workingText(at, now) { return `Working… last activity ${since(at, now)}, ${timeLabel(at, now, true)}`; }
+
+  const api = { HOST_REPLAYS, workingText, ChatModel, timeLabel, since, pauseBefore, PAUSE_MS, LineReader, Wire, toolBrief, textOf, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText, liveStep, taskRunning, asks, offeredCommands, renameAsked, skillsAsked, skillsNote, reloadNote, modelLabel, Recall, filterSessions, ago, startsOver, clampWide, diffKind };
   if (typeof module !== 'undefined' && module.exports) { module.exports = api; return; }
 
   // ================= the page side =================
@@ -1132,7 +1135,13 @@
     // latest message then. New words on a line already there change nothing's place.
     function paintTail() {
       const at = model.lastAt, t = now();
-      const show = at !== null && model.items.length > 0 && el.dataset.state !== 'busy' && t - at >= QUIET_MS;
+      const quiet = at !== null && model.items.length > 0 && t - at >= QUIET_MS;
+      // At work with nothing new for a while (a command that takes minutes): how long, on the line that says it is
+      // working, so a chat that is busy can be told from one that is stuck.
+      const busy = el.dataset.state === 'busy';
+      const still = busy && quiet ? workingText(at, t) : 'Working…';
+      if (working.textContent !== still) { working.textContent = still; working.title = busy && quiet ? fullTime(at) : ''; }
+      const show = quiet && !busy;
       const text = show ? `Last message ${since(at, t)}, ${timeLabel(at, t, true)}` : '';
       const moved = tail.hidden === show;
       if (moved || (show && tail.textContent !== text)) { tail.hidden = !show; tail.textContent = text; tail.title = show ? fullTime(at) : ''; }

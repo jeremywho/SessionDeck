@@ -145,7 +145,9 @@ and the whole conversation is loaded at once rather than a page at a time. Claud
 chats need the native `claude.exe` and use the default login; Codex chats need `codex.exe`, AGY
 chats `agy.exe`, and OpenCode chats `opencode` on the path. A chat shows when things were said: a quiet line where the conversation starts and wherever it picks up
 after an hour or on a new day, and under the last message, from a minute after the chat goes quiet, how long ago that was ("Last message
-3 days ago, Saturday 4:52 PM"). Hover one of your own messages for its exact time. Claude and Codex keep every
+3 days ago, Saturday 4:52 PM"). While a chat is at work and nothing new has come for a minute (a command that
+takes a while), the line that says it is working says since when ("Working… last activity 4 minutes ago,
+9:52 AM"). Hover one of your own messages for its exact time. Claude and Codex keep every
 message's time, so it is there for old conversations too. Antigravity keeps them in its own files, where
 Session Deck reads them when a chat is reopened; for OpenCode the times are there for what was said while
 the session's host has been running. A subagent an AGY chat starts is shown as Claude's are: a row for it,
