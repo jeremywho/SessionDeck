@@ -146,4 +146,69 @@ public class AgyDiskTests : IDisposable
         var found = new AgyDisk(_root).Subagents(Talk);
         Assert.Equal(new[] { (Helper, "First", "self", "SUBAGENT_STATE_ALIVE", 2), (Other, "Second", "self", "SUBAGENT_STATE_KILLED", 9) }, found.Select(s => (s.Id, s.Role, s.TypeName, s.State, s.SpawnStep)));
     }
+
+    // ---- what the subagents write, a look at a time ----
+
+    void Subagent(string conversation, string id, string role, int spawn, string state = "SUBAGENT_STATE_ALIVE")
+    {
+        Directory.CreateDirectory(Kept(conversation, "subagents"));
+        File.WriteAllText(Kept(conversation, "subagents", id + ".json"),
+            "{\"conversationId\":\"" + id + "\", \"subagentDescriptor\":{\"typeName\":\"self\", \"role\":\"" + role + "\"}, \"state\":\"" + state + "\", \"spawnStepIndex\":" + spawn + "}");
+    }
+
+    [Fact]
+    public void A_subagent_that_appears_while_watching_is_told_of_once_and_then_only_what_it_writes()
+    {
+        var watch = new AgyWatch(new AgyDisk(_root));
+        Transcript(Talk, Asked(0, "2026-03-04T10:00:05Z", "delegate") + "\n");
+        // The first look at a conversation finds what is there and says nothing.
+        Assert.Null(watch.Look(Talk));
+        Assert.Null(watch.Look(Talk));
+
+        Subagent(Talk, Helper, "File Lister", 2);
+        Transcript(Helper, Notice(0, "2026-03-04T10:00:06Z", "your task") + "\n");
+        var appeared = watch.Look(Talk)!;
+        Assert.Equal(Talk, appeared.Conversation);
+        var one = appeared.Subagents.Single();
+        Assert.Equal((Helper, "File Lister", "SUBAGENT_STATE_ALIVE", 2, 1), (one.Subagent.Id, one.Subagent.Role, one.Subagent.State, one.Subagent.SpawnStep, one.Steps.Count));
+        Assert.Null(watch.Look(Talk));
+
+        // A step, when it is whole; never one already told of.
+        string step = Planned(1, "2026-03-04T10:00:08Z", "Working.");
+        File.AppendAllText(Kept(Helper, "logs", "transcript.jsonl"), step[..15]);
+        Assert.Null(watch.Look(Talk));
+        File.AppendAllText(Kept(Helper, "logs", "transcript.jsonl"), step[15..] + "\n");
+        Assert.Equal(new[] { 1 }, watch.Look(Talk)!.Subagents.Single().Steps.Select(s => s.Index));
+        Assert.Null(watch.Look(Talk));
+
+        // Its file says something else of it: told, with nothing new written.
+        Subagent(Talk, Helper, "File Lister", 2, "SUBAGENT_STATE_KILLED");
+        var killed = watch.Look(Talk)!.Subagents.Single();
+        Assert.Equal(("SUBAGENT_STATE_KILLED", 0), (killed.Subagent.State, killed.Steps.Count));
+        Assert.Null(watch.Look(Talk));
+    }
+
+    [Fact]
+    public void Subagents_already_there_at_the_first_look_belong_to_an_earlier_process_and_are_left_alone()
+    {
+        // Measured: a subagent's file still says it is alive after the process that ran it has gone.
+        Subagent(Talk, Helper, "File Lister", 2);
+        Transcript(Helper, Notice(0, "2026-03-04T10:00:06Z", "your task") + "\n");
+        var watch = new AgyWatch(new AgyDisk(_root));
+        Assert.Null(watch.Look(Talk));
+        File.AppendAllText(Kept(Helper, "logs", "transcript.jsonl"), Planned(1, "2026-03-04T10:00:08Z", "Working.") + "\n");
+        Assert.Null(watch.Look(Talk));
+        // One started now is followed, beside it.
+        Subagent(Talk, Other, "Second", 9);
+        Assert.Equal(Other, watch.Look(Talk)!.Subagents.Single().Subagent.Id);
+
+        // Another conversation is looked at afresh; coming back to the first, so is it.
+        const string Elsewhere = "12121212-3434-4565-8787-909090909090";
+        Subagent(Elsewhere, Other, "Second", 1);
+        Assert.Null(watch.Look(Elsewhere));
+        Assert.Null(watch.Look(Talk));
+        Assert.Null(watch.Look(Talk));
+        Assert.Null(watch.Look("not a conversation"));
+        Assert.Null(watch.Look(""));
+    }
 }

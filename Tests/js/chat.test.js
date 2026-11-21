@@ -1184,3 +1184,18 @@ test('a timer left running when the turn ends is still running, and done when it
   old.durable(Object.assign(used('s9', 'Schedule', {}), { history: true }));
   assert.equal(calls(old)[0].stopped, true);
 });
+
+test('a subagent that has reported and is set going again is at work again', () => {
+  const m = new ChatModel();
+  m.durable(used('a1', 'Agent', { description: 'File Lister', prompt: 'p' }));
+  m.durable(returned('a1', ''));
+  m.durable(task('task_started', 'a1', { description: 'File Lister', is_backgrounded: true }));
+  m.durable(done());
+  const agent = calls(m)[0];
+  assert.equal(taskRunning(agent), true);
+  m.durable(task('task_notification', 'a1', { status: 'completed' }));
+  assert.equal(taskRunning(agent), false);
+  m.durable(task('task_started', 'a1', { description: 'File Lister', is_backgrounded: true }));
+  assert.equal(taskRunning(agent), true);
+  assert.equal(runOverview([agent]).running, true);
+});

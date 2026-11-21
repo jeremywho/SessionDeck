@@ -38,6 +38,8 @@ internal sealed class AcpChat : IChatAgent
         public string Id = "", Title = "", Kind = "", Name = "", Status = "";
         public JsonElement Input, Content, Output;
         public bool Shown, Done;
+        /// <summary>A call that starts a subagent, counted once among those waiting for theirs to show up on disk.</summary>
+        public bool Spawned;
         /// <summary>Made by the process running now, not read back from an earlier one.</summary>
         public bool Live;
     }
@@ -100,8 +102,15 @@ internal sealed class AcpChat : IChatAgent
     /// </summary>
     bool Waking => _tools.Values.Any(t => t.Live && t.Shown && !t.Done && t.Name == "schedule");
 
-    /// <summary>What a session with no turn running is: waiting for the person, or for its own timer.</summary>
-    string Rest => Waking ? "scheduled" : "idle";
+    /// <summary>What a session with no turn running is: waiting for the person, or for a timer or a subagent of its own.</summary>
+    string Rest(DateTime now) => Waking || Helping(now) ? "scheduled" : "idle";
+
+    /// <summary>A session at rest is what <see cref="Rest"/> says now: a subagent can finish, or go quiet, with the agent saying nothing.</summary>
+    void Settle(HostRecord record, DateTime now)
+    {
+        if (_prompting || _unasked || _loading != null || _session.Length == 0) return;
+        if (record.AgentStatus is "idle" or "scheduled") Status(record, Rest(now), now);
+    }
 
     /// <summary>How long a pause makes what the agent said unasked a message of the conversation.</summary>
     internal static readonly TimeSpan SaidQuiet = TimeSpan.FromSeconds(2);
@@ -146,13 +155,14 @@ internal sealed class AcpChat : IChatAgent
         {
             if (_run.ToString().Trim().Length == 0) EndRun(); else Flush(false, effects);
         }
+        if (!_unasked && _runKind.Length == 0) Settle(record, now);
         if (!_unasked || _runKind.Length > 0 || quiet < WorkQuiet) return effects;
         // A timer waiting to fire is not work going on: the session rests, scheduled, until it does.
         if (_tools.Values.Any(t => t.Live && t.Shown && !t.Done && t.Name != "schedule") && quiet < CallQuiet) return effects;
         _unasked = false;
         effects.Add(Durable(new { type = "result", subtype = "success", is_error = false, result = "" }));
         record.LastEvent = "Stop";
-        Status(record, Rest, now);
+        Status(record, Rest(now), now);
         return effects;
     }
 
@@ -234,6 +244,7 @@ internal sealed class AcpChat : IChatAgent
             _loading = _resume;
             _replay.Clear();
             _tools.Clear();
+            Alone();
             return Call("session/load", new { sessionId = _resume, cwd = _cwd, mcpServers = Array.Empty<object>() }, new Pending("load", Session: _resume));
         }
         return Call("session/new", new { cwd = _cwd, mcpServers = Array.Empty<object>() }, new Pending("new"));
@@ -391,6 +402,7 @@ internal sealed class AcpChat : IChatAgent
         (_replayUsed, _replayWindow) = (0, 0);
         _replay.Clear();
         _tools.Clear();
+        Alone();
         EndRun();
         return new() { Call("session/load", new { sessionId = session, cwd = _cwd, mcpServers = Array.Empty<object>() }, new Pending("load", request, tag, session)) };
     }
@@ -658,6 +670,275 @@ internal sealed class AcpChat : IChatAgent
         else effects.Add(new Effect(Kind.Durable, line));
     }
 
+    // ---- subagents ----
+
+    /// <summary>Antigravity's call that starts a subagent.</summary>
+    const string Spawn = "invoke_subagent";
+    /// <summary>What a subagent with no role of its own is called.</summary>
+    const string NoRole = "Subagent";
+    const string Killed = "SUBAGENT_STATE_KILLED";
+
+    /// <summary>
+    /// A subagent the open conversation started in this process, under the call that started it.
+    /// Antigravity ends a call that starts one at once and says no more of it over the protocol;
+    /// what the subagent does is read from its transcript on disk (<see cref="AgyWatch"/>) and
+    /// shown as a Claude subagent's work is: lines under the call, and a task that is running
+    /// until the subagent has had its say. Its file never says it is done (it stays alive to be
+    /// spoken to again), so it is over when its last step is words with no call: the end of a turn.
+    /// </summary>
+    sealed class Helper
+    {
+        public string Id = "", Call = "", Tag = "", Role = "", Last = "";
+        public int Uses;
+        /// <summary>Its turn has ended, or it was killed.</summary>
+        public bool Over;
+        /// <summary>Viewers have been told it is at work, and not yet that it stopped.</summary>
+        public bool Told;
+        public DateTime HeardAt;
+        public readonly Queue<string> Open = new();
+    }
+
+    /// <summary>The calls of this process that started a subagent not yet seen on disk, oldest first.</summary>
+    readonly List<string> _spawns = new();
+    /// <summary>Subagents seen on disk with no call yet to put them under, and what they have done meanwhile.</summary>
+    readonly List<(AgySubagent Subagent, List<AgyStep> Steps)> _unclaimed = new();
+    readonly Dictionary<string, Helper> _helpers = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// How long a subagent that has not ended its turn is taken to be at work with nothing new on
+    /// disk. A step is written when it ends, so a long command is silence; and a subagent whose
+    /// process died is silence for ever.
+    /// </summary>
+    internal static readonly TimeSpan HelperQuiet = TimeSpan.FromMinutes(30);
+
+    bool Helping(DateTime now) => _helpers.Values.Any(h => !h.Over && now - h.HeardAt < HelperQuiet);
+
+    /// <summary>The open conversation's subagents are no longer followed: it is another conversation now, or none.</summary>
+    void Alone()
+    {
+        _helpers.Clear();
+        _spawns.Clear();
+        _unclaimed.Clear();
+    }
+
+    /// <summary>What the open conversation's subagents wrote to disk since the last look.</summary>
+    public List<Effect> Outside(AgyNews news, HostRecord record, DateTime now) => Logged(Seen(news, record, now), now);
+
+    List<Effect> Seen(AgyNews news, HostRecord record, DateTime now)
+    {
+        var effects = new List<Effect>();
+        if (news.Conversation != _session || _loading != null) return effects;
+        bool reported = false;
+        foreach (var one in news.Subagents)
+        {
+            if (_helpers.TryGetValue(one.Subagent.Id, out var helper))
+            {
+                bool was = helper.Over;
+                foreach (var line in Walked(helper, one.Steps, one.Subagent.State, now, history: false)) effects.Add(new Effect(Kind.Durable, line));
+                reported |= !was && helper.Over && one.Subagent.State != Killed;
+                continue;
+            }
+            int waiting = _unclaimed.FindIndex(u => u.Subagent.Id == one.Subagent.Id);
+            if (waiting >= 0)
+            {
+                _unclaimed[waiting].Steps.AddRange(one.Steps);
+                _unclaimed[waiting] = (one.Subagent, _unclaimed[waiting].Steps);
+            }
+            else if (_unclaimed.Count < 64) _unclaimed.Add((one.Subagent, new List<AgyStep>(one.Steps)));
+        }
+        Claim(now, effects);
+        // A subagent that has had its say has reported to the agent, which goes on from there (measured: it speaks
+        // within seconds, and can be a second behind the subagent's last words): the session is at work, not done.
+        if (reported && !_prompting && !_unasked)
+        {
+            _unasked = true;
+            _heardAt = now;
+            effects.Add(Working());
+            Status(record, "busy", now);
+        }
+        Settle(record, now);
+        return effects;
+    }
+
+    /// <summary>
+    /// Puts each subagent seen on disk under the call that started it: the oldest call still without
+    /// one, since the agent starts them in the order it calls for them. A call that names a role is
+    /// only given a subagent of that role, so one that is not this conversation's to show is never
+    /// put under a call that did not start it.
+    /// </summary>
+    void Claim(DateTime now, List<Effect> effects)
+    {
+        for (int i = 0; i < _unclaimed.Count; i++)
+        {
+            var (subagent, steps) = _unclaimed[i];
+            int call = _spawns.FindIndex(id => _tools.TryGetValue(id, out var tool) && tool.Shown && (RoleOf(tool).Length == 0 || subagent.Role.Length == 0 || RoleOf(tool) == subagent.Role));
+            if (call < 0) continue;
+            var helper = new Helper { Id = subagent.Id, Call = _spawns[call], Tag = "sub-" + subagent.Id[..8], Role = subagent.Role.Length > 0 ? subagent.Role : NoRole, HeardAt = now };
+            _spawns.RemoveAt(call);
+            _unclaimed.RemoveAt(i--);
+            _helpers[subagent.Id] = helper;
+            foreach (var line in Walked(helper, steps, subagent.State, now, history: false)) effects.Add(new Effect(Kind.Durable, line));
+        }
+    }
+
+    static string RoleOf(Tool tool) =>
+        tool.Input.ValueKind == JsonValueKind.Object && tool.Input.TryGetProperty("Role", out var role) && role.ValueKind == JsonValueKind.String ? role.GetString() ?? "" : "";
+
+    /// <summary>
+    /// A subagent's steps as lines under the call that started it, with the task lines that say it
+    /// is at work, how far along, and that it has stopped. Its thinking and the messages it is sent
+    /// are not shown: what it says and does is.
+    /// </summary>
+    List<byte[]> Walked(Helper helper, IReadOnlyList<AgyStep> steps, string state, DateTime now, bool history)
+    {
+        var lines = new List<byte[]>();
+        bool moved = false;
+        foreach (var step in steps)
+        {
+            helper.HeardAt = now;
+            byte[] At(byte[] line) => history && step.At is { } when ? ChatLines.Stamped(line, new DateTimeOffset(DateTime.SpecifyKind(when, DateTimeKind.Utc))) : line;
+            if (step.Type == AgyStep.Planner)
+            {
+                bool said = step.Content.Trim().Length > 0;
+                if (said) lines.Add(At(Assistant($"{helper.Tag}-{step.Index}", new { type = "text", text = step.Content }, history, helper.Call)));
+                for (int k = 0; k < step.Calls.Count; k++)
+                {
+                    var made = step.Calls[k];
+                    // A call the pane has no reading for is told by the first thing it was given (a message's words).
+                    string about = made.Args.Values.FirstOrDefault(v => v.Length > 0) ?? "";
+                    var tool = new Tool { Id = $"{helper.Tag}-{step.Index}-{k}", Name = made.Name, Title = about.Length > 120 ? about[..120] : about, Kind = KindOf(made.Name), Input = JsonSerializer.SerializeToElement(made.Args) };
+                    var input = Input(tool);
+                    helper.Open.Enqueue(tool.Id);
+                    helper.Uses++;
+                    helper.Last = (NameOfTool(tool) + " " + Brief(input)).Trim();
+                    lines.Add(At(Assistant(tool.Id, new { type = "tool_use", id = tool.Id, name = NameOfTool(tool), input }, history, helper.Call)));
+                    moved = true;
+                }
+                helper.Over = said && step.Calls.Count == 0;
+            }
+            else
+            {
+                // Anything else is something it will answer: what a call came back with, or a message sent to it.
+                helper.Over = false;
+                if (step.Type != AgyStep.Outcome || helper.Open.Count == 0) continue;
+                string id = helper.Open.Dequeue();
+                lines.Add(At(Line(new Dictionary<string, object?>
+                {
+                    ["type"] = "user", ["uuid"] = id + ":r",
+                    ["message"] = new { role = "user", content = new[] { new { type = "tool_result", tool_use_id = id, content = Unwrapped(step.Content), is_error = false } } },
+                    ["parent_tool_use_id"] = helper.Call,
+                }, history)));
+                moved = true;
+            }
+        }
+        if (state == Killed) helper.Over = true;
+        // One that had already had its say when it was first seen is still shown as a task: begun, and over.
+        if (!helper.Told && (!helper.Over || lines.Count > 0))
+        {
+            helper.Told = true;
+            lines.Insert(0, TaskLine(helper, "task_started", history, new() { ["description"] = helper.Role, ["is_backgrounded"] = true }));
+        }
+        if (moved && helper.Told) lines.Add(TaskLine(helper, "task_progress", history, new() { ["description"] = helper.Last, ["usage"] = new { tool_uses = helper.Uses } }));
+        if (helper.Over && helper.Told)
+        {
+            helper.Told = false;
+            lines.Add(TaskLine(helper, "task_notification", history, new() { ["status"] = state == Killed ? "stopped" : "completed" }));
+        }
+        return lines;
+    }
+
+    static byte[] TaskLine(Helper helper, string subtype, bool history, Dictionary<string, object?> more)
+    {
+        var line = new Dictionary<string, object?> { ["type"] = "system", ["subtype"] = subtype, ["tool_use_id"] = helper.Call, ["task_id"] = helper.Id };
+        foreach (var (name, value) in more) line[name] = value;
+        return Line(line, history);
+    }
+
+    /// <summary>The names Antigravity's transcript gives its tools, as kinds the protocol would have said. Only the ones measured: any other keeps its own name.</summary>
+    static string KindOf(string name) => name switch
+    {
+        "run_command" => "execute",
+        "write_file" or "edit_file" => "edit",
+        _ => "other",
+    };
+
+    /// <summary>The one thing a call was given that says what it is about.</summary>
+    static string Brief(Dictionary<string, object?> input)
+    {
+        foreach (string name in new[] { "command", "file_path", "pattern", "url", "description" })
+            if (input.TryGetValue(name, out var value) && value is string { Length: > 0 } said) return said.Length > 80 ? said[..80] : said;
+        return "";
+    }
+
+    /// <summary>What a step came back with, without the lines Antigravity heads it with (when it began and ended, repeated).</summary>
+    static string Unwrapped(string content)
+    {
+        const string output = "\nCommand output:\n";
+        int at = content.StartsWith("Created At:", StringComparison.Ordinal) ? content.IndexOf(output, StringComparison.Ordinal) : -1;
+        if (at >= 0) return content[(at + output.Length)..];
+        int start = 0;
+        while (start < content.Length)
+        {
+            int end = content.IndexOf('\n', start);
+            string line = end < 0 ? content[start..] : content[start..end];
+            if (!line.StartsWith("Created At:", StringComparison.Ordinal) && !line.StartsWith("Completed At:", StringComparison.Ordinal)) break;
+            start = end < 0 ? content.Length : end + 1;
+        }
+        return content[start..];
+    }
+
+    /// <summary>
+    /// A replayed conversation with what its subagents did put under the calls that started them,
+    /// read from disk. Only when every such call has its subagent and each is of the role its call
+    /// named: otherwise which belongs to which is a guess, and the replay stays as it came. They
+    /// belong to a process that is gone, so none is shown as still at work.
+    /// </summary>
+    List<byte[]> Helped(List<byte[]> lines, string session)
+    {
+        if (_provider != "Agy" || lines.Count == 0) return lines;
+        try
+        {
+            var subagents = _disk.Subagents(session);
+            if (subagents.Count == 0) return lines;
+            var calls = new List<(int Line, string Id, string Role)>();
+            var ids = new List<string>(lines.Count);
+            for (int i = 0; i < lines.Count; i++)
+            {
+                using var doc = JsonDocument.Parse(lines[i]);
+                var root = doc.RootElement;
+                ids.Add(Text(root, "uuid"));
+                if (Text(root, "type") != "assistant" || !Get(root, "message", out var message) || !Get(message, "content", out var content) || content.ValueKind != JsonValueKind.Array) continue;
+                foreach (var block in content.EnumerateArray())
+                    if (Text(block, "type") == "tool_use" && Text(block, "name") == "Agent" && Text(block, "id") is { Length: > 0 } id)
+                        calls.Add((i, id, Get(block, "input", out var input) ? Text(input, "description") : ""));
+            }
+            if (calls.Count != subagents.Count) return lines;
+            for (int k = 0; k < calls.Count; k++)
+                if (subagents[k].Role.Length > 0 && calls[k].Role != NoRole && calls[k].Role != subagents[k].Role) return lines;
+
+            var after = new Dictionary<int, int>();
+            for (int k = 0; k < calls.Count; k++)
+            {
+                int at = calls[k].Line;
+                for (int j = at + 1; j < lines.Count && j <= at + 64; j++)
+                    if (ids[j] == calls[k].Id + ":r") { at = j; break; }
+                after[at] = k;
+            }
+            var with = new List<byte[]>(lines.Count);
+            for (int i = 0; i < lines.Count; i++)
+            {
+                with.Add(lines[i]);
+                if (!after.TryGetValue(i, out int which)) continue;
+                var subagent = subagents[which];
+                var helper = new Helper { Id = subagent.Id, Call = calls[which].Id, Tag = "sub-" + subagent.Id[..8], Role = subagent.Role.Length > 0 ? subagent.Role : NoRole };
+                with.AddRange(Walked(helper, _disk.Steps(subagent.Id), subagent.State, DateTime.MinValue, history: true));
+                if (helper.Told) with.Add(TaskLine(helper, "task_notification", true, new() { ["status"] = "stopped" }));
+            }
+            return with;
+        }
+        catch (Exception e) when (e is JsonException or InvalidOperationException or FormatException or ArgumentException) { return lines; }
+    }
+
     // ---- tool calls ----
 
     Tool ToolOf(JsonElement call)
@@ -680,9 +961,15 @@ internal sealed class AcpChat : IChatAgent
         if (Text(call, "toolCallId").Length == 0) return;
         var tool = ToolOf(call);
         if (!replay) tool.Live = true;
+        if (!replay && tool.Name == Spawn && !tool.Spawned)
+        {
+            tool.Spawned = true;
+            _spawns.Add(tool.Id);
+        }
         bool ended = tool.Status is "completed" or "failed";
         // OpenCode announces a call before it knows what the call is ("shell", no command yet): it is shown once it runs.
         if (!tool.Shown && (ended || tool.Status == "in_progress")) Show(tool, replay, record, effects);
+        if (!replay && tool.Spawned && _unclaimed.Count > 0) Claim(now, effects);
         if (!ended || tool.Done) return;
         tool.Done = true;
         // OpenCode runs a call it was waiting to ask about once an "always" given meanwhile covers it, and never
@@ -711,7 +998,7 @@ internal sealed class AcpChat : IChatAgent
     }
 
     /// <summary>The agent's own name for a call is its implementation's ("run_command", "shell"); the protocol's kind says what it is to a reader.</summary>
-    static string NameOfTool(Tool tool) => tool.Kind switch
+    static string NameOfTool(Tool tool) => tool.Name == Spawn ? "Agent" : tool.Kind switch
     {
         "execute" => "Shell",
         "edit" => "Edit",
@@ -741,6 +1028,8 @@ internal sealed class AcpChat : IChatAgent
         }
         bool Has(params string[] names) => tool.Input.ValueKind == JsonValueKind.Object && tool.Input.EnumerateObject().Any(p => p.Value.ValueKind == JsonValueKind.String && names.Contains(p.Name, StringComparer.OrdinalIgnoreCase));
 
+        // A subagent's call reads as Claude's does: who it is, and what it was asked.
+        if (tool.Name == Spawn) return new() { ["description"] = Raw("Role") is { Length: > 0 } role ? role : NoRole, ["prompt"] = Raw("Prompt"), ["subagent_type"] = Raw("TypeName") };
         string command = Raw("command", "CommandLine", "cmd"), path = Raw("path", "file_path", "filePath", "AbsolutePath", "TargetFile", "file");
         if (command.Length > 0) return new() { ["command"] = command };
         if (Has("oldString", "old_string", "Target", "oldText") && Has("newString", "new_string", "Replacement", "newText"))
@@ -840,6 +1129,7 @@ internal sealed class AcpChat : IChatAgent
                 _log.Clear();
                 _logIds.Clear();
                 _logBytes = 0;
+                Alone();
                 Opened(result, record, effects);
                 record.SessionId = _session;
                 Next(record, now, effects);
@@ -864,7 +1154,7 @@ internal sealed class AcpChat : IChatAgent
                 Flush(true, effects);
                 _session = session;
                 _open.Clear();
-                var lines = Timed(new List<byte[]>(_replay), session);
+                var lines = Helped(Timed(new List<byte[]>(_replay), session), session);
                 _replay.Clear();
                 _opening = new List<byte[]>(lines);
                 int size = lines.Sum(l => l.Length + 1), drop = 0;
@@ -916,7 +1206,7 @@ internal sealed class AcpChat : IChatAgent
                 effects.Add(Durable(new { type = "result", subtype = failed ? "error" : stop == "cancelled" ? "error_during_execution" : "success", is_error = failed, result = said }));
                 if (!failed && said.Length > 0) effects.Add(Durable(new { type = "host", subtype = "note", text = said }));
                 record.LastEvent = "Stop";
-                Status(record, Rest, now);
+                Status(record, Rest(now), now);
                 Next(record, now, effects);
                 break;
             }
@@ -1082,8 +1372,8 @@ internal sealed class AcpChat : IChatAgent
         return Line(new Dictionary<string, object?> { ["type"] = "user", ["uuid"] = id, ["isReplay"] = true, ["message"] = new { role = "user", content }, ["parent_tool_use_id"] = null }, history);
     }
 
-    static byte[] Assistant(string id, object block, bool history) =>
-        Line(new Dictionary<string, object?> { ["type"] = "assistant", ["uuid"] = id, ["message"] = new { role = "assistant", content = new[] { block } }, ["parent_tool_use_id"] = null }, history);
+    static byte[] Assistant(string id, object block, bool history, string? parent = null) =>
+        Line(new Dictionary<string, object?> { ["type"] = "assistant", ["uuid"] = id, ["message"] = new { role = "assistant", content = new[] { block } }, ["parent_tool_use_id"] = parent }, history);
 
     static byte[] Line(Dictionary<string, object?> line, bool history)
     {

@@ -60,11 +60,15 @@ internal interface IAgentDisk
 {
     /// <summary>Every step of the conversation written so far; none when there is no transcript that can be read.</summary>
     IReadOnlyList<AgyStep> Steps(string conversation);
+
+    /// <summary>The subagents the conversation has started, in the order it started them.</summary>
+    IReadOnlyList<AgySubagent> Subagents(string conversation);
 }
 
 internal sealed class NoAgentDisk : IAgentDisk
 {
     public IReadOnlyList<AgyStep> Steps(string conversation) => Array.Empty<AgyStep>();
+    public IReadOnlyList<AgySubagent> Subagents(string conversation) => Array.Empty<AgySubagent>();
 }
 
 /// <summary>
@@ -125,6 +129,8 @@ internal sealed class AgyDisk : IAgentDisk
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         return steps;
     }
+
+    IReadOnlyList<AgySubagent> IAgentDisk.Subagents(string conversation) => Subagents(conversation);
 
     /// <summary>The subagents the conversation has started, in the order it started them.</summary>
     public List<AgySubagent> Subagents(string conversation)

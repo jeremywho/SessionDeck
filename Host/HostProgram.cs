@@ -167,6 +167,8 @@ internal static class HostProgram
     /// <summary>Set for a chat whose agent has no stream-json mode (Codex's app server, an ACP agent): this turns its protocol into the lines a viewer reads.</summary>
     static IChatAgent? _agent;
     static System.Threading.Timer? _agentTick;
+    static System.Threading.Timer? _agentWatch;
+    static int _agentWatching;
     static readonly object ChatInputLock = new();
     static readonly StringBuilder _chatErrors = new();
     /// <summary>The conversation the CLI was last started on, its transcript, and the command that started it. The record's session id can run ahead of this: the CLI names its session at each turn.</summary>
@@ -473,6 +475,24 @@ internal static class HostProgram
                     try { if (!_exited) Agent(c => c.Tick(_record, DateTime.UtcNow)); }
                     catch (Exception ex) { Log($"tick: {ex.Message}"); }
                 }, null, 1000, 1000);
+                // Antigravity says nothing of a subagent after starting it and writes its steps to disk: they are read
+                // there, on a thread of their own, and handed to the translator like anything else it is told.
+                if (_agent is AcpChat acp && spec.Provider == "Agy")
+                {
+                    var watch = new AgyWatch(new AgyDisk());
+                    _agentWatch = new System.Threading.Timer(_ =>
+                    {
+                        if (_exited || Interlocked.Exchange(ref _agentWatching, 1) == 1) return;
+                        try
+                        {
+                            string session;
+                            lock (_record) session = _record.SessionId;
+                            if (watch.Look(session) is { } news) Agent(_ => acp.Outside(news, _record, DateTime.UtcNow));
+                        }
+                        catch (Exception ex) { Log($"subagents: {ex.Message}"); }
+                        finally { Volatile.Write(ref _agentWatching, 0); }
+                    }, null, 1000, 1000);
+                }
                 if (prompt.Length > 0) AgentInput(ChatStream.UserLine(prompt));
             }
             else

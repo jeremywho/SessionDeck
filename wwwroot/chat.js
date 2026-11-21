@@ -483,7 +483,8 @@
         const tool = this.tools.get(line.tool_use_id);
         if (!tool) return;
         const task = tool.task || (tool.task = { description: '', last: '', uses: 0, status: 'running', background: false });
-        if (line.subtype === 'task_started') { task.description = String(line.description || ''); task.background = !!line.is_backgrounded; }
+        // A subagent that has reported can be set going again (Antigravity's are messaged and answer): it is at work once more.
+        if (line.subtype === 'task_started') { task.description = String(line.description || ''); task.background = !!line.is_backgrounded; task.status = 'running'; }
         else if (line.subtype === 'task_progress') {
           if (line.description) task.last = String(line.description);
           if (line.usage && typeof line.usage.tool_uses === 'number') task.uses = line.usage.tool_uses;
