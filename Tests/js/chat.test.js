@@ -1342,3 +1342,18 @@ test('calls the end of a turn says are still running are not cut off, and the re
   for (const line of [used('x1', 'Shell', {}), done({ running: 'x1' })]) plain.durable(line);
   assert.equal(calls(plain)[0].stopped, true);
 });
+
+test('a table cell is short, a sentence, or one long unbroken thing', () => {
+  const { cellKind } = require('../../wwwroot/chat.js');
+  assert.equal(cellKind('2,333'), '');
+  assert.equal(cellKind('  Last member done  '), '');
+  assert.equal(cellKind('Keep it off everywhere until the second service ships.'), 'prose');
+  assert.equal(cellKind('C:/Repos/.worktrees/some-project/a-long-branch/src/File.cs'), 'long');
+  assert.equal(cellKind('See C:/Repos/.worktrees/some-project/a-long-branch/src/File.cs for it'), 'long');
+  assert.equal(cellKind(''), '');
+  // 28 characters is still short; 29 is a sentence, and a word of 29 is too long for a narrow column.
+  assert.equal(cellKind('a'.repeat(13) + ' ' + 'b'.repeat(14)), '');
+  assert.equal(cellKind('a'.repeat(14) + ' ' + 'b'.repeat(14)), 'prose');
+  assert.equal(cellKind('a'.repeat(28)), '');
+  assert.equal(cellKind('a'.repeat(29)), 'long');
+});

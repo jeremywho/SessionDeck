@@ -75,6 +75,18 @@
 .chat thead, .chat tfoot { break-inside: auto; }
 .chat .md table { border-collapse: collapse; display: block; max-width: 100%; overflow-x: auto; font-variant-numeric: tabular-nums; }
 .chat .md th, .chat .md td { padding: 6px 20px 6px 0; border-bottom: 1px solid var(--pr-line); text-align: left; vertical-align: top; }
+/* A message breaks its words anywhere so nothing runs off the pane. Inherited by a cell, that lets a table shrink
+   every column to a letter's width before it would scroll: on a phone, four columns of prose came out one syllable
+   wide. In a cell a word stays whole, a column of prose keeps a width it can be read at, and a table that is then
+   too wide scrolls sideways (it is its own scroll box, above). Only a cell holding one long unbroken thing (a path)
+   still breaks it. The classes are set by `cellKind` when the markdown is drawn. */
+.chat .md th, .chat .md td { overflow-wrap: break-word; }
+.chat .md td.prose, .chat .md th.prose { min-width: 18ch; }
+.chat .md td.long, .chat .md th.long { min-width: 18ch; overflow-wrap: anywhere; }
+/* The side a scrolling table has more on fades out (`edges` in chat.js sets these as it is scrolled and resized). */
+.chat .md table.more { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 36px), transparent); }
+.chat .md table.back { -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(to left, #000 calc(100% - 36px), transparent); }
+.chat .md table.more.back { -webkit-mask-image: linear-gradient(to right, transparent, #000 36px, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(to right, transparent, #000 36px, #000 calc(100% - 36px), transparent); }
 .chat .md th { font-weight: 600; color: var(--fg2); border-bottom-color: var(--pr-line-strong); }
 .chat .md tr:last-child td { border-bottom: 0; }
 

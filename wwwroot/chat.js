@@ -862,10 +862,18 @@
     return modes;
   }
 
+  // What a table cell holds, for how wide its column has to be to be read: 'long' when it has one unbroken thing too
+  // long for a narrow column (a path, which may be broken anywhere), 'prose' when it is a sentence, '' when it is short.
+  function cellKind(text) {
+    const words = String(text).trim().split(/\s+/).filter(Boolean);
+    if (words.some(w => w.length > 28)) return 'long';
+    return words.join(' ').length > 28 ? 'prose' : '';
+  }
+
   // What the line under a chat at work says once nothing has come for a while.
   function workingText(at, now) { return `Working… last activity ${since(at, now)}, ${timeLabel(at, now, true)}`; }
 
-  const api = { HOST_REPLAYS, workingText, ChatModel, timeLabel, since, pauseBefore, PAUSE_MS, LineReader, Wire, toolBrief, textOf, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText, liveStep, taskRunning, asks, offeredCommands, renameAsked, skillsAsked, skillsNote, reloadNote, modelLabel, Recall, filterSessions, ago, startsOver, clampWide, diffKind };
+  const api = { HOST_REPLAYS, workingText, cellKind, ChatModel, timeLabel, since, pauseBefore, PAUSE_MS, LineReader, Wire, toolBrief, textOf, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText, liveStep, taskRunning, asks, offeredCommands, renameAsked, skillsAsked, skillsNote, reloadNote, modelLabel, Recall, filterSessions, ago, startsOver, clampWide, diffKind };
   if (typeof module !== 'undefined' && module.exports) { module.exports = api; return; }
 
   // ================= the page side =================
@@ -898,6 +906,10 @@
     const tpl = document.createElement('template');
     tpl.innerHTML = html;
     scrub(tpl.content, !!files);
+    for (const cell of tpl.content.querySelectorAll('td, th')) {
+      const kind = cellKind(cell.textContent || '');
+      if (kind) cell.className = kind;
+    }
     return tpl.innerHTML;
   }
 
@@ -1031,8 +1043,23 @@
     // A scroll reported while the area is changing height (a phone's keyboard coming up) is the browser's doing,
     // not the reader's: it must not be read as their having left the latest message, or they are left behind.
     scroll.addEventListener('scroll', () => { if (scroll.clientHeight === heightSeen) atLatest = nearBottom(); });
-    const resized = new ResizeObserver(() => { heightSeen = scroll.clientHeight; if (atLatest) scroll.scrollTop = scroll.scrollHeight; placeGrips(); });
+    // A table too wide for the pane scrolls sideways (chat.css). The edge it is cut at fades, so it reads as going on
+    // and not as all there is. Every table is read before any is written to, so it is one layout however many there are.
+    function edges(tables) {
+      const seen = [];
+      for (const t of tables) seen.push([t, t.scrollWidth - t.clientWidth - t.scrollLeft > 1, t.scrollLeft > 1]);
+      for (const [t, more, back] of seen) { t.classList.toggle('more', more); t.classList.toggle('back', back); }
+    }
+    let widthSeen = -1;
+    const resized = new ResizeObserver(() => {
+      heightSeen = scroll.clientHeight;
+      if (atLatest) scroll.scrollTop = scroll.scrollHeight;
+      placeGrips();
+      // Width only: it is what decides whether a table fits (and a pane that was hidden has none until it is shown).
+      if (scroll.clientWidth !== widthSeen) { widthSeen = scroll.clientWidth; edges(column.querySelectorAll('.md table')); }
+    });
     resized.observe(scroll);
+    column.addEventListener('scroll', e => { if (e.target instanceof Element && e.target.tagName === 'TABLE') edges([e.target]); }, { capture: true, passive: true });
 
     // ---- the column's width ----
 
@@ -1103,10 +1130,12 @@
         for (const n of nodes.values()) n.remove();
         nodes.clear();
       }
+      const drawn = [];
       for (const item of model.dirty) {
         let node = nodes.get(item);
         if (item.removed) { if (node) { node.remove(); nodes.delete(item); } continue; }
         const fresh = render(item, node);
+        drawn.push(fresh);
         if (!node) {
           nodes.set(item, fresh);
           // Ahead of the next item that is on the page: a page of earlier conversation arrives as many at once.
@@ -1122,6 +1151,8 @@
         }
       }
       model.dirty.clear();
+      const tables = drawn.flatMap(n => n.isConnected && n.querySelectorAll ? Array.from(n.querySelectorAll('.md table')) : []);
+      if (tables.length) edges(tables);
       empty.style.display = model.items.length ? 'none' : '';
       earlier.hidden = !(hostPages && model.earlier && model.historyAsk());
       earlier.disabled = !!asked || !connected;
