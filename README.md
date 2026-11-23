@@ -130,7 +130,11 @@ update a chat left idle restarts itself onto the new build with its model, mode 
 session underneath: it shows in the list with the same states, survives a deck restart, and comes
 back after a reboot with its conversation. The phone app opens a chat as the same conversation
 (Return adds a line there and the button sends; `+` attaches an image) and can start one from its
-`+` menu. Swiping a session left in the phone's list closes and ends it, as **Close & end session**
+`+` menu, where the chats are listed first. A dashboard that runs on the deck's computer and listens only there can be
+read on the phone, at home or away: name it in `phone-page.json` in the deck's data folder (`{ "name": "Usage", "url":
+"http://127.0.0.1:9000/", "paths": ["/api/usage"] }`, where `paths` are what the page fetches from its own server) and
+the phone's session list gets a button that opens it. It is read-only there: the page's own buttons are out of reach.
+Swiping a session left in the phone's list closes and ends it, as **Close & end session**
 does on the desktop; one that is still working or waiting for an answer is asked about first. Codex has a chat too (**New Codex** in the same menu, or **Chat view** with Codex picked): the
 same pane over Codex's app server, with its models and efforts, approvals as cards, file changes as
 diffs, and `/resume` over the folder's Codex conversations. A Codex chat either asks before each

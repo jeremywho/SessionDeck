@@ -43,7 +43,9 @@ public class PhonePageTests : IAsyncDisposable
                             if (first.Length < 2) return;
                             lock (Asked) Asked.Add(first[0] + " " + first[1]);
                             var (status, type, body, extra) = Answers.TryGetValue(first[1], out var a) ? a : (404, "text/plain", Encoding.UTF8.GetBytes("no"), "");
-                            await stream.WriteAsync(Encoding.ASCII.GetBytes($"HTTP/1.1 {status} X\r\nContent-Type: {type}\r\nContent-Length: {body.Length}\r\n{extra}Connection: close\r\n\r\n"));
+                            // "unsized" leaves the length out: the body is whatever comes before the connection closes.
+                            string length = extra == "unsized" ? "" : $"Content-Length: {body.Length}\r\n{extra}";
+                            await stream.WriteAsync(Encoding.ASCII.GetBytes($"HTTP/1.1 {status} X\r\nContent-Type: {type}\r\n{length}Connection: close\r\n\r\n"));
                             await stream.WriteAsync(body);
                         }
                     });
@@ -216,6 +218,11 @@ public class PhonePageTests : IAsyncDisposable
         lock (_fake.Asked) Assert.DoesNotContain("GET /api/reset", _fake.Asked);
         _fake.Say("/big", "text/html", new string('x', PhonePage.MostBytes + 1));
         Assert.Equal((HttpStatusCode.BadGateway, "Usage sent more than can be shown."), await Ask("/page/big"));
+        // And when it does not say how much is coming, the count is kept as it arrives.
+        _fake.Say("/big", "text/html", new string('x', PhonePage.MostBytes + 1), extra: "unsized");
+        Assert.Equal((HttpStatusCode.BadGateway, "Usage sent more than can be shown."), await Ask("/page/big"));
+        _fake.Say("/big", "text/html", "small enough", extra: "unsized");
+        Assert.Equal((HttpStatusCode.OK, "small enough"), await Ask("/page/big"));
         _fake.Say("/zip", "application/zip", "PK");
         Assert.Equal((HttpStatusCode.BadGateway, "Usage sent something that is not a page."), await Ask("/page/zip"));
 
