@@ -98,16 +98,20 @@ struct SessionsView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     // The deck's own "+" right-click: a new session in the home folder with the deck's flags.
                     Menu {
-                        Button { start("Claude") } label: { Label("New Claude session", systemImage: "sparkle") }
-                        Button { start("Claude", chat: true) } label: { Label("New Claude chat", systemImage: "bubble.left") }
-                        Button { start("Swift") } label: { Label("New Claude Swift session", systemImage: "sparkle") }
-                        Button { start("Swift", chat: true) } label: { Label("New Claude Swift chat", systemImage: "bubble.left") }
-                        Button { start("Codex") } label: { Label("New Codex session", systemImage: "diamond") }
-                        Button { start("Codex", chat: true) } label: { Label("New Codex chat", systemImage: "bubble.left") }
-                        Button { start("Agy") } label: { Label("New AGY session", systemImage: "diamond.inset.filled") }
-                        Button { start("Agy", chat: true) } label: { Label("New AGY chat", systemImage: "bubble.left") }
-                        Button { start("OpenCode", chat: true) } label: { Label("New OpenCode chat", systemImage: "bubble.left") }
-                        Button { start("Shell") } label: { Label("New terminal", systemImage: "terminal") }
+                        Section {
+                            Button { start("Claude", chat: true) } label: { Label("New Claude chat", systemImage: "bubble.left") }
+                            Button { start("Swift", chat: true) } label: { Label("New Claude Swift chat", systemImage: "bubble.left") }
+                            Button { start("Codex", chat: true) } label: { Label("New Codex chat", systemImage: "bubble.left") }
+                            Button { start("Agy", chat: true) } label: { Label("New AGY chat", systemImage: "bubble.left") }
+                            Button { start("OpenCode", chat: true) } label: { Label("New OpenCode chat", systemImage: "bubble.left") }
+                        }
+                        Section {
+                            Button { start("Claude") } label: { Label("New Claude session", systemImage: "sparkle") }
+                            Button { start("Swift") } label: { Label("New Claude Swift session", systemImage: "sparkle") }
+                            Button { start("Codex") } label: { Label("New Codex session", systemImage: "diamond") }
+                            Button { start("Agy") } label: { Label("New AGY session", systemImage: "diamond.inset.filled") }
+                            Button { start("Shell") } label: { Label("New terminal", systemImage: "terminal") }
+                        }
                     } label: { Image(systemName: "plus") }
                         .disabled(!gateway.connected)
                         .accessibilityLabel("New session")
