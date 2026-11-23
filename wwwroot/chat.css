@@ -63,6 +63,10 @@
 .chat .md blockquote { padding-left: 14px; color: var(--fg2); border-left: 2px solid var(--pr-line-strong); }
 .chat .md hr { border: 0; border-top: 1px solid var(--pr-line); margin: 16px 0; }
 .chat .md code { font-family: var(--chat-mono); font-size: 0.875em; }
+/* A formula (MathML, drawn by the browser from what KaTeX makes of the model's LaTeX). One set apart scrolls sideways
+   when it is wider than the pane. */
+.chat .md math { font-size: 1.08em; }
+.chat .md math[display="block"] { margin: 6px 0; max-width: 100%; overflow-x: auto; overflow-y: hidden; }
 .chat .md :not(pre) > code { padding: 1px 5px; background: var(--chat-tint); border-radius: 5px; }
 .chat .md pre { position: relative; padding: 12px 14px; background: var(--chat-well); border-radius: 10px; overflow-x: auto; line-height: 1.5; }
 .chat .md pre code { white-space: pre; }

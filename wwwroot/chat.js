@@ -862,6 +862,28 @@
     return modes;
   }
 
+  // Math as models write it (LaTeX), found in running text: `$…$`, `\(…\)` in a line, `$$…$$` and `\[…\]` set apart.
+  // `before` is the character ahead of `src`. A dollar sign is far more often money or a shell variable than math,
+  // so a `$…$` pair counts only when it is shaped like math: it opens after something that is not a letter or a
+  // digit and straight onto its first character, closes straight after its last and before something that is not a
+  // letter or a digit, and stays on one line ("$5 and $10", "$HOME/$USER" and "US$5" are all left alone).
+  // Returns { raw, tex, display } or null. Whether the TeX is any good is for the renderer to say.
+  const MATH_START = /\$|\\[(\[]/;
+  function mathAt(src, before) {
+    let m;
+    if ((m = /^\$\$([\s\S]+?)\$\$/.exec(src)) || (m = /^\\\[([\s\S]+?)\\\]/.exec(src)))
+      return m[1].trim() && !/\n\s*\n/.test(m[1]) ? { raw: m[0], tex: m[1].trim(), display: true } : null;
+    if ((m = /^\\\(([\s\S]+?)\\\)/.exec(src)))
+      return m[1].trim() && !/\n\s*\n/.test(m[1]) ? { raw: m[0], tex: m[1].trim(), display: false } : null;
+    if (src[0] !== '$' || /[A-Za-z0-9$\\]/.test(before || '') || src.length < 3 || /[\s$]/.test(src[1])) return null;
+    let end = 1;
+    while ((end = src.indexOf('$', end)) > 0 && src[end - 1] === '\\') end++;
+    if (end < 2) return null;
+    const tex = src.slice(1, end);
+    if (tex.includes('\n') || /\s/.test(tex[tex.length - 1]) || /[A-Za-z0-9]/.test(src[end + 1] || '')) return null;
+    return { raw: src.slice(0, end + 1), tex, display: false };
+  }
+
   // What a table cell holds, for how wide its column has to be to be read: 'long' when it has one unbroken thing too
   // long for a narrow column (a path, which may be broken anywhere), 'prose' when it is a sentence, '' when it is short.
   function cellKind(text) {
@@ -873,7 +895,7 @@
   // What the line under a chat at work says once nothing has come for a while.
   function workingText(at, now) { return `Working… last activity ${since(at, now)}, ${timeLabel(at, now, true)}`; }
 
-  const api = { HOST_REPLAYS, workingText, cellKind, ChatModel, timeLabel, since, pauseBefore, PAUSE_MS, LineReader, Wire, toolBrief, textOf, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText, liveStep, taskRunning, asks, offeredCommands, renameAsked, skillsAsked, skillsNote, reloadNote, modelLabel, Recall, filterSessions, ago, startsOver, clampWide, diffKind };
+  const api = { HOST_REPLAYS, workingText, cellKind, mathAt, ChatModel, timeLabel, since, pauseBefore, PAUSE_MS, LineReader, Wire, toolBrief, textOf, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText, liveStep, taskRunning, asks, offeredCommands, renameAsked, skillsAsked, skillsNote, reloadNote, modelLabel, Recall, filterSessions, ago, startsOver, clampWide, diffKind };
   if (typeof module !== 'undefined' && module.exports) { module.exports = api; return; }
 
   // ================= the page side =================
@@ -883,6 +905,53 @@
 
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  // ---- math ----
+  // The markdown pass only marks where math is (two private-use characters around its number), so that what it
+  // makes still goes through the scrub as plain text; the formulas are drawn into those places afterwards.
+  const MATH_OPEN = '\uE000', MATH_CLOSE = '\uE001';
+  let maths = [];
+  function mathMark(token) { maths.push(token); return MATH_OPEN + (maths.length - 1) + MATH_CLOSE; }
+
+  // What KaTeX is let put on the page: MathML and nothing else.
+  const MATH_TAGS = new Set(['math', 'semantics', 'annotation', 'mrow', 'mi', 'mo', 'mn', 'ms', 'mtext', 'mspace', 'msup', 'msub', 'msubsup', 'mfrac', 'msqrt', 'mroot',
+    'mover', 'munder', 'munderover', 'mmultiscripts', 'mprescripts', 'mtable', 'mtr', 'mtd', 'mstyle', 'menclose', 'mpadded', 'mphantom', 'merror']);
+  const MATH_ATTRS = new Set(['display', 'encoding', 'mathvariant', 'stretchy', 'fence', 'separator', 'accent', 'accentunder', 'displaystyle', 'scriptlevel', 'mathcolor',
+    'mathbackground', 'columnalign', 'rowalign', 'columnspacing', 'rowspacing', 'columnlines', 'rowlines', 'notation', 'width', 'height', 'depth', 'lspace', 'rspace',
+    'minsize', 'maxsize', 'linethickness', 'movablelimits', 'largeop', 'symmetric', 'form', 'voffset']);
+
+  // The formula as an element, or null when it is not TeX that can be drawn (the text then stays as it was typed).
+  // KaTeX's MathML needs no fonts or styles of its own: the browser draws it.
+  function mathNode(m) {
+    if (!root.katex) return null;
+    try {
+      const tpl = document.createElement('template');
+      tpl.innerHTML = root.katex.renderToString(m.tex, { output: 'mathml', displayMode: !!m.display, throwOnError: true, trust: false, strict: 'ignore', maxExpand: 500 });
+      const math = tpl.content.querySelector('math');
+      if (!math) return null;
+      for (const el of [math, ...math.querySelectorAll('*')]) {
+        if (!MATH_TAGS.has(el.localName)) return null;
+        for (const attr of Array.from(el.attributes)) if (!MATH_ATTRS.has(attr.name.toLowerCase())) el.removeAttribute(attr.name);
+      }
+      return math;
+    } catch { return null; }
+  }
+
+  function placeMath(node, found) {
+    const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+    const marked = [];
+    for (let t; (t = walker.nextNode());) if (t.data.includes(MATH_OPEN)) marked.push(t);
+    for (const t of marked) {
+      const parts = t.data.split(new RegExp(MATH_OPEN + '(\\d+)' + MATH_CLOSE));
+      const made = document.createDocumentFragment();
+      parts.forEach((part, i) => {
+        if (i % 2 === 0) { if (part) made.appendChild(document.createTextNode(part)); return; }
+        const m = found[Number(part)];
+        if (m) made.appendChild(mathNode(m) || document.createTextNode(m.raw.replace(/\s+$/, '')));
+      });
+      t.replaceWith(made);
+    }
   }
 
   let markedReady = false;
@@ -899,13 +968,40 @@
           html(token) { return escapeHtml(token.text || token.raw || ''); },
           image(token) { return escapeHtml(token.text || token.href || ''); },
         },
+        // Math is taken out before the markdown rules see it: `_`, `*` and `\\` mean other things inside a formula.
+        // Code is tokenized first where it starts first, so a `$` in a code span or block is never math.
+        extensions: [
+          {
+            name: 'mathBlock', level: 'block',
+            start(src) { const m = /(^|\n)(\$\$|\\\[)/.exec(src); return m ? m.index + m[1].length : undefined; },
+            tokenizer(src) {
+              const m = mathAt(src, '');
+              const tail = m && m.display ? /^[ \t]*(\n|$)/.exec(src.slice(m.raw.length)) : null;
+              if (tail) return { type: 'mathBlock', raw: m.raw + tail[0], tex: m.tex, display: true };
+            },
+            renderer(token) { return '<p>' + mathMark(token) + '</p>\n'; },
+          },
+          {
+            name: 'math', level: 'inline',
+            start(src) { const i = src.search(MATH_START); return i < 0 ? undefined : i; },
+            tokenizer(src, tokens) {
+              const last = tokens && tokens.length ? tokens[tokens.length - 1] : null;
+              const m = mathAt(src, last && typeof last.raw === 'string' ? last.raw.slice(-1) : '');
+              if (m) return { type: 'math', raw: m.raw, tex: m.tex, display: m.display };
+            },
+            renderer(token) { return mathMark(token); },
+          },
+        ],
       });
     }
     let html;
-    try { html = root.marked.parse(text); } catch { return '<p>' + escapeHtml(text) + '</p>'; }
+    maths = [];
+    try { html = root.marked.parse(text.replace(/[\uE000\uE001]/g, '')); } catch { return '<p>' + escapeHtml(text) + '</p>'; }
     const tpl = document.createElement('template');
     tpl.innerHTML = html;
     scrub(tpl.content, !!files);
+    if (maths.length) placeMath(tpl.content, maths);
+    maths = [];
     for (const cell of tpl.content.querySelectorAll('td, th')) {
       const kind = cellKind(cell.textContent || '');
       if (kind) cell.className = kind;

@@ -701,6 +701,20 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
   (`highlight.js`, vendored) runs after the scrub, on a block's text only, and only for a named
   language in a finished message. The pane takes its ink
   from the terminal scheme's background, not the app theme (`chatLook` in `deck.html`).
+- **Math a model writes as LaTeX is drawn** (`mathAt`, `placeMath` in `chat.js`; `wwwroot/katex.js` is
+  KaTeX's `dist/katex.min.js`, vendored unchanged, licence beside it). Antigravity and the others write
+  `$O(n^k)$`, `\(…\)`, `$$…$$` and `\[…\]`, which their own apps draw. Here a `marked` extension takes
+  the math out before the markdown rules see it (so `_` and `*` inside a formula are not emphasis, and a
+  `$` in a code span or block is never math, since code is tokenized where it starts first) and leaves a
+  mark of two private-use characters; after the scrub each mark is replaced by KaTeX's **MathML-only**
+  output (`output: 'mathml'`), which the browser draws itself: no KaTeX fonts or stylesheet are shipped,
+  and it works in WebView2 and in iOS WebKit (both checked). What KaTeX returns is held to a list of
+  MathML elements and attributes (`MATH_TAGS`, `MATH_ATTRS`), with `trust: false`.
+  A `$` is far more often money or a shell variable than math, so `$…$` counts only when shaped like
+  math: it opens after something that is not a letter or digit and straight onto its first character,
+  closes straight after its last and before something that is not a letter or digit, and stays on one
+  line. TeX that KaTeX cannot parse stays as the text that was typed. Known cost: a literal `\(` … `\)`
+  in prose (outside code) is read as math.
 - **A phone opens a chat as the same pane.** The gateway serves `/mobile/mobile-chat.html`, which
   hosts `chat.js` full screen (`touch: true`) and attaches through the gateway's relay
   (`socketUrl`), exactly as `mobile.html` does for a terminal; the app's `ChatScreen` is a web

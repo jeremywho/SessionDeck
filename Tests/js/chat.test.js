@@ -1357,3 +1357,57 @@ test('a table cell is short, a sentence, or one long unbroken thing', () => {
   assert.equal(cellKind('a'.repeat(28)), '');
   assert.equal(cellKind('a'.repeat(29)), 'long');
 });
+
+// ---- math in running text ----
+
+test('math is found where a model writes it, between the delimiters LaTeX uses', () => {
+  const { mathAt } = require('../../wwwroot/chat.js');
+  assert.deepEqual(mathAt('$O(n^k)$ time', ' '), { raw: '$O(n^k)$', tex: 'O(n^k)', display: false });
+  assert.deepEqual(mathAt('$k$.', ' '), { raw: '$k$', tex: 'k', display: false });
+  assert.deepEqual(mathAt('$P \\subseteq NP$ (if', ' '), { raw: '$P \\subseteq NP$', tex: 'P \\subseteq NP', display: false });
+  assert.deepEqual(mathAt('$\\pm 1,000$', ''), { raw: '$\\pm 1,000$', tex: '\\pm 1,000', display: false });
+  assert.deepEqual(mathAt('\\(a^2 + b^2\\) inline', ' '), { raw: '\\(a^2 + b^2\\)', tex: 'a^2 + b^2', display: false });
+  assert.deepEqual(mathAt('$$\n\\frac{a}{b}\n$$\nafter', ''), { raw: '$$\n\\frac{a}{b}\n$$', tex: '\\frac{a}{b}', display: true });
+  assert.deepEqual(mathAt('\\[ x = 1 \\] after', ''), { raw: '\\[ x = 1 \\]', tex: 'x = 1', display: true });
+  // A dollar sign inside the formula, written as TeX writes one, does not end it.
+  assert.deepEqual(mathAt('$a = \\$5$ ok', ' '), { raw: '$a = \\$5$', tex: 'a = \\$5', display: false });
+  // Straight after punctuation or a bracket is fine.
+  assert.equal(mathAt('$x$)', '(').tex, 'x');
+});
+
+test('a dollar sign that is money or a variable is not math', () => {
+  const { mathAt } = require('../../wwwroot/chat.js');
+  // "It costs $5 and $10": the pair would close after a space.
+  assert.equal(mathAt('$5 and $10, or', ' '), null);
+  assert.equal(mathAt('$5 for one, a few $ more for two', ' '), null);
+  // "between $5-$10": it would close onto a digit; "$HOME/$USER": onto a letter.
+  assert.equal(mathAt('$5-$10.', ' '), null);
+  assert.equal(mathAt('$HOME/$USER and', ' '), null);
+  // "US$5 … 7$": it would open after a letter; "7$ each … $x": after a digit.
+  assert.equal(mathAt('$5 and another of 7$ each', 'S'), null);
+  assert.equal(mathAt('$ each and $x', '7'), null);
+  // A space after the opening sign, nothing between the signs, no closing sign, or the next line.
+  assert.equal(mathAt('$ x$', ' '), null);
+  assert.equal(mathAt('$$', ' '), null);
+  assert.equal(mathAt('$x', ' '), null);
+  assert.equal(mathAt('$x\ny$', ' '), null);
+  assert.equal(mathAt('$x', ''), null);
+  // An escaped sign is the sign itself.
+  assert.equal(mathAt('$5', '\\'), null);
+  // Not at a sign at all.
+  assert.equal(mathAt('x$y$', ' '), null);
+  assert.equal(mathAt('\\{x\\}', ' '), null);
+});
+
+test('math set apart does not run across a blank line, and an empty pair is nothing', () => {
+  const { mathAt } = require('../../wwwroot/chat.js');
+  assert.equal(mathAt('$$\na\n\nb\n$$', ''), null);
+  assert.equal(mathAt('\\[ a\n\n b \\]', ''), null);
+  assert.equal(mathAt('\\(a\n\nb\\)', ' '), null);
+  assert.equal(mathAt('$$ $$', ''), null);
+  assert.equal(mathAt('\\(\\)', ' '), null);
+  assert.equal(mathAt('\\[ \\]', ''), null);
+  // The first closing pair ends it.
+  assert.equal(mathAt('$$a$$ and $$b$$', '').raw, '$$a$$');
+  assert.equal(mathAt('\\(a\\) and \\(b\\)', '').raw, '\\(a\\)');
+});
