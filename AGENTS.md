@@ -711,6 +711,25 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
 - **Phone differences live behind `opts.touch`:** Return is a new line and the button sends, an
   attach button stands in for paste, and under 600 px the pickers use one-word labels because
   three full ones do not fit.
+- **One page of the deck's machine can be read on the phone** (`Gateway/PhonePage.cs`,
+  `ios/.../Sessions/PageSheet.swift`). A dashboard that listens only on loopback is named in
+  `phone-page.json` beside the settings (`{ "name", "url", "paths" }`; its own file because the deck
+  rewrites `settings.json` from memory, and read when asked, so naming one needs no restart). `/meta`
+  carries `page: { name }` when there is one (optional both ways: an older app ignores it, an older
+  gateway omits it), and the app then shows a button on the session list that opens it in a sheet.
+  - It is a narrow way through, not a proxy: a paired phone may `GET /page` (the page) and
+    `GET /page/<a listed path>`, and the gateway fetches exactly that from the configured loopback
+    address. Any other path is 404, any other method 405, a redirect is not followed, more than 2 MB
+    or a type that is not a page is 502, and the phone never says where to go. So a page's own
+    actions (buttons that POST) cannot be reached from a phone, by design: add a path to `paths` only
+    if a GET of it changes nothing.
+  - The page was written for a browser on that machine and fetches from the root of its own server
+    (`fetch('/api/…')`). The sheet's web view loads it from a scheme of its own (`sdpage://page/`,
+    `PageLoader`) whose handler asks the gateway with the phone's credential, so those fetches work
+    unchanged on the home network and through the relay. Proven in the simulator by
+    `PageSheetTests`: a `fetch` of an absolute path arrives through the handler.
+  - Its buttons are dimmed and dead in the sheet (a style added at document end), since nothing
+    behind them can work there.
 - **Testing the phone path without the live deck:** an isolated gateway (`SD_DATA_DIR`, its own
   port) lists hosts spawned under the same data dir; a debug app launch with `--pair host:port
   CODE` sets the built-in relay aside and reaches only that gateway (`--open`, `--send` work for
