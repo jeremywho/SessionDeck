@@ -68,10 +68,16 @@ struct EventsFrame: Codable {
     let machine: MachineLoad?
 }
 
+/// A page of the deck's own machine that the gateway lets this phone read; absent when the deck names none, and on older gateways.
+struct PhonePageInfo: Codable, Equatable {
+    let name: String
+}
+
 struct Meta: Codable {
     let folders: [String]
     let providers: [String]
     let machine: MachineLoad?
+    let page: PhonePageInfo?
     /// Where the gateway can be reached on its own network, e.g. `http://192.168.1.5:7420`; absent on older gateways.
     let lan: String?
 }

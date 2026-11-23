@@ -112,6 +112,33 @@ final class ModelsTests: XCTestCase {
         XCTAssertFalse(try entry("Working", exited: true).endNeedsConfirmation)
     }
 
+    func testTheDecksPageIsOptionalInWhatTheGatewaySaysOfItself() throws {
+        let named = try JSONDecoder().decode(Meta.self, from: Data(#"{"folders":[],"providers":["Claude"],"machine":null,"lan":null,"page":{"name":"Usage"}}"#.utf8))
+        XCTAssertEqual(named.page, PhonePageInfo(name: "Usage"))
+        // None named, and a gateway from before there was such a thing.
+        XCTAssertNil(try JSONDecoder().decode(Meta.self, from: Data(#"{"folders":[],"providers":[],"page":null}"#.utf8)).page)
+        XCTAssertNil(try JSONDecoder().decode(Meta.self, from: Data(#"{"folders":[],"providers":[]}"#.utf8)).page)
+    }
+
+    func testWhatThePageAsksForIsAskedOfTheGatewayUnderItsPagePathWithThisPhonesCredential() throws {
+        let home = Pairing(host: "192.168.1.5", port: 7420, token: "T0KEN", deviceId: "d1")
+        let away = Pairing(host: "deck.example.com", port: 443, token: "KEY", deviceId: "relay", scheme: "https")
+        func asked(_ url: String, _ pairing: Pairing) -> (String, String?) {
+            let request = PageLoader.request(for: URL(string: url)!, via: pairing)
+            return (request.url!.absoluteString, request.value(forHTTPHeaderField: "Authorization"))
+        }
+        XCTAssertEqual(asked("sdpage://page/", home).0, "http://192.168.1.5:7420/page/")
+        XCTAssertEqual(asked("sdpage://page", home).0, "http://192.168.1.5:7420/page/")
+        XCTAssertEqual(asked("sdpage://page/api/usage", home).0, "http://192.168.1.5:7420/page/api/usage")
+        XCTAssertEqual(asked("sdpage://page/api/usage?x=1", home).0, "http://192.168.1.5:7420/page/api/usage")
+        XCTAssertEqual(asked("sdpage://page/api/usage", away).0, "https://deck.example.com:443/page/api/usage")
+        XCTAssertEqual(asked("sdpage://page/a%20b", home).0, "http://192.168.1.5:7420/page/a%20b")
+        XCTAssertEqual(asked("sdpage://page/", home).1, "Bearer T0KEN")
+        XCTAssertEqual(asked("sdpage://page/", away).1, "Bearer KEY")
+        XCTAssertEqual(PageLoader.home.scheme, PageLoader.scheme)
+        XCTAssertTrue(String(decoding: PageLoader.message("a <b> & c"), as: UTF8.self).contains("a &lt;b> &amp; c"))
+    }
+
     func testAChatSessionOpensAsAConversationWhenTheGatewayCanRelayIt() throws {
         func entry(_ rest: String) throws -> CatalogEntry {
             let json = """

@@ -148,6 +148,9 @@ internal static class GatewayProcess
             adminToken, settings.Gateway.Relay.Key);
         server.QuitRequested += () => quit.TrySetResult();
         server.Folders = () => SessionStarter.Folders(Settings.Peek());
+        // Read when asked, so naming a page (or taking it away) needs no restart.
+        string pageFile = Path.Combine(Settings.DataDir, PhonePage.FileName);
+        server.Page = () => PhonePage.Load(pageFile);
         server.MarkRead = sessionId =>
         {
             // The other phones learn at once; the deck folds the file in on its next refresh.

@@ -8,6 +8,7 @@ final class GatewayStore: ObservableObject {
     @Published private(set) var pairing: Pairing?
     @Published private(set) var sessions: [CatalogEntry] = []
     @Published private(set) var machine: MachineLoad?
+    @Published private(set) var page: PhonePageInfo?
     @Published private(set) var connected = false
     @Published private(set) var lastError: String?
     @Published private(set) var viewed: [String: Date]
@@ -199,6 +200,12 @@ final class GatewayStore: ObservableObject {
     func meta() async -> Meta? {
         guard let pairing else { return nil }
         return await meta(via: pairing)
+    }
+
+    /// Whether the deck has a page for this phone to read. An unanswered question leaves what was known.
+    func loadPage() async {
+        guard let meta = await meta() else { return }
+        page = meta.page
     }
 
     private func meta(via pairing: Pairing) async -> Meta? {

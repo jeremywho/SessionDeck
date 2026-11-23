@@ -9,6 +9,7 @@ struct SessionsView: View {
     @State private var startError: String?
     @State private var confirmEnd: CatalogEntry?
     @State private var endError: String?
+    @State private var showPage = false
 
     /// "0.1.0 (57) 905e217": marketing version, commit count, commit, as build.sh stamps them.
     static var buildLabel: String {
@@ -93,8 +94,17 @@ struct SessionsView: View {
             .navigationDestination(for: CatalogEntry.self) { entry in
                 if entry.opensAsChat { ChatScreen(entry: entry) } else { TerminalScreen(entry: entry) }
             }
-            .refreshable { await gateway.refresh() }
+            .refreshable { await gateway.refresh(); await gateway.loadPage() }
+            .sheet(isPresented: $showPage) {
+                if let page = gateway.page { PageSheet(page: page).environmentObject(gateway) }
+            }
             .toolbar {
+                if let page = gateway.page {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button { showPage = true } label: { Image(systemName: "chart.bar") }
+                            .accessibilityLabel(page.name)
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     // The deck's own "+" right-click: a new session in the home folder with the deck's flags.
                     Menu {
@@ -145,7 +155,10 @@ struct SessionsView: View {
             .alert("Could not start the session", isPresented: Binding(get: { startError != nil }, set: { if !$0 { startError = nil } })) {
                 Button("OK") { startError = nil }
             } message: { Text(startError ?? "") }
-            .task { await gateway.refresh() }
+            .task { await gateway.refresh(); await gateway.loadPage() }
+            .onChange(of: gateway.connected) { _, connected in
+                if connected { Task { await gateway.loadPage() } }
+            }
             .onChange(of: gateway.sessions) { _, sessions in
                 if let hostId = awaitingHost, let entry = sessions.first(where: { $0.hostId == hostId }) {
                     awaitingHost = nil

@@ -49,6 +49,9 @@ internal sealed class GatewayServer : IAsyncDisposable
     public Func<List<string>> Folders = () => new();
     /// <summary>The latest machine load sample, or null before the first.</summary>
     public Func<MachineLoad?> Machine = () => null;
+    /// <summary>The page of this machine a phone may read (<see cref="PhonePage"/>), or null when none is named.</summary>
+    public Func<PhonePage?> Page = () => null;
+    static readonly System.Net.Http.HttpClient PageFetcher = PhonePage.Fetcher();
     readonly CancellationTokenSource _stop = new();
     TcpListener? _listener;
     Task? _accept;
@@ -181,7 +184,7 @@ internal sealed class GatewayServer : IAsyncDisposable
                 await MiniHttp.WriteJson(s, 200, "OK", SessionCatalog.ToJson(_catalog()));
                 return;
             case ("GET", "/meta"):
-                await MiniHttp.WriteJson(s, 200, "OK", JsonSerializer.Serialize(new { folders = Folders(), providers = SessionStarter.Providers, machine = Machine(), lan = LanBase() }, Json));
+                await MiniHttp.WriteJson(s, 200, "OK", JsonSerializer.Serialize(new { folders = Folders(), providers = SessionStarter.Providers, machine = Machine(), lan = LanBase(), page = Page() is { } named ? new { name = named.Name } : null }, Json));
                 return;
             case ("POST", "/sessions"):
                 await Start(s, r);
@@ -192,6 +195,15 @@ internal sealed class GatewayServer : IAsyncDisposable
             case ("GET", "/devices"):
                 await MiniHttp.WriteJson(s, 200, "OK", JsonSerializer.Serialize(_devices.Devices.Select(d => new { d.Id, d.Name, d.PairedAtUtc, d.LastSeenUtc }), Json));
                 return;
+        }
+        if (r.Path == "/page" || r.Path.StartsWith("/page/", StringComparison.Ordinal))
+        {
+            // Read only: whatever the page itself can change is not reachable from a phone.
+            if (r.Method != "GET") { await MiniHttp.WriteStatus(s, 405, "Method Not Allowed"); return; }
+            if (Page() is not { } page) { await MiniHttp.WriteStatus(s, 404, "Not Found"); return; }
+            var answer = await page.Read(r.Path, PageFetcher, _stop.Token);
+            await MiniHttp.WriteBody(s, answer.Status, answer.Status == 200 ? "OK" : answer.Status == 404 ? "Not Found" : "Bad Gateway", answer.ContentType, answer.Body);
+            return;
         }
         var end = Regex.Match(r.Path, @"^/sessions/([A-Za-z0-9]+)/end$");
         if (r.Method == "POST" && end.Success)
