@@ -56,6 +56,8 @@ dotnet test Tests\SessionDeck.Tests.csproj
   - `page-key 84ms ran=chat-paint=61ms/1@<host> pane=<host> kind=chat`: a key that took 50 ms or more to reach
     the screen (at most ten a minute). `page-frame` starts at 100 ms, and typing drags well before that; this is
     the line that says whether typing is slow, and what of ours ran in the way.
+  - `page-keys n=200 median=9ms p90=31ms max=118ms slow=7`: how the last 200 keys went, slow or not. This is
+    the measure of how typing feels on a real deck; compare it across a change before believing a fixture.
 - **What makes the page slow, measured 2026-11-24** (26 fixture chats in one column, a key typed every 80 ms;
   a key reaches the screen in 5 ms when nothing else runs). Every open tab is in the one page and laid out,
   shown or not (`.pane` is `visibility: hidden`), and they share its thread:
@@ -68,9 +70,18 @@ dotnet test Tests\SessionDeck.Tests.csproj
     hundreds of them is tens of milliseconds a time: 96 ms a key in the chat being typed in, 4 ms now. A run
     keeps what it has drawn and draws only the calls whose `rev` moved, so **every change to a call must go
     through `ChatModel.touch`** (the pane tests check each kind of change moves it).
-  - Tried and left out, with the numbers: `content-visibility: hidden` on chats behind other tabs (a layout
-    pass falls from 17 ms to 1 ms on a page of 800,000 elements, but no key got faster and a tab switch went
-    from 87 ms to 125-164 ms) and `content-visibility: auto` on messages (slower: 93 ms a key, 28 ms idle).
+  - On a real deck (44 tabs, v0.5.113) that took frames of 100 ms+ from 13.2 a minute to 5.5 and a tab switch
+    from 307 ms to 111 ms, and left this: one drawing of a chat behind another tab still took 51-102 ms,
+    nearly all of it layout forced from inside `paint` (`forced 60ms` of a 61 ms callback), and 8 keys in 25
+    minutes waited on one. So a pane behind another tab now measures nothing when it draws (no `scrollHeight`,
+    no `edges`): whether its reader was at the latest message is remembered (`atLatest`), and its place and its
+    tables are settled when it is shown (`unsettled`). Anything new that `paint` reads must follow that rule.
+  - Tried and left out, with the numbers: `content-visibility: hidden` on chats behind other tabs (in a trace a
+    layout pass falls from 17 ms to 1 ms on a page of 860,000 objects, but untraced no key got faster, twice,
+    and a tab switch went from 87 ms to 125-170 ms) and `content-visibility: auto` on messages (slower: 93 ms
+    a key, 28 ms idle). A traced run overstates what layout costs; decide on untraced key times.
+  - Not looked into: `grow()` reads the message box's `scrollHeight` on every key, which is a forced layout
+    of the page each time (the largest script line in a trace of typing while other chats stream).
   - Still open: on a page that size the chat being typed in, while its own answer streams, takes about 56 ms
     a key (68 ms before). The frames are 50 ms long with a few milliseconds of script and layout in them; what
     takes the rest was not found. The CDP `LayoutDuration` counter misses forced layouts: read the trace.

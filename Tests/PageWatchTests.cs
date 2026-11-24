@@ -186,6 +186,10 @@ public class PageWatchTests
         Assert.Equal("page-key 52ms ran=- pane=- kind=-", Line("""{"type":"key","ms":52,"ran":"","pane":"","kind":""}"""));
 
     [Fact]
+    public void How_typing_went_over_a_run_of_keys_is_logged() =>
+        Assert.Equal("page-keys n=200 median=9ms p90=31ms max=118ms slow=7", Line("""{"type":"keys","n":200,"median":9,"p90":31.2,"max":118,"slow":7}"""));
+
+    [Fact]
     public void The_pace_of_frames_after_a_slow_switch_is_logged() =>
         Assert.Equal("page-pace median=62ms max=80ms pane=9410668b6e6b", Line("""{"type":"pace","median":62,"max":80.4,"pane":"9410668b6e6b"}"""));
 

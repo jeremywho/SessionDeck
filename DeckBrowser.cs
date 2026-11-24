@@ -140,6 +140,7 @@ internal sealed class DeckBrowser : Grid
                 case "took":
                 case "frame":
                 case "key":
+                case "keys":
                 case "pace":
                 case "visibility":
                     if (_watch.Line(root, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()) is { } watched) PerformanceLog.Write(watched);

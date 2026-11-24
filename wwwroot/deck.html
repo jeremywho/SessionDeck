@@ -250,8 +250,9 @@
   const PACE_FROM_MS = 60;
   // How long a key took to reach the screen, when that was long enough to feel: a frame is only noted above from a
   // tenth of a second, and typing drags well before that.
-  const KEY_MS = 50, KEYS_A_MINUTE = 10;
+  const KEY_MS = 50, KEYS_A_MINUTE = 10, KEYS_SUMMED = 200;
   let keysFrom = 0, keysSaid = 0;
+  const typed = [];
   addEventListener('keydown', ev => {
     if (document.hidden) return;
     const at = ev.timeStamp;
@@ -260,6 +261,14 @@
       drawn.port1.onmessage = () => {
         drawn.port1.close();
         const ms = performance.now() - at;
+        // And how typing went as a whole, every so many keys: the slow ones alone do not say how most of them felt.
+        typed.push(ms);
+        if (typed.length >= KEYS_SUMMED) {
+          typed.sort((a, b) => a - b);
+          post({ type: 'keys', n: typed.length, median: Math.round(typed[typed.length >> 1]), p90: Math.round(typed[Math.floor(typed.length * 0.9)]),
+                 max: Math.round(typed[typed.length - 1]), slow: typed.filter(t => t >= KEY_MS).length });
+          typed.length = 0;
+        }
         if (ms < KEY_MS) return;
         if (at - keysFrom > 60000) { keysFrom = at; keysSaid = 0; }
         if (++keysSaid > KEYS_A_MINUTE) return;

@@ -1248,11 +1248,20 @@
       if (away()) later = setTimeout(() => { later = 0; draw(); }, BEHIND_MS);
       else draw();
     }
-    const shownAgain = opts.behind ? new MutationObserver(() => { if (later && !away()) { clearTimeout(later); later = 0; draw(); } }) : null;
+    // Drawn behind another tab, a pane measures nothing (see paint): what that left undone is done when it is shown.
+    let unsettled = false;
+    const shownAgain = opts.behind ? new MutationObserver(() => {
+      if (away() || !(later || unsettled)) return;
+      if (later) { clearTimeout(later); later = 0; }
+      draw();
+    }) : null;
     if (shownAgain) shownAgain.observe(el, { attributes: true, attributeFilter: ['class'] });
 
     function paint() {
-      const stick = nearBottom();
+      // Asking where anything is makes the browser lay the whole page out there and then, every tab of it. A pane
+      // nobody can see asks nothing: whether its reader was at the latest message is remembered, not measured.
+      const hidden = away();
+      const stick = hidden || unsettled ? atLatest : nearBottom();
       if (model.cleared) {
         model.cleared = false;
         for (const n of nodes.values()) n.remove();
@@ -1279,7 +1288,8 @@
         }
       }
       model.dirty.clear();
-      const tables = drawn.flatMap(n => n.isConnected && n.querySelectorAll ? Array.from(n.querySelectorAll('.md table')) : []);
+      const tables = hidden ? [] : unsettled ? Array.from(column.querySelectorAll('.md table'))
+        : drawn.flatMap(n => n.isConnected && n.querySelectorAll ? Array.from(n.querySelectorAll('.md table')) : []);
       if (tables.length) edges(tables);
       empty.style.display = model.items.length ? 'none' : '';
       earlier.hidden = !(hostPages && model.earlier && model.historyAsk());
@@ -1287,7 +1297,8 @@
       earlier.textContent = asked ? 'Loading…' : 'Load earlier messages';
       paintStatus();
       paintTail();
-      if (stick) scroll.scrollTop = scroll.scrollHeight;
+      unsettled = hidden;
+      if (stick && !hidden) scroll.scrollTop = scroll.scrollHeight;
     }
 
     function markText(item) { return timeLabel(item.at, now()); }
