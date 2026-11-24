@@ -658,6 +658,19 @@ public class AcpChatTests
     const string AgyWrite = """{"sessionUpdate":"tool_call","toolCallId":"call_8020681131156347865","name":"write_file","args":{"Content":"alpha\n","Overwrite":true,"Path":"C:\\Temp\\acplab\\ws\\note.txt"},"status":"in_progress","kind":"edit","title":"File note.txt","locations":[{"path":"C:\\Temp\\acplab\\ws\\note.txt"}],"rawInput":{"Content":"alpha\n","Overwrite":true,"Path":"C:\\Temp\\acplab\\ws\\note.txt"}}""";
     const string AgyEdit = """{"sessionUpdate":"tool_call","toolCallId":"call_13553632996387484225","name":"edit_file","args":{"Path":"C:\\Temp\\acplab\\ws\\note.txt","Replacement":"beta","Target":"alpha"},"status":"in_progress","kind":"edit","title":"File note.txt","locations":[{"path":"C:\\Temp\\acplab\\ws\\note.txt"}],"rawInput":{"Path":"C:\\Temp\\acplab\\ws\\note.txt","Replacement":"beta","Target":"alpha"}}""";
 
+    [Theory]
+    [InlineData("\"toolSummary\":\"\"")]
+    [InlineData("\"toolSummary\":\"   \"")]
+    [InlineData("\"other\":1")]
+    public void A_command_with_nothing_said_about_it_is_shown_by_the_command_alone(string summary)
+    {
+        var (chat, record, _) = OpenWith("Agy");
+        Prompt(chat, record, "Run it.");
+        var run = Block(Kept(chat.FromCli(J(Update(AgyId, AgyRun.Replace("\"toolSummary\":\"Echo acp-lab-one\"", summary))), record, T0)).Single());
+        Assert.Equal("echo acp-lab-one", Str(run.GetProperty("input"), "command"));
+        Assert.False(run.GetProperty("input").TryGetProperty("summary", out _));
+    }
+
     [Fact]
     public void Antigravitys_calls_are_read_by_meaning_from_its_own_input_names()
     {
@@ -665,6 +678,8 @@ public class AcpChatTests
         Prompt(chat, record, "Do these in order, one tool call each.");
         var run = Block(Kept(chat.FromCli(J(Update(AgyId, AgyRun)), record, T0)).Single());
         Assert.Equal(("Shell", "echo acp-lab-one"), (Str(run, "name"), Str(run.GetProperty("input"), "command")));
+        // What the command is for, in Antigravity's own words: the pane shows that on the row, and the command under it.
+        Assert.Equal("Echo acp-lab-one", Str(run.GetProperty("input"), "summary"));
         Assert.Equal("tool_result", Str(Block(Assert.Single(Kept(chat.FromCli(J(Update(AgyId, AgyRunDone)), record, T0)))), "type"));
         var write = Block(Kept(chat.FromCli(J(Update(AgyId, AgyWrite)), record, T0)).Single());
         Assert.Equal(("Edit", @"C:\Temp\acplab\ws\note.txt", "alpha\n"), (Str(write, "name"), Str(write.GetProperty("input"), "file_path"), Str(write.GetProperty("input"), "content")));
@@ -1819,6 +1834,16 @@ public class AcpChatTests
         // One that names no role is still a subagent.
         var bare = Kept(chat.FromCli(J(Update(AgyId, Spawning("call_sp2", "in_progress", ""))), record, After(5))).Single();
         Assert.Equal("Subagent", Str(Block(bare).GetProperty("input"), "description"));
+    }
+
+    [Fact]
+    public void How_far_along_a_subagent_is_reads_by_what_its_command_is_for()
+    {
+        var (chat, record, _) = Delegated(ended: false);
+        chat.Outside(News(AgyId, (Sub1, "File Lister", Alive, StepsOf(AgyDiskTests.Notice(0, "2026-03-04T10:00:00Z", "your task")))), record, After(6));
+        var ran = Kept(chat.Outside(News(AgyId, (Sub1, "File Lister", Alive, StepsOf(AgyDiskTests.Calling(1, "2026-03-04T10:00:02Z", "run_command", ("CommandLine", "\"dir /b\""), ("toolSummary", "\"List the files\""))))), record, After(10)));
+        Assert.Equal(("dir /b", "List the files"), (Str(Block(ran[0]).GetProperty("input"), "command"), Str(Block(ran[0]).GetProperty("input"), "summary")));
+        Assert.Equal("Shell List the files", Str(ran[1], "description"));
     }
 
     [Fact]

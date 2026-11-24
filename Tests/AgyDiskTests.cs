@@ -37,6 +37,9 @@ public class AgyDiskTests : IDisposable
         return JsonSerializer.Serialize(step);
     }
 
+    internal static string Calling(int index, string at, string name, params (string Arg, string Value)[] args) =>
+        JsonSerializer.Serialize(new Dictionary<string, object?> { ["step_index"] = index, ["source"] = "MODEL", ["type"] = "PLANNER_RESPONSE", ["status"] = "DONE", ["created_at"] = at, ["model"] = "some-model", ["tool_calls"] = new[] { new { name, args = args.ToDictionary(a => a.Arg, a => a.Value) } } });
+
     internal static string Outcome(int index, string at, string content) =>
         JsonSerializer.Serialize(new { step_index = index, source = "MODEL", type = "GENERIC", status = "DONE", created_at = at, content });
 

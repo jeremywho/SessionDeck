@@ -1023,7 +1023,7 @@ internal sealed class AcpChat : IChatAgent
     /// <summary>The one thing a call was given that says what it is about.</summary>
     static string Brief(Dictionary<string, object?> input)
     {
-        foreach (string name in new[] { "command", "file_path", "pattern", "url", "description" })
+        foreach (string name in new[] { "summary", "command", "file_path", "pattern", "url", "description" })
             if (input.TryGetValue(name, out var value) && value is string { Length: > 0 } said) return said.Length > 80 ? said[..80] : said;
         return "";
     }
@@ -1195,7 +1195,13 @@ internal sealed class AcpChat : IChatAgent
         // A subagent's call reads as Claude's does: who it is, and what it was asked.
         if (tool.Name == Spawn) return new() { ["description"] = Raw("Role") is { Length: > 0 } role ? role : NoRole, ["prompt"] = Raw("Prompt"), ["subagent_type"] = Raw("TypeName") };
         string command = Raw("command", "CommandLine", "cmd"), path = Raw("path", "file_path", "filePath", "AbsolutePath", "TargetFile", "file");
-        if (command.Length > 0) return new() { ["command"] = command };
+        if (command.Length > 0)
+        {
+            // Antigravity says what each command is for (`toolSummary`). It goes out under a name of its own, not as
+            // Claude's `description`: the pane shows this one on the row, and Claude's rows keep showing the command.
+            string summary = Raw("toolSummary").Trim();
+            return summary.Length > 0 ? new() { ["command"] = command, ["summary"] = summary } : new() { ["command"] = command };
+        }
         if (Has("oldString", "old_string", "Target", "oldText") && Has("newString", "new_string", "Replacement", "newText"))
             return new() { ["file_path"] = path, ["old_string"] = Raw("oldString", "old_string", "Target", "oldText"), ["new_string"] = Raw("newString", "new_string", "Replacement", "newText") };
         if (path.Length > 0 && Has("content", "CodeContent", "text")) return new() { ["file_path"] = path, ["content"] = Raw("content", "CodeContent", "text") };

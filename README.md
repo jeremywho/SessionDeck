@@ -114,7 +114,8 @@ A Claude session can open as a conversation instead of a terminal: click a colum
 right-click it and pick **New Claude**; the first group is chats; the group under **Terminal** opens the same agents in a
 terminal), or tick **Chat view** in the New session dialog. A click anywhere in a chat, or on its
 tab or its row in the list, puts the cursor in its message box. Replies render as
-markdown with coloured code, a run of tool calls folds to one line, an edit shows as a diff, and
+markdown with coloured code, a run of tool calls folds to one line, a thought folds to a line that
+says what it is about, an edit shows as a diff, and
 permission requests, questions and plans appear as cards with buttons (a plan is approved into the
 mode you pick; a permission can be allowed for the rest of the session when Claude offers that). Enter sends, Shift+Enter adds a line, Esc or **Stop** interrupts, and Up on the first line brings back earlier messages (Down goes forward again). Typing `/` lists the
 session's commands (arrows to move, Tab to complete, Enter to run); the model, effort and permission
@@ -143,7 +144,9 @@ Antigravity and OpenCode have chats as well (**New AGY** and **New OpenCode**), 
 agent's own Agent Client Protocol server: the pickers show that agent's models, efforts and modes,
 and diffs and `/resume` work the same. An OpenCode chat asks when OpenCode's own permission settings
 say to, as cards, and its "always allow" lasts for the folder, not just the session. An AGY chat
-does not ask: it is started with `--dangerously-skip-permissions`, as AGY terminals here are. Two
+does not ask: it is started with `--dangerously-skip-permissions`, as AGY terminals here are. An AGY
+command shows as what it is for, in AGY's own words, with the command itself under it when you open
+the row (in chats started after v0.5.117 was installed). Two
 more things differ in both: a message sent while the agent is working waits for the turn to end,
 and the whole conversation is loaded at once rather than a page at a time. Claude
 chats need the native `claude.exe` and use the default login; Codex chats need `codex.exe`, AGY

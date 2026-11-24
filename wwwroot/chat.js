@@ -582,9 +582,45 @@
   }
 
   // The one-line description beside a tool's name.
+  // A command the host gives a `summary` of (Antigravity says what each of its commands is for) is shown by that:
+  // a reader follows "Check the deploy status" where a hundred characters of shell say nothing at a glance.
+  function briefIsProse(input) {
+    return !!input && typeof input.command === 'string' && !!input.command && typeof input.summary === 'string' && !!input.summary.trim();
+  }
+
+  // A first sentence shorter than this ("Okay.", "That timed out.") says too little to stand for the thought, and
+  // the line has room for the next one.
+  const GIST_LEAST = 40, GIST_MOST = 120;
+  // Only the start of a thought is read for it: this runs each time a thought being written is drawn again.
+  const GIST_READ = 600;
+
+  // What a thought is about, for the line that stands for it while it is folded: its first sentence, or its heading.
+  function thoughtGist(text) {
+    // What a line is about, without what marks it as a heading, a quote or a list item, or sets all of it in bold.
+    const bare = l => l.replace(/^(?:#+|>+|[-*+]|\d+[.)])\s+/, '').replace(/^(\*\*|__|\*|_)(.+)\1$/, '$2');
+    // The edge of a code block and a rule are not lines of the thought.
+    const lines = String(text || '').slice(0, GIST_READ).split('\n').map(l => l.trim()).filter(l => l && !/^(?:```|~~~|-{3,}$|\*{3,}$|_{3,}$)/.test(l));
+    // A first line that only announces the next ("Initial thoughts:") is read with it.
+    const first = lines.length > 1 && lines[0].endsWith(':') ? bare(lines[0]) + ' ' + bare(lines[1]) : bare(lines[0] || '');
+    let s = first.replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]*)`/g, '$1').replace(/\s+/g, ' ').trim();
+    // Where a sentence ends: a stop with a capital after it. Not the dots in "v1.2.3" or "e.g. the", and not the
+    // stop after an initial or a short form ("U.S. Navy", "vs. The").
+    const stop = /[.!?](?=\s+[A-Z"'(\[])/g;
+    for (let m; (m = stop.exec(s));) {
+      if (m.index < GIST_LEAST) continue;
+      if (m[0] === '.' && /(?:^|[\s(.])(?:[A-Za-z]|vs|etc|cf|approx)$/i.test(s.slice(0, m.index))) continue;
+      s = s.slice(0, m.index + 1);
+      break;
+    }
+    if (s.length <= GIST_MOST) return s;
+    // Cut between characters, never through one that takes two units (an emoji).
+    const cut = /[\uD800-\uDBFF]/.test(s[GIST_MOST - 2]) ? GIST_MOST - 2 : GIST_MOST - 1;
+    return s.slice(0, cut).trimEnd() + '…';
+  }
+
   function toolBrief(name, input) {
     const i = input || {};
-    const pick = i.command || i.file_path || i.path || i.pattern || i.description || i.prompt || i.query || i.url || i.skill || '';
+    const pick = (briefIsProse(i) ? i.summary : '') || i.command || i.file_path || i.path || i.pattern || i.description || i.prompt || i.query || i.url || i.skill || '';
     let s = typeof pick === 'string' ? pick : '';
     if (!s && Array.isArray(i.questions) && i.questions[0]) s = String(i.questions[0].question || '');
     if (!s) {
@@ -803,6 +839,8 @@
       going,
       words: `${tools.length} tool calls`,
       breakdown: Array.from(counts, ([name, n]) => n > 1 ? `${name} ${n}` : name).join(', '),
+      // What its commands are for, where they say: that tells a reader more than the names of the tools.
+      about: tools.filter(t => briefIsProse(t.input)).map(t => t.input.summary.replace(/\s+/g, ' ').trim()).join(' · '),
       failed, asking, running,
       state: asking ? 'asking' : running ? 'running' : failed ? 'failed' : 'done',
     };
@@ -908,7 +946,7 @@
     if (input.value) input.value = '';
   }
 
-  const api = { HOST_REPLAYS, emptyBox, workingText, cellKind, mathAt, ChatModel, timeLabel, since, pauseBefore, PAUSE_MS, LineReader, Wire, toolBrief, textOf, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText, liveStep, taskRunning, asks, offeredCommands, renameAsked, skillsAsked, skillsNote, reloadNote, modelLabel, Recall, filterSessions, ago, startsOver, clampWide, diffKind };
+  const api = { HOST_REPLAYS, emptyBox, briefIsProse, thoughtGist, workingText, cellKind, mathAt, ChatModel, timeLabel, since, pauseBefore, PAUSE_MS, LineReader, Wire, toolBrief, textOf, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText, liveStep, taskRunning, asks, offeredCommands, renameAsked, skillsAsked, skillsNote, reloadNote, modelLabel, Recall, filterSessions, ago, startsOver, clampWide, diffKind };
   if (typeof module !== 'undefined' && module.exports) { module.exports = api; return; }
 
   // ================= the page side =================
@@ -1528,9 +1566,14 @@
         case 'thinking': {
           if (!node) {
             node = h('details', 'thinking');
-            node.append(h('summary', '', 'Thinking'), h('div', 'thinking-body'));
+            const summary = h('summary');
+            summary.append(h('span', 'thinking-word', 'Thinking'), h('span', 'thinking-gist'));
+            node.append(summary, h('div', 'thinking-body'));
           }
           node.querySelector('.thinking-body').textContent = item.text;
+          // Folded, it says what the thought is about: a column of rows that all say "Thinking" says nothing.
+          const gist = thoughtGist(item.text), said = node.querySelector('.thinking-gist');
+          if (said.textContent !== gist) said.textContent = gist;
           return node;
         }
         case 'note': {
@@ -1596,7 +1639,7 @@
       summary.textContent = '';
       const latest = overview.going;
       summary.append(h('span', 'tool-name', overview.words),
-        h('span', 'tool-brief', overview.running ? `${latest.name} ${toolBrief(latest.name, latest.input)}` : overview.breakdown));
+        h('span', 'tool-brief' + ((overview.running ? briefIsProse(latest.input) : overview.about) ? ' plain' : ''), overview.running ? `${latest.name} ${toolBrief(latest.name, latest.input)}` : overview.about || overview.breakdown));
       const word = overview.asking ? 'answer required' : overview.running ? 'running' : overview.failed ? `${overview.failed} failed` : '';
       if (word) summary.appendChild(h('span', 'tool-state', word));
       const body = kept ? kept.lastElementChild : h('div', 'run-body');
@@ -1631,7 +1674,7 @@
       const summary = h('summary');
       // A timer that has been set is not doing anything: it is waiting to fire.
       const word = { asking: 'answer required', failed: req && req.decision === 'deny' ? 'declined' : 'failed', stopped: 'stopped', running: OUTLIVES_TURN.has(item.name) ? 'waiting' : 'running' }[state];
-      summary.append(h('span', 'tool-name', item.name), h('span', 'tool-brief', toolBrief(item.name, item.input)));
+      summary.append(h('span', 'tool-name', item.name), h('span', 'tool-brief' + (briefIsProse(item.input) ? ' plain' : ''), toolBrief(item.name, item.input)));
       if (word) summary.appendChild(h('span', 'tool-state', word));
       const step = liveStep(item);
       if (step) summary.appendChild(h('span', 'tool-live', step));

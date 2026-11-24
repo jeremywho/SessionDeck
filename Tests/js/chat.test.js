@@ -352,8 +352,13 @@ test('a run says how many calls it holds, of what, and how it stands', () => {
   const done = { result: { text: '', error: false } };
   const three = [tool('Read', done), tool('Read', done), tool('Grep', done)];
   const { going, ...overview } = runOverview(three);
-  assert.deepEqual(overview, { words: '3 tool calls', breakdown: 'Read 2, Grep', failed: 0, asking: false, running: false, state: 'done' });
+  assert.deepEqual(overview, { words: '3 tool calls', breakdown: 'Read 2, Grep', about: '', failed: 0, asking: false, running: false, state: 'done' });
   assert.equal(going, three[2]);
+  // Where its commands say what they are for, the run says that: the names of its tools say little.
+  const said = (command, summary) => tool('Shell', { input: { command, summary }, ...done });
+  assert.equal(runOverview([tool('Read', done), said('az webapp log tail', 'Read the worker start lines')]).about, 'Read the worker start lines');
+  assert.equal(runOverview([said('a', 'Start the review'), said('b', '  '), said('c', 'Show the  changed files')]).about, 'Start the review · Show the changed files');
+  assert.equal(runOverview([tool('Bash', { input: { command: 'npm test', description: 'Run the tests' }, ...done }), tool('Read', done)]).about, '');
   // While a run is at work the call it names is the latest still going, not the latest made.
   const slow = tool('Agent'), quick = tool('Read', done);
   assert.equal(runOverview([tool('Read', done), slow, quick]).going, slow);
@@ -1565,3 +1570,51 @@ test('a formula is never drawn as MathML, and the pages load the stylesheet KaTe
   assert.equal((katexCss.match(/@font-face/g) || []).length, 20);
   assert.doesNotMatch(katexCss, /url\((?!data:font\/woff2;base64,)/, 'every font is inside the file');
 });
+
+test('a command that says what it is for is shown by that, and by the command when it does not', () => {
+  assert.equal(toolBrief('Shell', { command: 'git -C D:\\Repos\\x status --short', summary: 'Check for uncommitted changes' }), 'Check for uncommitted changes');
+  assert.equal(toolBrief('Shell', { command: 'npm test', summary: '   ' }), 'npm test');
+  assert.equal(toolBrief('Shell', { command: 'npm test' }), 'npm test');
+  // Claude's command rows are as they were: its `description` is not this, and the row shows the command.
+  assert.equal(toolBrief('Bash', { command: 'git status --short', description: 'Check for uncommitted changes' }), 'git status --short');
+  assert.equal(toolBrief('Agent', { description: 'Count files', prompt: 'Count the files in src.' }), 'Count files');
+  assert.equal(toolBrief('Read', { file_path: 'a.txt', summary: 'ignored' }), 'a.txt');
+});
+
+test('whether a row reads as prose or as something typed follows what it shows', () => {
+  const { briefIsProse } = require('../../wwwroot/chat.js');
+  assert.equal(briefIsProse({ command: 'npm test', summary: 'Run the tests' }), true);
+  assert.equal(briefIsProse({ command: 'npm test' }), false);
+  assert.equal(briefIsProse({ command: 'npm test', summary: '' }), false);
+  assert.equal(briefIsProse({ command: 'npm test', description: 'Run the tests' }), false);
+  assert.equal(briefIsProse({ file_path: 'a.txt' }), false);
+  assert.equal(briefIsProse(null), false);
+});
+
+test('the gist of a thought is its first sentence, short enough for one line and without its markup', () => {
+  const { thoughtGist } = require('../../wwwroot/chat.js');
+  assert.equal(thoughtGist('Verifying the pull request `TrainerRoadWeb#63059` is green. Then the merge state.'), 'Verifying the pull request TrainerRoadWeb#63059 is green.');
+  assert.equal(thoughtGist('**Checking the build**\n\nThe build on SQL Server is ready.'), 'Checking the build');
+  assert.equal(thoughtGist('  \n\nFirst real line here\nsecond line'), 'First real line here');
+  assert.equal(thoughtGist('The file is v1.2.3 of e.g. the reader, as used. Next.'), 'The file is v1.2.3 of e.g. the reader, as used.');
+  // A list or a quote starts with its mark, and a sentence does not end at "vs.", at an initial, or after a word or two.
+  assert.equal(thoughtGist('1. Check the build on the server\n2. Merge it'), 'Check the build on the server');
+  assert.equal(thoughtGist('- Reading the deploy log now\n- then the tests'), 'Reading the deploy log now');
+  assert.equal(thoughtGist('> Comparing the old reader vs. The new one for the U.S. Navy files. Done.'), 'Comparing the old reader vs. The new one for the U.S. Navy files.');
+  assert.equal(thoughtGist('Okay. The build is green and the merge can go ahead. Next the deploy.'), 'Okay. The build is green and the merge can go ahead.');
+  assert.equal(thoughtGist('That timed out. A narrower window should come back. Trying half an hour.'), 'That timed out. A narrower window should come back.');
+  assert.equal(thoughtGist('Initial thoughts:\nThe review found two blockers. Both are fixed.'), 'Initial thoughts: The review found two blockers.');
+  assert.equal(thoughtGist('What is left:\n- The deploy has not settled on two of the workers'), 'What is left: The deploy has not settled on two of the workers');
+  // A line that is only the edge of a code block or a rule is not what the thought is about.
+  assert.equal(thoughtGist('Let me check:\n\n```\nnpm test\n```\n'), 'Let me check: npm test');
+  assert.equal(thoughtGist('```json\n{ "a": 1 }\n```\nThe settings file is small.'), '{ "a": 1 }');
+  assert.equal(thoughtGist('---\nReading the settings file\n---'), 'Reading the settings file');
+  assert.equal(thoughtGist('*Weighing the two fixes*\n\nThe first is smaller.'), 'Weighing the two fixes');
+  assert.equal(thoughtGist('__Plan__\nfailed_parse_closes_the_file is the test to write'), 'Plan');
+  assert.equal(thoughtGist('The test failed_parse_closes_the_file is the one to write first'), 'The test failed_parse_closes_the_file is the one to write first');
+  // A cut never leaves half a character.
+  assert.equal(thoughtGist('a'.repeat(118) + '😀😀😀'), 'a'.repeat(118) + '…');
+  assert.equal(thoughtGist(''), '');
+  assert.equal(thoughtGist(undefined), '');
+  const long = thoughtGist('word '.repeat(80));
+  assert.ok(long.length <= 120 && long.endsWith('…'), long);});

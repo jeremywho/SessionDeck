@@ -476,6 +476,19 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
   late part. This did not get a `ChatStream.Revision` bump: the revision is one number for every kind
   of chat, a bump restarts every idle Claude chat, and only reopened Antigravity or OpenCode chats
   differ; a revision per translator is what would say this properly.
+- **A folded row says what it is about.** An Antigravity chat is a thought and a few calls, over and over
+  (one turn measured at 123 thoughts and 436 calls), and a column of "Thinking" and raw commands says
+  nothing. Two things, both in `chat.js`:
+  - A folded thought shows its gist beside the word (`thoughtGist`: the first sentence or heading, at most
+    120 characters, checked against the 3,300 or so thoughts the live chats held). It is the pane's alone, so it
+    shows in every kind of chat at once.
+  - Antigravity gives each command a `toolSummary`. `AcpChat.Input` passes it on as `input.summary`, and the
+    row shows that in place of the command (`briefIsProse`), with the command under it when opened. A finished
+    run of calls shows the summaries of its commands in place of the names of its tools (`runOverview.about`),
+    and a subagent's progress line reads by the summary too (`AcpChat.Brief`). It has a name of its own on
+    purpose: Claude's `description` is left alone and its rows still show the command.
+    No `ChatStream.Revision` bump, for the reason in the bullet above: an Antigravity chat started before
+    v0.5.117 keeps showing commands until it is restarted, and nothing on the page says so.
 - **An earlier page comes from the host, not the agent.** `AcpChat` keeps every line of the open
   conversation (`_log`: the replay whole, then each line as it is kept, stamped by `Logged` at
   every entry point), up to `LogMost` (64 MB, then the oldest go). `History` answers with the

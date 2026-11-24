@@ -128,11 +128,15 @@
    out every numbered item of every conversation again (1,102 of them on a real deck, some 40 ms, for each tool call
    that arrived). `none` leaves the triangle as it is and the numbered lists alone. */
 .chat details > summary { cursor: pointer; list-style-position: inside; color: var(--fg2); counter-increment: none; }
-.chat details.thinking > summary { color: var(--fg2); font-size: 0.875em; }
+.chat details.thinking > summary { display: list-item; color: var(--fg3); font-size: 0.875em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat .thinking-gist { margin-left: 8px; color: var(--fg2); }
+.chat details.thinking[open] > summary .thinking-gist { display: none; }
 .chat .thinking-body { margin: 6px 0 0 16px; color: var(--fg2); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.9em; }
 .chat details.tool > summary { display: list-item; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 0.9em; }
 .chat .tool-name { font-weight: 600; color: var(--fg); margin-right: 8px; }
 .chat .tool-brief { font-family: var(--chat-mono); font-size: 0.92em; }
+/* What a command is for, in words, where it says: set as words, not as something typed. */
+.chat .tool-brief.plain { font-family: inherit; font-size: 1em; color: var(--fg2); }
 .chat .tool-state { margin-left: 10px; color: var(--fg3); }
 .chat .tool-live { display: block; margin-left: 17px; color: var(--fg3); font-family: var(--chat-mono); font-size: 0.92em; overflow: hidden; text-overflow: ellipsis; }
 /* Opened, the row lists the subagent's steps: the newest one is not also said in the line above them. */
