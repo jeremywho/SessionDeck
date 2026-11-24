@@ -895,7 +895,18 @@
   // What the line under a chat at work says once nothing has come for a while.
   function workingText(at, now) { return `Working… last activity ${since(at, now)}, ${timeLabel(at, now, true)}`; }
 
-  const api = { HOST_REPLAYS, workingText, cellKind, mathAt, ChatModel, timeLabel, since, pauseBefore, PAUSE_MS, LineReader, Wire, toolBrief, textOf, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText, liveStep, taskRunning, asks, offeredCommands, renameAsked, skillsAsked, skillsNote, reloadNote, modelLabel, Recall, filterSessions, ago, startsOver, clampWide, diffKind };
+  // Script assigning '' to a box the keyboard is typing into makes iOS WebKit call into the keyboard, where the app has hung (iOS 26.6): an edit does not.
+  // A box that lost the focus in this turn and gets it back afterwards counts as typed into: focus it before, never after.
+  function emptyBox(input, doc) {
+    if (!input.value) return;
+    if (doc.activeElement === input) {
+      input.select();
+      try { doc.execCommand('delete'); } catch { }
+    }
+    if (input.value) input.value = '';
+  }
+
+  const api = { HOST_REPLAYS, emptyBox, workingText, cellKind, mathAt, ChatModel, timeLabel, since, pauseBefore, PAUSE_MS, LineReader, Wire, toolBrief, textOf, commandQuery, matchCommands, modelInForce, shortModel, lineDiff, runOverview, alwaysOffer, planExits, planText, liveStep, taskRunning, asks, offeredCommands, renameAsked, skillsAsked, skillsNote, reloadNote, modelLabel, Recall, filterSessions, ago, startsOver, clampWide, diffKind };
   if (typeof module !== 'undefined' && module.exports) { module.exports = api; return; }
 
   // ================= the page side =================
@@ -1115,6 +1126,14 @@
     let shots = [], nextShot = 1, preparing = false, hostTakesImages = false, pickedModel = '', drawnCatalog = null, menuItems = [], menuActive = 0, menuClosedFor = null;
 
     const sendLine = line => { if (ws && ws.readyState === WebSocket.OPEN) { ws.send(JSON.stringify({ type: 'input', data: line + '\n' })); return true; } return false; };
+
+    // Every place the page itself puts words in the message box, or takes them out, goes through here.
+    let emptying = false;
+    function setBox(text) {
+      if (text || !opts.touch) { input.value = text; return; }
+      emptying = true;
+      try { emptyBox(input, document); } finally { emptying = false; }
+    }
 
     function nearBottom() { return scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 60; }
 
@@ -1806,7 +1825,7 @@
     }
     function showRecalled(text) {
       if (text === null) return false;
-      input.value = text;
+      setBox(text);
       input.setSelectionRange(text.length, text.length);
       menuClosedFor = input.value;
       keepDraft();
@@ -1854,7 +1873,7 @@
       if (!sendLine(Wire.user(Wire.content(text, images)))) { paintStatus(); return; }
       model.sent(text, taken.map(s => s.url));
       shots = [];
-      input.value = '';
+      setBox('');
       keepDraft();
       paintShelf();
       paintMenu();
@@ -1956,7 +1975,7 @@
       }
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
       ws.send(JSON.stringify({ type: 'rename', request: 'n' + nextAsk++, name }));
-      input.value = '';
+      setBox('');
       keepDraft();
       paintMenu();
       grow();
@@ -1990,7 +2009,7 @@
         model.add({ kind: 'note', tone: 'plain', text: what === 'list' ? skillsNote(agent, model.catalog.commands)
           : 'Usage: /skills lists the skills and commands, /skills reload reads them again from disk.' });
       }
-      input.value = '';
+      setBox('');
       keepDraft();
       paintMenu();
       grow();
@@ -2016,18 +2035,18 @@
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
       choosing = { request: 'p' + nextAsk++, sessions: null, active: 0 };
       ws.send(JSON.stringify({ type: 'sessions', request: choosing.request }));
-      input.value = '';
+      input.focus();
+      setBox('');
       keepDraft();
       grow();
       paintMenu();
       paintStatus();
-      input.focus();
     }
 
     function closePicker() {
       if (!choosing) return;
       choosing = null;
-      input.value = '';
+      setBox('');
       grow();
       paintMenu();
       paintStatus();
@@ -2064,7 +2083,7 @@
       const close = h('button', 'resume-close', 'Close');
       close.type = 'button';
       close.addEventListener('mousedown', ev => ev.preventDefault());
-      close.addEventListener('click', () => { closePicker(); input.focus(); });
+      close.addEventListener('click', () => { input.focus(); closePicker(); });
       head.appendChild(close);
       menu.appendChild(head);
       if (!shown.length) {
@@ -2162,6 +2181,7 @@
     }
 
     input.addEventListener('input', () => {
+      if (emptying) return;
       menuActive = 0;
       grow();
       // While a conversation is being picked the box is the filter, not a message being written.
@@ -2182,7 +2202,9 @@
     input.addEventListener('blur', () => setTimeout(() => {
       if (document.activeElement !== input && !menu.hidden && !choosing) { menuClosedFor = input.value; paintMenu(); }
     }, 250));
-    action.addEventListener('click', () => { if (action.classList.contains('stop')) interrupt(); else submit(); input.focus(); });
+    // The message box keeps the focus through a press on the button, so the keyboard is never told it was left.
+    action.addEventListener('mousedown', ev => ev.preventDefault());
+    action.addEventListener('click', () => { input.focus(); if (action.classList.contains('stop')) interrupt(); else submit(); });
     el.addEventListener('keydown', ev => {
       // F13 to F16 move through the session list, as they do from a terminal pane.
       if (/^F1[3-6]$/.test(ev.key)) { post({ type: 'listKey', key: ev.key }); ev.preventDefault(); }
@@ -2266,7 +2288,7 @@
       model,
       focus() { retime(false); input.focus(); },
       // Type and send in one step, for a shell around the page that has its own way of taking words.
-      send(text) { input.value = String(text || ''); grow(); return submit(); },
+      send(text) { setBox(String(text || '')); grow(); return submit(); },
       get state() { return el.dataset.state; },
       paste(text) {
         if (!text) return;

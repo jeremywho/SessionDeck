@@ -1411,3 +1411,52 @@ test('math set apart does not run across a blank line, and an empty pair is noth
   assert.equal(mathAt('$$a$$ and $$b$$', '').raw, '$$a$$');
   assert.equal(mathAt('\\(a\\) and \\(b\\)', '').raw, '\\(a\\)');
 });
+
+// A message box that records how it was emptied: by script assigning its value, or by an edit command.
+function fakeBox(text, edits = true) {
+  const seen = { assigned: [], commands: [], selected: 0, focused: 0 };
+  let held = text;
+  const doc = { activeElement: null, execCommand(name) { seen.commands.push(name); if (edits === 'throws') throw new Error('no'); if (edits) held = ''; return !!edits; } };
+  const input = {
+    get value() { return held; }, set value(v) { seen.assigned.push(v); held = v; },
+    select() { seen.selected++; }, focus() { seen.focused++; doc.activeElement = input; },
+  };
+  return { input, doc, seen };
+}
+
+test('the box the keyboard is typing into is emptied by an edit, never by assigning its value', () => {
+  const { emptyBox } = require('../../wwwroot/chat.js');
+  const { input, doc, seen } = fakeBox('ok teh');
+  doc.activeElement = input;
+  emptyBox(input, doc);
+  assert.equal(input.value, '');
+  assert.deepEqual(seen, { assigned: [], commands: ['delete'], selected: 1, focused: 0 });
+});
+
+test('a box nothing is typing into is emptied by assignment, and is not given the focus', () => {
+  const { emptyBox } = require('../../wwwroot/chat.js');
+  const { input, doc, seen } = fakeBox('ok teh');
+  emptyBox(input, doc);
+  assert.equal(input.value, '');
+  assert.equal(doc.activeElement, null);
+  assert.deepEqual(seen, { assigned: [''], commands: [], selected: 0, focused: 0 });
+});
+
+test('a box the edit command leaves full is still emptied', () => {
+  const { emptyBox } = require('../../wwwroot/chat.js');
+  for (const edits of [false, 'throws']) {
+    const { input, doc, seen } = fakeBox('ok teh', edits);
+    doc.activeElement = input;
+    emptyBox(input, doc);
+    assert.equal(input.value, '');
+    assert.deepEqual(seen.assigned, ['']);
+  }
+});
+
+test('an empty box is left alone', () => {
+  const { emptyBox } = require('../../wwwroot/chat.js');
+  const { input, doc, seen } = fakeBox('');
+  doc.activeElement = input;
+  emptyBox(input, doc);
+  assert.deepEqual(seen, { assigned: [], commands: [], selected: 0, focused: 0 });
+});

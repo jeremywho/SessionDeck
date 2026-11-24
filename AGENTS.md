@@ -725,6 +725,26 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
 - **Phone differences live behind `opts.touch`:** Return is a new line and the button sends, an
   attach button stands in for paste, and under 600 px the pickers use one-word labels because
   three full ones do not fit.
+- **Never empty the message box by assigning to it; call `setBox('')`.** When script takes a text
+  box from full to empty while the keyboard is typing into it, iOS WebKit sends
+  `DidProgrammaticallyClearFocusedElement` and UIKit waits, on the main thread, for the keyboard's
+  task queue; the app was killed twice in that wait (iOS 26.6.2, `0x8BADF00D`, the message had
+  been sent). A box that lost the focus in the same turn and gets it back afterwards counts too,
+  which is what a tap on Send used to do. On a phone `emptyBox` therefore deletes the text of a
+  focused box as an edit (`execCommand('delete')`), which sends nothing, and assigns only to a box
+  without the focus. Two rules keep that true: the send button keeps the focus in the box through a
+  press (`mousedown`), and a handler that wants the box focused calls `input.focus()` **before**
+  it empties the box, never after (`openPicker`, the picker's close button, the send button).
+  - The price: the keyboard is not told. The next message does not start with a capital while the
+    keyboard stays up, a correction offered for the last word can linger, and the edit is one step
+    on the undo stack (shake to undo offers the sent text back). Every way of telling the keyboard
+    is that same UIKit call, and so is moving the focus to another box.
+  - What held the keyboard's queue is not known, and the hang was never reproduced. A blur and
+    refocus in one turn (`UpdateInputContextAfterBlurringAndRefocusingElement`) and a page reload
+    with the keyboard up reach UIKit's keyboard code by other roads and are untouched.
+  - Check it in a simulator, not by reading: `ChatKeyboardTests` passes with the signal firing. A
+    debugger breakpoint on `-[WKContentView _didProgrammaticallyClearFocusedElement:]` counted one
+    hit a send before the change and none after.
 - **One page of the deck's machine can be read on the phone** (`Gateway/PhonePage.cs`,
   `ios/.../Sessions/PageSheet.swift`). A dashboard that listens only on loopback is named in
   `phone-page.json` beside the settings (`{ "name", "url", "paths" }`; its own file because the deck
