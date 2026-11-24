@@ -1460,3 +1460,59 @@ test('an empty box is left alone', () => {
   emptyBox(input, doc);
   assert.deepEqual(seen, { assigned: [], commands: [], selected: 0, focused: 0 });
 });
+
+// A run of calls draws again only the calls whose `rev` has moved (chat.js renderRun), so everything that changes how
+// a call reads has to move it, and must leave the calls beside it alone.
+const revs = m => Object.fromEntries(Array.from(m.tools.values()).filter(t => !t.parent).map(t => [t.id, t.rev || 0]));
+function moved(m, change) {
+  const before = revs(m);
+  change();
+  const after = revs(m);
+  return Object.keys(after).filter(id => after[id] !== (before[id] || 0)).sort();
+}
+
+test('a result, a question and its answer each move the rev of their own call and of no other', () => {
+  const m = new ChatModel();
+  m.durable(echo('do it'));
+  m.durable(used('t1', 'Bash', { command: 'a' }));
+  m.durable(used('t2', 'Write', { file_path: 'b.txt' }));
+  m.durable(used('t3', 'Read', { file_path: 'c.txt' }));
+  assert.deepEqual(kinds(m), ['user', 'tools']);
+  assert.deepEqual(moved(m, () => m.durable(returned('t1', 'ok'))), ['t1']);
+  assert.deepEqual(moved(m, () => m.durable(asks('r2', 't2', 'Write', { file_path: 'b.txt' }))), ['t2']);
+  assert.deepEqual(moved(m, () => m.durable(JSON.parse(Wire.allow(calls(m)[1].request)))), ['t2']);
+  assert.deepEqual(moved(m, () => m.durable(returned('t3', 'boom', true))), ['t3']);
+});
+
+test('the end of a turn moves the rev of the calls it leaves unfinished or unanswered, and of no finished one', () => {
+  const m = new ChatModel();
+  m.durable(echo('do it'));
+  m.durable(used('t1', 'Bash', { command: 'a' }));
+  m.durable(returned('t1', 'ok'));
+  m.durable(used('t2', 'Bash', { command: 'b' }));
+  m.durable(used('t3', 'Write', { file_path: 'c.txt' }));
+  m.durable(asks('r3', 't3', 'Write', { file_path: 'c.txt' }));
+  assert.deepEqual(moved(m, () => m.durable(done())), ['t2', 't3']);
+  assert.equal(calls(m)[1].stopped, true);
+  assert.equal(calls(m)[2].request.decision, 'cancelled');
+});
+
+test('a session that ends moves the rev of a call cut off in the middle', () => {
+  const m = new ChatModel();
+  m.durable(echo('do it'));
+  m.durable(used('t1', 'Bash', { command: 'a' }));
+  m.durable(returned('t1', 'ok'));
+  m.durable(used('t2', 'Bash', { command: 'b' }));
+  assert.deepEqual(moved(m, () => m.exited(1)), ['t2']);
+});
+
+test('what a subagent does, and what it reports, moves the rev of the call that started it', () => {
+  const m = new ChatModel();
+  m.durable(echo('count the files'));
+  m.durable(used('a1', 'Agent', { description: 'Count files', prompt: 'Count the files in src.' }));
+  assert.deepEqual(moved(m, () => m.durable(task('task_started', 'a1', { description: 'Count files', is_backgrounded: false }))), ['a1']);
+  assert.deepEqual(moved(m, () => m.durable(under('a1', used('c1', 'Glob', { pattern: 'src/**' })))), ['a1']);
+  assert.deepEqual(moved(m, () => m.durable(task('task_progress', 'a1', { description: 'Finding src/**', usage: { tool_uses: 1 } }))), ['a1']);
+  assert.deepEqual(moved(m, () => m.durable(under('a1', returned('c1', 'src/a.js')))), ['a1']);
+  assert.deepEqual(moved(m, () => m.durable(task('task_notification', 'a1', { status: 'completed' }))), ['a1']);
+});

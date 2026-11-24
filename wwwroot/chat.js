@@ -169,9 +169,11 @@
 
     // A tool call is drawn inside its run, and a subagent's call inside the call that started the subagent:
     // what gets repainted is the row that holds it.
+    // `rev` counts the changes to a call (its own and those under it), so a run can tell which of its calls to draw again.
     touch(item) {
       let root = item;
       while (root.parent) root = root.parent;
+      root.rev = (root.rev || 0) + 1;
       this.dirty.add(root.run || root);
     }
 
@@ -1233,10 +1235,21 @@
       applyWide(storedWide());
     }
 
-    function schedule() {
-      if (frame) return;
-      frame = requestAnimationFrame(() => { frame = 0; timed('chat-paint', id, paint); });
+    // Every pane shares one thread, so a chat behind another tab is drawn at most this often: drawn each frame, it
+    // holds up the pane being typed in. It is drawn at once when it is come back to.
+    const BEHIND_MS = 2000;
+    const away = opts.behind || (() => false);
+    let later = 0;
+    function draw() {
+      if (!frame) frame = requestAnimationFrame(() => { frame = 0; timed('chat-paint', id, paint); });
     }
+    function schedule() {
+      if (frame || later) return;
+      if (away()) later = setTimeout(() => { later = 0; draw(); }, BEHIND_MS);
+      else draw();
+    }
+    const shownAgain = opts.behind ? new MutationObserver(() => { if (later && !away()) { clearTimeout(later); later = 0; draw(); } }) : null;
+    if (shownAgain) shownAgain.observe(el, { attributes: true, attributeFilter: ['class'] });
 
     function paint() {
       const stick = nearBottom();
@@ -1365,13 +1378,22 @@
     // A select is as wide as its longest option unless told otherwise; these are as wide as the choice they show.
     const ruler = h('span', 'pick-ruler');
     el.appendChild(ruler);
+    // Measuring makes the browser lay the page out there and then, and this is asked on every drawing and every key
+    // typed: it is done only when the words shown, or the look they are set in, have changed.
+    let looks = 0;
     function fit(select) {
       const shown = select.selectedOptions[0];
-      ruler.textContent = shown ? shown.textContent : '';
+      const text = shown ? shown.textContent : '';
+      const fitted = looks + '\u0000' + text;
+      if (select.dataset.fitted === fitted) return;
+      ruler.textContent = text;
       // Its padding and edge differ between a desktop and a phone: read, not assumed.
       const box = getComputedStyle(select);
       const around = ['paddingLeft', 'paddingRight', 'borderLeftWidth', 'borderRightWidth'].reduce((sum, side) => sum + (parseFloat(box[side]) || 0), 0);
-      select.style.width = Math.ceil(ruler.getBoundingClientRect().width) + Math.ceil(around) + 'px';
+      const wide = ruler.getBoundingClientRect().width;
+      select.style.width = Math.ceil(wide) + Math.ceil(around) + 'px';
+      // Words that measured nothing were not laid out (a pane not on the page yet): they are measured again.
+      if (wide > 0 || !text) select.dataset.fitted = fitted;
     }
 
     // The session's model, effort and permission mode, as the CLI lists and reports them. Nothing shows until it has:
@@ -1509,19 +1531,30 @@
       const open = openIn(node);
       if (run.tools.length === 1) return renderTool(run.tools[0], open);
       const overview = runOverview(run.tools);
-      const fresh = h('details', 'tool-run');
-      fresh.open = (!!node && node.classList.contains('tool-run') && node.open) || overview.asking;
-      fresh.dataset.state = overview.state;
-      const summary = h('summary');
+      // A run already drawn is kept, and only the calls that changed are drawn again. Each call is a <details>, and
+      // making hundreds of them afresh for every call and result held the page for tens of milliseconds each time.
+      const kept = node && node.classList.contains('tool-run') ? node : null;
+      const fresh = kept || h('details', 'tool-run');
+      if (overview.asking) fresh.open = true;
+      if (fresh.dataset.state !== overview.state) fresh.dataset.state = overview.state;
+      const summary = kept ? kept.firstElementChild : h('summary');
+      summary.textContent = '';
       const latest = overview.going;
       summary.append(h('span', 'tool-name', overview.words),
         h('span', 'tool-brief', overview.running ? `${latest.name} ${toolBrief(latest.name, latest.input)}` : overview.breakdown));
       const word = overview.asking ? 'answer required' : overview.running ? 'running' : overview.failed ? `${overview.failed} failed` : '';
       if (word) summary.appendChild(h('span', 'tool-state', word));
-      fresh.appendChild(summary);
-      const body = h('div', 'run-body');
-      for (const tool of run.tools) body.appendChild(renderTool(tool, open));
-      fresh.appendChild(body);
+      const body = kept ? kept.lastElementChild : h('div', 'run-body');
+      if (!kept) fresh.append(summary, body);
+      run.tools.forEach((tool, i) => {
+        const now = body.children[i], same = !!now && now.dataset.tool === tool.id;
+        if (same && now.drawnRev === tool.rev) return;
+        const drawn = renderTool(tool, open);
+        drawn.drawnRev = tool.rev;
+        if (same) now.replaceWith(drawn);
+        else body.insertBefore(drawn, now || null);
+      });
+      while (body.children.length > run.tools.length) body.lastElementChild.remove();
       return fresh;
     }
 
@@ -2306,11 +2339,14 @@
         el.dataset.scheme = look.onDark ? 'dark' : 'light';
         el.style.setProperty('--chat-alpha', String(look.alpha ?? 1));
         el.style.colorScheme = look.onDark ? 'dark' : 'light';
+        looks++;
         schedule();
       },
       dispose() {
         closed = true;
         if (frame) cancelAnimationFrame(frame);
+        if (later) clearTimeout(later);
+        if (shownAgain) shownAgain.disconnect();
         resized.disconnect();
         widePanes.delete(applyWide);
         clocks.delete(retime);

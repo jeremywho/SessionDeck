@@ -248,6 +248,26 @@
     requestAnimationFrame(step);
   }
   const PACE_FROM_MS = 60;
+  // How long a key took to reach the screen, when that was long enough to feel: a frame is only noted above from a
+  // tenth of a second, and typing drags well before that.
+  const KEY_MS = 50, KEYS_A_MINUTE = 10;
+  let keysFrom = 0, keysSaid = 0;
+  addEventListener('keydown', ev => {
+    if (document.hidden) return;
+    const at = ev.timeStamp;
+    requestAnimationFrame(() => {
+      const drawn = new MessageChannel();
+      drawn.port1.onmessage = () => {
+        const ms = performance.now() - at;
+        if (ms < KEY_MS) return;
+        if (at - keysFrom > 60000) { keysFrom = at; keysSaid = 0; }
+        if (++keysSaid > KEYS_A_MINUTE) return;
+        const f = groups[focused] && groups[focused].id ? panes.get(groups[focused].id) : null;
+        post({ type: 'key', ms: Math.round(ms), ran: ranIn(at, at + ms, 10), pane: f ? f.id : '', kind: f ? (f.chat ? 'chat' : 'terminal') : '' });
+      };
+      drawn.port2.postMessage(0);
+    });
+  }, true);
   // A window that is minimised or covered gets no frames, and what its panes were sent meanwhile is drawn when it is back.
   document.addEventListener('visibilitychange', () => post({ type: 'visibility', hidden: document.hidden }));
 
@@ -436,6 +456,7 @@
     document.body.appendChild(el);
     const chat = ChatPane.create({
       el, id, port, token, post, exited, session, timed,
+      behind: () => !el.classList.contains('shown'),
       onFocus: () => {
         const gi = groups.findIndex(g => g.id === id);
         if (gi >= 0 && gi !== focused) { focused = gi; layout(); }

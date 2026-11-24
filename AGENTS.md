@@ -53,6 +53,27 @@ dotnet test Tests\SessionDeck.Tests.csproj
   - `page-visibility hidden|visible` (a hidden page is given no frames, and draws what it missed when it is
     back), and `pane-socket lost host=..` then `pane-socket back host=..` (a pane's socket to its host dropped;
     the pane reconnects itself, and is logged once however often it has to ask).
+  - `page-key 84ms ran=chat-paint=61ms/1@<host> pane=<host> kind=chat`: a key that took 50 ms or more to reach
+    the screen (at most ten a minute). `page-frame` starts at 100 ms, and typing drags well before that; this is
+    the line that says whether typing is slow, and what of ours ran in the way.
+- **What makes the page slow, measured 2026-11-24** (26 fixture chats in one column, a key typed every 80 ms;
+  a key reaches the screen in 5 ms when nothing else runs). Every open tab is in the one page and laid out,
+  shown or not (`.pane` is `visibility: hidden`), and they share its thread:
+  - A chat behind another tab drew every frame it was sent something: 197 ms a key with two hidden chats
+    running tool calls. It now draws at most every two seconds (`BEHIND_MS`, `opts.behind`) and at once when
+    it is shown: 5 ms. Nothing outside the pane waits on that drawing (no `post` comes from `paint`).
+  - `fit()` measured the three pickers under the message box on every drawing and every key, each measuring a
+    forced layout (45,000 in a twelve-second run). It measures only when the words or the look change.
+  - A run of tool calls was built whole for every call and result. Each call is a `<details>`, and making
+    hundreds of them is tens of milliseconds a time: 96 ms a key in the chat being typed in, 4 ms now. A run
+    keeps what it has drawn and draws only the calls whose `rev` moved, so **every change to a call must go
+    through `ChatModel.touch`** (the pane tests check each kind of change moves it).
+  - Tried and left out, with the numbers: `content-visibility: hidden` on chats behind other tabs (a layout
+    pass falls from 17 ms to 1 ms on a page of 800,000 elements, but no key got faster and a tab switch went
+    from 87 ms to 125-164 ms) and `content-visibility: auto` on messages (slower: 93 ms a key, 28 ms idle).
+  - Still open: on a page that size the chat being typed in, while its own answer streams, takes about 56 ms
+    a key (68 ms before). The frames are 50 ms long with a few milliseconds of script and layout in them; what
+    takes the rest was not found. The CDP `LayoutDuration` counter misses forced layouts: read the trace.
 - DWM investigation is opt-in and documented in `docs/dwm-diagnostics.md`. The diagnostic launcher
   separates Mica from recurring work, records one-second DWM/app telemetry, and exits only the test app
   if the known sustained-DWM-CPU/resident-growth signature appears. Never enable that logging normally.

@@ -177,6 +177,15 @@ public class PageWatchTests
             Line("""{"type":"frame","ms":110,"work":0,"raf":0,"layout":108,"blocked":60,"scripts":"","hidden":true}"""));
 
     [Fact]
+    public void A_key_that_was_slow_to_reach_the_screen_is_logged_with_what_ran_meanwhile() =>
+        Assert.Equal("page-key 84ms ran=chat-paint=61ms/1@abc pane=abc kind=chat",
+            Line("""{"type":"key","ms":84.3,"ran":"chat-paint=61ms/1@abc","pane":"abc","kind":"chat"}"""));
+
+    [Fact]
+    public void A_slow_key_with_nothing_of_ours_running_says_none() =>
+        Assert.Equal("page-key 52ms ran=- pane=- kind=-", Line("""{"type":"key","ms":52,"ran":"","pane":"","kind":""}"""));
+
+    [Fact]
     public void The_pace_of_frames_after_a_slow_switch_is_logged() =>
         Assert.Equal("page-pace median=62ms max=80ms pane=9410668b6e6b", Line("""{"type":"pace","median":62,"max":80.4,"pane":"9410668b6e6b"}"""));
 
