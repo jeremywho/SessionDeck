@@ -737,8 +737,10 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
   it empties the box, never after (`openPicker`, the picker's close button, the send button).
   - The price: the keyboard is not told. The next message does not start with a capital while the
     keyboard stays up, a correction offered for the last word can linger, and the edit is one step
-    on the undo stack (shake to undo offers the sent text back). Every way of telling the keyboard
-    is that same UIKit call, and so is moving the focus to another box.
+    on the undo stack (so shake to undo may offer the sent text back: read from WebKit's source,
+    not tried). Every way of telling the keyboard is that same UIKit call. Moving the focus to
+    another box, or putting the keyboard away, re-enters keyboard code at the same moment by
+    another road (`reloadInputViews`); nobody measured whether that one can wait too.
   - What held the keyboard's queue is not known, and the hang was never reproduced. A blur and
     refocus in one turn (`UpdateInputContextAfterBlurringAndRefocusingElement`) and a page reload
     with the keyboard up reach UIKit's keyboard code by other roads and are untouched.
