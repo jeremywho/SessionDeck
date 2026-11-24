@@ -1,4 +1,4 @@
-KaTeX 0.19.1 (wwwroot/katex.js is its dist/katex.min.js, unchanged). https://katex.org
+KaTeX 0.19.1 (wwwroot/katex.js is its dist/katex.min.js, unchanged; wwwroot/katex.css is its dist/katex.min.css with the fonts of dist/fonts put inside it by tools/katex-css.py). https://katex.org
 
 The MIT License (MIT)
 

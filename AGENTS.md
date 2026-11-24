@@ -85,6 +85,32 @@ dotnet test Tests\SessionDeck.Tests.csproj
   - Still open: on a page that size the chat being typed in, while its own answer streams, takes about 56 ms
     a key (68 ms before). The frames are 50 ms long with a few milliseconds of script and layout in them; what
     takes the rest was not found. The CDP `LayoutDuration` counter misses forced layouts: read the trace.
+  - **The cause under all of the above, found 2026-11-24 on a copy of a real deck page** (headless Edge with a
+    pane for each of 36 live chats, attached read-only and sending nothing). Adding one part to a
+    conversation made Chromium style **every element of that conversation** again and fold every tool call's
+    body out of the layout and back in: 17 to 20 ms for a chat of 24,000 elements, 0.9 ms once fixed. The
+    trace names it: `StyleRecalcInvalidationTracking` on `.chat-column` with `subtree: true`, reason
+    "Related style rule". Two things each brought it on, and either alone is enough:
+    - sibling rules the engine cannot narrow: `.chat-column > * + *`, `details + details`, `li + li`. A `*`
+      or a bare tag left of a `+` goes into the one set the engine tries for every element added; a `*`
+      right of it means "anything", which it can only honour by styling everything. Spacing is now by the
+      part itself (`.chat-column > *`, `details.tight` set in `paint` by `tighten`, `li:not(:first-child)`);
+      the space above all 11,460 parts of the real conversations is the same before and after.
+    - a MathML formula anywhere in the page (see the note on math below).
+    And a second thing, found in the same traces once the first was gone: Chromium's own stylesheet gives
+    every `<summary>` `counter-increment: list-item 0`, and with that on it each `<summary>` added or
+    removed counts as a change to the numbering of every `<ol>` in the page. Each tool call that arrived
+    had all 1,102 numbered-list items of all the conversations laid out again (`LayoutInvalidationTracking`,
+    reason "List value change", some 40 ms of layout and as much again of pre-paint). `counter-increment:
+    none` on `.chat details > summary` ends it (10 ms to 0.4 ms a part on a made-up page of 900 items); the
+    triangle and the numbers are as before. `display: block` on the summary, and `contain: style` on the
+    list, the message or the part, do nothing.
+    A pane test reads `chat.css` for the first and the third and the pages for the second. To look again: the trace
+    categories `devtools.timeline` and `disabled-by-default-devtools.timeline.invalidationTracking` say
+    which elements are styled or laid out again and why. Three traps met on the way: a rule taken out of a
+    live page shows nothing when two rules each cause the same thing (try each on a fresh page); adding
+    five lines in a row measures "a line after a line", not "a line after a tool call" (take each out
+    again); a made-up conversation had no formula in it, so no fixture showed any of this.
 - DWM investigation is opt-in and documented in `docs/dwm-diagnostics.md`. The diagnostic launcher
   separates Mica from recurring work, records one-second DWM/app telemetry, and exits only the test app
   if the known sustained-DWM-CPU/resident-growth signature appears. Never enable that logging normally.
@@ -738,10 +764,16 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
   `$O(n^k)$`, `\(…\)`, `$$…$$` and `\[…\]`, which their own apps draw. Here a `marked` extension takes
   the math out before the markdown rules see it (so `_` and `*` inside a formula are not emphasis, and a
   `$` in a code span or block is never math, since code is tokenized where it starts first) and leaves a
-  mark of two private-use characters; after the scrub each mark is replaced by KaTeX's **MathML-only**
-  output (`output: 'mathml'`), which the browser draws itself: no KaTeX fonts or stylesheet are shipped,
-  and it works in WebView2 and in iOS WebKit (both checked). What KaTeX returns is held to a list of
-  MathML elements and attributes (`MATH_TAGS`, `MATH_ATTRS`), with `trust: false`.
+  mark of two private-use characters; after the scrub each mark is replaced by what KaTeX draws with
+  **spans and its own fonts** (`output: 'html'`). `wwwroot/katex.css` is KaTeX's `dist/katex.min.css` with
+  its twenty woff2 fonts inside the file (`tools/katex-css.py` builds it and checks it is the same release
+  as `katex.js`), so the pages need one more stylesheet and no font files. What KaTeX returns is held to a
+  list of elements and attributes (`MATH_TAGS`, `MATH_ATTRS`), with `trust: false`.
+  - **Never MathML** (v0.5.111 to v0.5.114 used `output: 'mathml'`). The first `<math>` element in a page
+    makes Chromium load its built-in MathML stylesheet, and with that and our stylesheet in the page a part
+    added to any conversation has the whole conversation styled again, for as long as the page lives: 17 ms
+    an addition where it takes under one, in a fresh deck page with one formula ever put in it (taking the
+    formula out again changes nothing; an SVG put in instead costs nothing). A pane test holds this.
   A `$` is far more often money or a shell variable than math, so `$…$` counts only when shaped like
   math: it opens after something that is not a letter or digit and straight onto its first character,
   closes straight after its last and before something that is not a letter or digit, and stays on one

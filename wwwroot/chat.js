@@ -927,26 +927,29 @@
   let maths = [];
   function mathMark(token) { maths.push(token); return MATH_OPEN + (maths.length - 1) + MATH_CLOSE; }
 
-  // What KaTeX is let put on the page: MathML and nothing else.
-  const MATH_TAGS = new Set(['math', 'semantics', 'annotation', 'mrow', 'mi', 'mo', 'mn', 'ms', 'mtext', 'mspace', 'msup', 'msub', 'msubsup', 'mfrac', 'msqrt', 'mroot',
-    'mover', 'munder', 'munderover', 'mmultiscripts', 'mprescripts', 'mtable', 'mtr', 'mtd', 'mstyle', 'menclose', 'mpadded', 'mphantom', 'merror']);
-  const MATH_ATTRS = new Set(['display', 'encoding', 'mathvariant', 'stretchy', 'fence', 'separator', 'accent', 'accentunder', 'displaystyle', 'scriptlevel', 'mathcolor',
-    'mathbackground', 'columnalign', 'rowalign', 'columnspacing', 'rowspacing', 'columnlines', 'rowlines', 'notation', 'width', 'height', 'depth', 'lspace', 'rspace',
-    'minsize', 'maxsize', 'linethickness', 'movablelimits', 'largeop', 'symmetric', 'form', 'voffset']);
+  // What KaTeX is let put on the page: its own spans and the drawings inside them (a root sign, a stretched brace).
+  const MATH_TAGS = new Set(['span', 'svg', 'path', 'line']);
+  const MATH_ATTRS = new Set(['class', 'style', 'aria-hidden', 'xmlns', 'width', 'height', 'viewbox', 'preserveaspectratio', 'd', 'x1', 'y1', 'x2', 'y2', 'stroke-width']);
 
   // The formula as an element, or null when it is not TeX that can be drawn (the text then stays as it was typed).
-  // KaTeX's MathML needs no fonts or styles of its own: the browser draws it.
+  // Never MathML: the first <math> in a page makes Chromium load its own stylesheet for it, whose `:nth-child` rules
+  // are tried on every element, and from then on a part added to any conversation has the whole of it styled again
+  // (17 ms where it took under one, for good; AGENTS.md). KaTeX draws with spans and its fonts (katex.css).
   function mathNode(m) {
     if (!root.katex) return null;
     try {
       const tpl = document.createElement('template');
-      tpl.innerHTML = root.katex.renderToString(m.tex, { output: 'mathml', displayMode: !!m.display, throwOnError: true, trust: false, strict: 'ignore', maxExpand: 500 });
-      const math = tpl.content.querySelector('math');
-      if (!math) return null;
+      tpl.innerHTML = root.katex.renderToString(m.tex, { output: 'html', displayMode: !!m.display, throwOnError: true, trust: false, strict: 'ignore', maxExpand: 500 });
+      const math = tpl.content.firstElementChild;
+      if (!math || tpl.content.childElementCount !== 1 || !/^katex/.test(math.className)) return null;
       for (const el of [math, ...math.querySelectorAll('*')]) {
         if (!MATH_TAGS.has(el.localName)) return null;
-        for (const attr of Array.from(el.attributes)) if (!MATH_ATTRS.has(attr.name.toLowerCase())) el.removeAttribute(attr.name);
+        for (const attr of Array.from(el.attributes)) {
+          if (!MATH_ATTRS.has(attr.name.toLowerCase())) el.removeAttribute(attr.name);
+          else if (attr.name === 'style' && /url\(|expression|@import|javascript:/i.test(attr.value)) return null;
+        }
       }
+      math.dataset.tex = m.tex;
       return math;
     } catch { return null; }
   }
@@ -961,7 +964,18 @@
       parts.forEach((part, i) => {
         if (i % 2 === 0) { if (part) made.appendChild(document.createTextNode(part)); return; }
         const m = found[Number(part)];
-        if (m) made.appendChild(mathNode(m) || document.createTextNode(m.raw.replace(/\s+$/, '')));
+        if (!m) return;
+        const drawn = mathNode(m);
+        if (!drawn) { made.appendChild(document.createTextNode(m.raw.replace(/\s+$/, ''))); return; }
+        // A full stop or comma straight after a formula stays on its line: left to itself the browser will put it
+        // alone on the next one.
+        const closing = /^[.,;:!?)\]}%’”]{1,3}/.exec(parts[i + 1] || '');
+        if (!closing || m.display) { made.appendChild(drawn); return; }
+        const glued = document.createElement('span');
+        glued.className = 'math-glue';
+        glued.append(drawn, document.createTextNode(closing[0]));
+        parts[i + 1] = parts[i + 1].slice(closing[0].length);
+        made.appendChild(glued);
       });
       t.replaceWith(made);
     }
@@ -1257,6 +1271,14 @@
     }) : null;
     if (shownAgain) shownAgain.observe(el, { attributes: true, attributeFilter: ['class'] });
 
+    // A foldable part right under another sits close to it. The stylesheet could say so itself (`details + details`),
+    // but then the engine styles every foldable part of the conversation again whenever one is added (chat.css).
+    function tighten(part) {
+      const before = part.previousElementSibling;
+      const tight = part.localName === 'details' && !!before && before.localName === 'details';
+      if (part.classList.contains('tight') !== tight) part.classList.toggle('tight', tight);
+    }
+
     function paint() {
       // Asking where anything is makes the browser lay the whole page out there and then, every tab of it. A pane
       // nobody can see asks nothing: whether its reader was at the latest message is remembered, not measured.
@@ -1267,10 +1289,10 @@
         for (const n of nodes.values()) n.remove();
         nodes.clear();
       }
-      const drawn = [];
+      const drawn = [], placed = [];
       for (const item of model.dirty) {
         let node = nodes.get(item);
-        if (item.removed) { if (node) { node.remove(); nodes.delete(item); } continue; }
+        if (item.removed) { if (node) { placed.push(node.nextElementSibling); node.remove(); nodes.delete(item); } continue; }
         const fresh = render(item, node);
         drawn.push(fresh);
         if (!node) {
@@ -1282,12 +1304,15 @@
             if (n && n.parentNode === column) { before = n; break; }
           }
           column.insertBefore(fresh, before);
+          placed.push(fresh, fresh.nextElementSibling);
         } else if (fresh !== node) {
           node.replaceWith(fresh);
           nodes.set(item, fresh);
+          placed.push(fresh, fresh.nextElementSibling);
         }
       }
       model.dirty.clear();
+      for (const n of placed) if (n && n.parentNode === column) tighten(n);
       const tables = hidden ? [] : unsettled ? Array.from(column.querySelectorAll('.md table'))
         : drawn.flatMap(n => n.isConnected && n.querySelectorAll ? Array.from(n.querySelectorAll('.md table')) : []);
       if (tables.length) edges(tables);

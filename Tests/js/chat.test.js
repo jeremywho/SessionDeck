@@ -1516,3 +1516,47 @@ test('what a subagent does, and what it reports, moves the rev of the call that 
   assert.deepEqual(moved(m, () => m.durable(under('a1', returned('c1', 'src/a.js')))), ['a1']);
   assert.deepEqual(moved(m, () => m.durable(task('task_notification', 'a1', { status: 'completed' }))), ['a1']);
 });
+
+// Two things make Chromium style a whole conversation again every time a part is added to it (measured on a copy of a
+// real deck page: 17 ms an addition where it takes under one). Both are kept out here; AGENTS.md has the measurements.
+test('no sibling rule in the chat stylesheet is one the engine has to try for every part added', () => {
+  const fs = require('node:fs'), path = require('node:path');
+  const css = fs.readFileSync(path.join(__dirname, '../../wwwroot/chat.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  // What is inside brackets (a :where() list, a :not()) is set aside: its commas and classes are not the selector's own.
+  const flat = s => { let last; do { last = s; s = s.replace(/\([^()]*\)/g, '()'); } while (s !== last); return s; };
+  const selectors = css.split('}').map(rule => flat(rule.split('{')[0])).flatMap(s => s.split(',')).map(s => s.trim()).filter(s => /[+~]/.test(s));
+  assert.ok(selectors.length >= 3, 'the stylesheet was read and has sibling rules to check');
+  const compounds = s => s.split(/\s*[+~]\s*/).map(side => side.trim().split(/[\s>]+/));
+  // Left of a `+`: a tag or `*` alone goes into the one set the engine keeps for "any element", and that set is then
+  // gone through for every element added. A class there keeps the rule to the few parts that carry it.
+  const bareLeft = selectors.filter(s => compounds(s).slice(0, -1).some(side => !/[.#\[]/.test(side[side.length - 1])));
+  assert.deepEqual(bareLeft, []);
+  // Right of it: `*` means "whatever comes next", which the engine can only honour by styling everything again. A
+  // list of kinds (`:where(.msg, details)`) names them, and is fine.
+  const anyRight = selectors.filter(s => compounds(s).slice(1).some(side => /^\*?$/.test(side[0].replace(/:[\w-]+\(\)/g, 'named').replace(/:[\w-]+/g, ''))));
+  assert.deepEqual(anyRight, []);
+});
+
+test('the heading of a foldable part counts for nothing in the page\'s numbered lists', () => {
+  const fs = require('node:fs'), path = require('node:path');
+  const css = fs.readFileSync(path.join(__dirname, '../../wwwroot/chat.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  // Chromium's own `summary { counter-increment: list-item 0 }` makes each tool call added lay out every <ol> item
+  // in the page again; the rule for every <summary> in a chat has to put that out.
+  const rule = css.split('}').map(r => r.split('{')).find(([selector]) => selector && selector.trim() === '.chat details > summary');
+  assert.ok(rule, 'there is a rule for every summary in a chat');
+  assert.match(rule[1], /counter-increment:\s*none\s*;/);
+});
+
+test('a formula is never drawn as MathML, and the pages load the stylesheet KaTeX draws with', () => {
+  const fs = require('node:fs'), path = require('node:path');
+  const www = name => fs.readFileSync(path.join(__dirname, '../../wwwroot', name), 'utf8');
+  const chat = www('chat.js');
+  const options = chat.match(/renderToString\([^)]*\{([^}]*)\}/g) || [];
+  assert.equal(options.length, 1, 'one place draws a formula');
+  assert.match(options[0], /output: 'html'/);
+  assert.doesNotMatch(chat.replace(/\/\/.*$/gm, ''), /createElementNS\([^)]*Math|<math[\s>]/i);
+  for (const page of ['deck.html', 'mobile-chat.html']) assert.match(www(page), /<link rel="stylesheet" href="katex\.css">/, page);
+  const katexCss = www('katex.css');
+  assert.equal((katexCss.match(/@font-face/g) || []).length, 20);
+  assert.doesNotMatch(katexCss, /url\((?!data:font\/woff2;base64,)/, 'every font is inside the file');
+});

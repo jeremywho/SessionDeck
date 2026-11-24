@@ -23,10 +23,15 @@
 .pane.chat ::selection { background: color-mix(in srgb, var(--pr-blue) 38%, transparent); }
 .chat-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; user-select: text; }
 .chat-column { max-width: var(--chat-wide); box-sizing: border-box; margin: 0 auto; padding: 28px var(--chat-side) 18px; }
-.chat-column > * + * { margin-top: 22px; }
+/* Not `* + *`, and nothing below with `*` on either side of a `+`: for a rule shaped like that the engine cannot tell
+   what a new part of the conversation changes, and styles every part of it again each time one is added (28 ms in a
+   chat of 24,000 elements, folding every tool call's body out of the layout and back in). The button for earlier
+   messages is always first, and is the one part with nothing above it. */
+.chat-column > * { margin-top: 22px; }
+.chat-column > .load-earlier { margin-top: 0; }
 /* More room where the turn changes hands than between the parts of one answer. */
-.chat-column > * + .msg.user { margin-top: 38px; }
-.chat-column > details + details { margin-top: 6px; }
+.chat-column > .msg.user { margin-top: 38px; }
+.chat-column > details.tight { margin-top: 6px; }
 .chat-column > [hidden] { display: none; }
 .chat .chat-grip { position: absolute; top: 0; bottom: 0; width: 11px; margin-left: -5px; z-index: 2; cursor: col-resize; opacity: 0; transition: opacity 120ms; touch-action: none; }
 .chat .chat-grip::after { content: ""; position: absolute; top: 0; bottom: 0; left: 5px; width: 1px; background: var(--pr-line-strong); }
@@ -56,17 +61,21 @@
 .chat .md h2 { font-size: 1.18em; }
 .chat .md h3, .chat .md h4, .chat .md h5, .chat .md h6 { font-size: 1.05em; }
 .chat .md ul, .chat .md ol { padding-left: 26px; }
-.chat .md li + li { margin-top: 4px; }
+/* Not `li + li`: a tag alone before a `+` is tried for every part added to the conversation, and every list item in
+   it is styled again. */
+.chat .md li:not(:first-child) { margin-top: 4px; }
 .chat .md a { color: var(--pr-blue); text-decoration: underline; cursor: pointer; }
 /* A link that goes nowhere from here (a relative path, a file on the computer seen from a phone) reads as the text it is. */
 .chat .md a:not([href]) { color: inherit; text-decoration: none; cursor: text; }
 .chat .md blockquote { padding-left: 14px; color: var(--fg2); border-left: 2px solid var(--pr-line-strong); }
 .chat .md hr { border: 0; border-top: 1px solid var(--pr-line); margin: 16px 0; }
 .chat .md code { font-family: var(--chat-mono); font-size: 0.875em; }
-/* A formula (MathML, drawn by the browser from what KaTeX makes of the model's LaTeX). One set apart scrolls sideways
-   when it is wider than the pane. */
-.chat .md math { font-size: 1.08em; }
-.chat .md math[display="block"] { margin: 6px 0; max-width: 100%; overflow-x: auto; overflow-y: hidden; }
+/* A formula, drawn by KaTeX from the model's LaTeX (katex.css has its fonts). One set apart scrolls sideways when it
+   is wider than the pane. KaTeX's own size is for a serif page; beside this text a little smaller sits right. */
+.chat .md .katex { font-size: 1.1em; }
+.chat .md .katex-display { margin: 6px 0; max-width: 100%; overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
+.chat .md .katex-display > .katex { white-space: nowrap; }
+.chat .md .math-glue { white-space: nowrap; }
 .chat .md :not(pre) > code { padding: 1px 5px; background: var(--chat-tint); border-radius: 5px; }
 .chat .md pre { position: relative; padding: 12px 14px; background: var(--chat-well); border-radius: 10px; overflow-x: auto; line-height: 1.5; }
 .chat .md pre code { white-space: pre; }
@@ -106,14 +115,18 @@
    time belongs to what follows it, so it sits close above that and well clear of what came before. */
 .chat .time-mark, .chat .time-tail { color: var(--fg3); font-size: 0.875em; text-align: center; }
 .chat .host-behind { color: var(--pr-amber); font-size: 0.875em; margin-top: 22px; }
-.chat-column > * + .time-mark { margin-top: 38px; }
+.chat-column > .time-mark { margin-top: 38px; }
 /* At the top there is nothing to stand clear of (the two before it there are the button for earlier messages and the empty note). */
 .chat-column > .chat-empty + .time-mark { margin-top: 22px; }
-.chat-column > .time-mark + *, .chat-column > .time-mark + .msg.user, .chat-column > .time-mark + details { margin-top: 10px; }
+.chat-column > .time-mark + :where(.msg, details, .plan, .note, .working, .time-tail, .host-behind), .chat-column > .time-mark + .msg.user, .chat-column > .time-mark + details { margin-top: 10px; }
 .chat .note.error { color: var(--pr-red); white-space: pre-wrap; overflow-wrap: anywhere; }
 
 .chat details.thinking, .chat details.tool { min-width: 0; }
-.chat details > summary { cursor: pointer; list-style-position: inside; color: var(--fg2); }
+/* counter-increment: the browser's own rule gives every <summary> `counter-increment: list-item 0`, and with that on
+   it Chromium takes each <summary> added or removed as a change to the numbering of every <ol> in the page, and lays
+   out every numbered item of every conversation again (1,102 of them on a real deck, some 40 ms, for each tool call
+   that arrived). `none` leaves the triangle as it is and the numbered lists alone. */
+.chat details > summary { cursor: pointer; list-style-position: inside; color: var(--fg2); counter-increment: none; }
 .chat details.thinking > summary { color: var(--fg2); font-size: 0.875em; }
 .chat .thinking-body { margin: 6px 0 0 16px; color: var(--fg2); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.9em; }
 .chat details.tool > summary { display: list-item; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 0.9em; }
