@@ -76,6 +76,7 @@
 .chat .md .katex-display { margin: 6px 0; max-width: 100%; overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
 .chat .md .katex-display > .katex { white-space: nowrap; }
 .chat .md .math-glue { white-space: nowrap; }
+.math-loading .chat .md .katex { visibility: hidden; }
 .chat .md :not(pre) > code { padding: 1px 5px; background: var(--chat-tint); border-radius: 5px; }
 .chat .md pre { position: relative; padding: 12px 14px; background: var(--chat-well); border-radius: 10px; overflow-x: auto; line-height: 1.5; }
 .chat .md pre code { white-space: pre; }

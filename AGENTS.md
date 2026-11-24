@@ -769,6 +769,12 @@ default login only; desktop only. Measured against Claude Code 2.1.322.
   its twenty woff2 fonts inside the file (`tools/katex-css.py` builds it and checks it is the same release
   as `katex.js`), so the pages need one more stylesheet and no font files. What KaTeX returns is held to a
   list of elements and attributes (`MATH_TAGS`, `MATH_ATTRS`), with `trust: false`.
+  - The deck page has `katex.css` in its head (it is in the app). The phone's page does not: it is 266 KB
+    over the relay even compressed, the gateway sends no cache headers, and a phone fetches the page each
+    time a chat is opened. There `mathStyles` asks for it when the first formula is drawn, and
+    `.math-loading` keeps formulas out of sight until it has come.
+  - One drawing of a message with 24 formulas takes 6 ms this way against 2.4 ms as MathML (1,100 elements
+    against 430): the price of the note below, paid only by messages that have formulas.
   - **Never MathML** (v0.5.111 to v0.5.114 used `output: 'mathml'`). The first `<math>` element in a page
     makes Chromium load its built-in MathML stylesheet, and with that and our stylesheet in the page a part
     added to any conversation has the whole conversation styled again, for as long as the page lives: 17 ms

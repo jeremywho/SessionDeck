@@ -935,8 +935,27 @@
   // Never MathML: the first <math> in a page makes Chromium load its own stylesheet for it, whose `:nth-child` rules
   // are tried on every element, and from then on a part added to any conversation has the whole of it styled again
   // (17 ms where it took under one, for good; AGENTS.md). KaTeX draws with spans and its fonts (katex.css).
+  // The deck page has katex.css in its head (it is in the app, so it costs nothing). A phone fetches the page afresh
+  // each time it opens a chat, and the fonts are 266 KB even compressed: there it is asked for when the first formula
+  // is drawn, and formulas are kept out of sight until it has come (without it they are a jumble of letters).
+  let mathStyled = false;
+  function mathStyles() {
+    if (mathStyled) return;
+    mathStyled = true;
+    if (document.querySelector('link[href$="katex.css"]')) return;
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = 'katex.css';
+    document.documentElement.classList.add('math-loading');
+    const come = () => document.documentElement.classList.remove('math-loading');
+    link.addEventListener('load', come);
+    link.addEventListener('error', come);
+    document.head.appendChild(link);
+  }
+
   function mathNode(m) {
     if (!root.katex) return null;
+    mathStyles();
     try {
       const tpl = document.createElement('template');
       tpl.innerHTML = root.katex.renderToString(m.tex, { output: 'html', displayMode: !!m.display, throwOnError: true, trust: false, strict: 'ignore', maxExpand: 500 });

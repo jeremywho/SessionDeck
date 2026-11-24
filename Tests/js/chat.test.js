@@ -1555,7 +1555,12 @@ test('a formula is never drawn as MathML, and the pages load the stylesheet KaTe
   assert.equal(options.length, 1, 'one place draws a formula');
   assert.match(options[0], /output: 'html'/);
   assert.doesNotMatch(chat.replace(/\/\/.*$/gm, ''), /createElementNS\([^)]*Math|<math[\s>]/i);
-  for (const page of ['deck.html', 'mobile-chat.html']) assert.match(www(page), /<link rel="stylesheet" href="katex\.css">/, page);
+  // The deck page has the stylesheet in its head; the phone's page asks for it when a formula is first drawn (it is
+  // 266 KB over the relay, each time a chat is opened), and the pane does the asking wherever it is missing.
+  assert.match(www('deck.html'), /<link rel="stylesheet" href="katex\.css">/);
+  assert.doesNotMatch(www('mobile-chat.html'), /katex\.css/);
+  assert.match(chat, /link\.href = 'katex\.css';/);
+  assert.match(chat, /function mathNode\(m\) \{\s+if \(!root\.katex\) return null;\s+mathStyles\(\);/);
   const katexCss = www('katex.css');
   assert.equal((katexCss.match(/@font-face/g) || []).length, 20);
   assert.doesNotMatch(katexCss, /url\((?!data:font\/woff2;base64,)/, 'every font is inside the file');
