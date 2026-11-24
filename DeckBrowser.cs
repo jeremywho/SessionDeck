@@ -59,8 +59,17 @@ internal sealed class DeckBrowser : Grid
             ? Path.Combine(d, "WebView2")
             : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SessionDeck", "WebView2");
         return _env ??= CoreWebView2Environment.CreateAsync(null, profile,
-            new CoreWebView2EnvironmentOptions { AdditionalBrowserArguments = "--disable-features=msSmartScreenProtection" });
+            new CoreWebView2EnvironmentOptions { AdditionalBrowserArguments = BrowserArguments((_settings ?? new Settings()).PageAccessibility) });
     }
+
+    /// <summary>
+    /// What the browser is started with. Unless asked for, it is told to refuse an accessibility tree: any program
+    /// that reads the window through UI Automation (a screen reader, but also a script looking for a button) turns
+    /// one on for as long as the deck runs, and with dozens of chats in the page a tab switch then takes most of a
+    /// second and typing stutters (AGENTS.md).
+    /// </summary>
+    internal static string BrowserArguments(bool pageAccessibility) =>
+        "--disable-features=msSmartScreenProtection" + (pageAccessibility ? "" : " --disable-renderer-accessibility");
 
     public async void Start()
     {

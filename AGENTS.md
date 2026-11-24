@@ -111,6 +111,17 @@ dotnet test Tests\SessionDeck.Tests.csproj
     live page shows nothing when two rules each cause the same thing (try each on a fresh page); adding
     five lines in a row measures "a line after a line", not "a line after a tool call" (take each out
     again); a made-up conversation had no formula in it, so no fixture showed any of this.
+- **Never read the deck's window through UI Automation, and do not start its browser without
+  `--disable-renderer-accessibility`** (`DeckBrowser.BrowserArguments`; the `PageAccessibility` setting turns
+  it back on for someone who needs a screen reader). The first UI Automation client to walk the window makes
+  Chromium build an accessibility tree for the page, and keep it for as long as the deck runs. Measured
+  2026-11-24 on a copy of a real deck page (36 chats): a tab switch 69 ms without the tree, 744 to 1,125 ms
+  with it; on the page as it was that morning 14 keys in 100 took 50 ms or more with it (worst 331 ms), none
+  without. It was turned on by a script of ours looking for the Update button (`AutomationElement.FromHandle`
+  then `FindFirst(Descendants)`), the evening before the sluggishness was reported. The flag wins over a
+  forced tree (`--force-renderer-accessibility` beside it: 69 ms). Nothing in the page can see whether the
+  tree is on: a `tab-switch` whose `frame=` runs to hundreds of milliseconds with no `page-frame` beside it
+  is the sign. An update is applied by the deck itself (`AutoRestartOnUpdate`); nothing has to press a button.
 - DWM investigation is opt-in and documented in `docs/dwm-diagnostics.md`. The diagnostic launcher
   separates Mica from recurring work, records one-second DWM/app telemetry, and exits only the test app
   if the known sustained-DWM-CPU/resident-growth signature appears. Never enable that logging normally.

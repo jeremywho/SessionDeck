@@ -45,6 +45,7 @@ internal sealed class Settings
     public string LastCodexModel { get; set; } = "";
     public string LastCodexEffort { get; set; } = "";
     public bool AutoRestartOnUpdate { get; set; } = true;
+    public bool PageAccessibility { get; set; }                             // true = a screen reader can read the panes; it costs speed (DeckBrowser.BrowserArguments)
     public string RowOrder { get; set; } = RowOrderState;                    // State: attention bands, alphabetical inside each | Name: alphabetical, exited last
     public const string RowOrderState = "State";
     public const string RowOrderName = "Name";
