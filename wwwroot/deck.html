@@ -258,6 +258,7 @@
     requestAnimationFrame(() => {
       const drawn = new MessageChannel();
       drawn.port1.onmessage = () => {
+        drawn.port1.close();
         const ms = performance.now() - at;
         if (ms < KEY_MS) return;
         if (at - keysFrom > 60000) { keysFrom = at; keysSaid = 0; }
