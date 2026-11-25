@@ -206,14 +206,19 @@
   // not being asked for).
   const FRAME_MS = 100, FRAMES_A_MINUTE = 20;
   let framesFrom = 0, frames = 0;
+  // The newest long frames of any length the browser reports (from 50 ms), for `parts` below.
+  const longFrames = [];
   if (window.PerformanceObserver) {
     try {
       new PerformanceObserver(list => {
         for (const e of list.getEntries()) {
+          const end = e.startTime + e.duration, render = e.renderStart || end, layoutAt = e.styleAndLayoutStart || end;
+          longFrames.push({ start: e.startTime, end, work: render - e.startTime, raf: layoutAt - render, layout: end - layoutAt,
+                            script: Array.from(e.scripts || []).reduce((a, s) => a + s.duration, 0) });
+          if (longFrames.length > 80) longFrames.splice(0, 40);
           if (e.duration < FRAME_MS) continue;
           if (e.startTime - framesFrom > 60000) { framesFrom = e.startTime; frames = 0; }
           if (++frames > FRAMES_A_MINUTE) continue;
-          const end = e.startTime + e.duration, render = e.renderStart || end, layoutAt = e.styleAndLayoutStart || end;
           // Each script with where it is in the source (file:function@position): "FrameRequestCallback" alone is every
           // pane's drawing and the terminals' too, and does not say whose.
           const where = s => {
@@ -876,11 +881,43 @@
                                    pane: f ? f.id : '', kind: f ? (f.chat ? 'chat' : 'terminal') : '', hidden: document.hidden });
     // A page nobody can see is given no frames; there is nothing to wait for.
     if (document.hidden) { report(-1); return; }
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      const frame = Math.round(performance.now() - began);
-      report(frame);
-      if (frame - handler >= PACE_FROM_MS) pace(f ? f.id : '');
-    }));
+    requestAnimationFrame(() => {
+      const first = performance.now();
+      // A message posted from a frame's callback is taken once this thread has finished drawing that frame.
+      let drawn = 0;
+      const done = new MessageChannel();
+      done.port1.onmessage = () => { done.port1.close(); if (!drawn) drawn = performance.now(); };
+      done.port2.postMessage(0);
+      requestAnimationFrame(() => {
+        const second = performance.now();
+        const frame = Math.round(second - began);
+        report(frame);
+        if (changed && frame >= PARTS_FROM_MS) parts(began, first, drawn, second, f);
+        drawn = -1;
+        if (frame - handler >= PACE_FROM_MS) pace(f ? f.id : '');
+      });
+    });
+  }
+
+  // Where a slow switch spent its time: waiting for the first frame, this thread drawing it (callbacks, styling,
+  // layout, painting), and waiting for the frame after. With them, every long frame the browser reported in that
+  // stretch, however short of FRAME_MS: three of 80 ms hold a switch as well as one of 240. A stretch with no long
+  // frame in it was spent past this thread (drawing on the graphics side, or no frame being asked for).
+  const PARTS_FROM_MS = 100, PARTS_A_MINUTE = 20;
+  let partsFrom = 0, partsSaid = 0;
+  function parts(began, first, drawn, second, f) {
+    if (began - partsFrom > 60000) { partsFrom = began; partsSaid = 0; }
+    if (++partsSaid > PARTS_A_MINUTE) return;
+    const ranNow = ranIn(began, second, 10);
+    // The browser reports a long frame after it is over, so they are read a moment later.
+    setTimeout(() => {
+      const seen = longFrames.filter(x => x.end > began && x.start < second)
+        .map(x => `${Math.round(x.start - began)}+${Math.round(x.end - x.start)}(work=${Math.round(x.work)},raf=${Math.round(x.raf)},layout=${Math.round(x.layout)},script=${Math.round(x.script)})`);
+      post({ type: 'switch-parts', frame: Math.round(second - began), first: Math.round(first - began),
+             render: drawn > 0 ? Math.round(drawn - first) : -1, next: drawn > 0 ? Math.round(second - drawn) : -1,
+             elements: f && f.el ? f.el.getElementsByTagName('*').length : 0, frames: seen.join(' '), ran: ranNow,
+             pane: f ? f.id : '', kind: f ? (f.chat ? 'chat' : 'terminal') : '' });
+    }, 500);
   }
 
   if (window.chrome && window.chrome.webview) {

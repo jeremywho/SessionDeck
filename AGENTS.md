@@ -50,6 +50,16 @@ dotnet test Tests\SessionDeck.Tests.csproj
     beside it waited past this thread. `page-pace median=..ms max=..ms` follows a switch whose frame took 60 ms+: the gap between the next
     eight frames, which says whether frames are slow to come at all. `app=` on a `tab-switch` is the app's own
     handler around the post.
+  - `switch-parts frame=290ms first=9ms render=71ms next=210ms elements=24031 pane=<host> kind=chat frames=8+72(work=1,raf=20,layout=51,script=19) ran=..`:
+    where a switch of 100 ms or more went (at most twenty a minute). `first` is the wait for a frame, `render`
+    is this thread drawing it (callbacks, styling, layout, painting; -1 when it could not be told from `next`),
+    `next` the wait for the frame after. `frames=` is every long frame the browser reported in that stretch
+    (from 50 ms, as `start+length`), which `page-frame` leaves out under 100 ms. How to read it: `render` far
+    above the long frames listed is the browser's own work after layout, which is what an accessibility tree
+    costs (the replica with the tree forced on: `frame=508 render=506 frames=0+67`); a large `next` with the
+    thread idle is time past this thread. Added in v0.5.118 because switches on the real deck stayed near
+    290 ms from v0.5.115 on, with the accessibility switch on the browser's command line, while the replica
+    took 55 ms on every version: the cause was not known when this was written.
   - `page-visibility hidden|visible` (a hidden page is given no frames, and draws what it missed when it is
     back), and `pane-socket lost host=..` then `pane-socket back host=..` (a pane's socket to its host dropped;
     the pane reconnects itself, and is logged once however often it has to ask).

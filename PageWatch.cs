@@ -83,6 +83,10 @@ internal sealed class PageWatch
                 return $"{(changed ? "tab-switch" : "page-layout")} total={nowMs - at}ms{app} queued={Number(root, "queued")}ms handler={Number(root, "handler")}ms frame={Number(root, "frame")}ms"
                     + $" pane={Word(Text(root, "pane"))} kind={Word(Text(root, "kind"))}{hidden}";
             }
+            case "switch-parts":
+                // `render` and `next` are -1 when the page could not tell them apart (the frame after came first).
+                return $"switch-parts frame={Number(root, "frame")}ms first={Number(root, "first")}ms render={Number(root, "render")}ms next={Number(root, "next")}ms"
+                    + $" elements={Number(root, "elements")} pane={Word(Text(root, "pane"))} kind={Word(Text(root, "kind"))} frames={Rest(Text(root, "frames"))} ran={Rest(Text(root, "ran"))}";
             case "took":
                 // The page's thread has the layout; whether a frame follows is the next thing waited for.
                 if (Number(root, "at") is > 0 and var took && took == _waitAt) _taken = true;

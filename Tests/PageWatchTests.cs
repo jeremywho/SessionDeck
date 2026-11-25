@@ -46,6 +46,16 @@ public class PageWatchTests
             Line("""{"type":"switched","at":9100,"queued":880,"handler":3,"frame":-1,"changed":true,"pane":"","kind":"","hidden":true}"""));
 
     [Fact]
+    public void A_slow_switch_is_split_into_the_wait_for_a_frame_the_drawing_of_it_and_the_wait_for_the_next() =>
+        Assert.Equal("switch-parts frame=290ms first=9ms render=71ms next=210ms elements=24031 pane=ad64c6cd90a8 kind=chat frames=8+72(work=1,raf=20,layout=51,script=19) ran=chat-paint=19ms/1@ad64c6cd90a8",
+            Line("""{"type":"switch-parts","frame":290,"first":9.2,"render":71,"next":210,"elements":24031,"frames":"8+72(work=1,raf=20,layout=51,script=19)","ran":"chat-paint=19ms/1@ad64c6cd90a8","pane":"ad64c6cd90a8","kind":"chat"}"""));
+
+    [Fact]
+    public void A_slow_switch_with_no_long_frame_and_parts_that_could_not_be_told_apart_says_so() =>
+        Assert.Equal("switch-parts frame=300ms first=4ms render=-1ms next=-1ms elements=0 pane=- kind=- frames=- ran=-",
+            Line("""{"type":"switch-parts","frame":300,"first":4,"render":-1,"next":-1,"frames":"","ran":""}"""));
+
+    [Fact]
     public void A_stall_says_what_the_pages_handlers_took_of_it() =>
         Assert.Equal("page-stall 1800ms ran=chat-paint=1650ms/21@abc fit=90ms/20@def",
             Line("""{"type":"stall","ms":1800.4,"ran":"chat-paint=1650ms/21@abc fit=90ms/20@def","hidden":false}"""));

@@ -146,6 +146,7 @@ internal sealed class DeckBrowser : Grid
                     return;
                 case "stall":
                 case "switched":
+                case "switch-parts":
                 case "took":
                 case "frame":
                 case "key":
