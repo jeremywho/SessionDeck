@@ -201,9 +201,10 @@ the window's position/size is remembered on close, so it reopens where you left 
   config changes.
 - Settings persist to `%APPDATA%\SessionDeck\settings.json`; unhandled errors are logged to
   `%TEMP%\sessiondeck-error.log`.
-- The panes are not readable by a screen reader unless `"PageAccessibility": true` is set in that file: an
-  accessibility tree over dozens of open chats makes tab switches and typing slow, and any program that reads
-  windows through UI Automation switches it on.
+- A known cause of slow tab switches: any program that reads the deck's window through UI Automation (a
+  screen reader, but also tools that only look at the focused control) makes the embedded browser keep an
+  accessibility tree for the page until Session Deck is restarted, and each tab switch then costs a few
+  hundred milliseconds more. Restarting Session Deck clears it. No setting prevents it yet.
 - Slow background scans and Windows UI Automation sweeps are recorded in the bounded
   `%TEMP%\sessiondeck-performance.log` for troubleshooting.
 - `--list` / `--windows` headless modes dump the session list / focus mapping to `%TEMP%`.

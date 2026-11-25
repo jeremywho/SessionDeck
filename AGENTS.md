@@ -57,9 +57,14 @@ dotnet test Tests\SessionDeck.Tests.csproj
     (from 50 ms, as `start+length`), which `page-frame` leaves out under 100 ms. How to read it: `render` far
     above the long frames listed is the browser's own work after layout, which is what an accessibility tree
     costs (the replica with the tree forced on: `frame=508 render=506 frames=0+67`); a large `next` with the
-    thread idle is time past this thread. Added in v0.5.118 because switches on the real deck stayed near
-    290 ms from v0.5.115 on, with the accessibility switch on the browser's command line, while the replica
-    took 55 ms on every version: the cause was not known when this was written.
+    thread idle is time past this thread. Added in v0.5.118 because switches on the real deck were near
+    200 to 300 ms, with the accessibility switch on the browser's command line, while the replica took
+    55 ms on every version. What the real deck's logs of 2026-11-24 show (`C:\Temp\chatlab\flip-find.py`
+    on the machine it was written on): a run of the deck is fast until one freeze of 0.8 to 0.9 s with none
+    of our code running (`page-stall ..ms ran=-`), at a moment focus goes into a chat's message box, and
+    from then on every switch costs a fixed 170 to 195 ms of `render` whatever the size of the chat
+    (`frames=-`). One run of two hours and 2,600 keys never turned. It is not a matter of the version: an
+    earlier note here said "slow since v0.5.115", which was the timing of restarts.
   - `page-visibility hidden|visible` (a hidden page is given no frames, and draws what it missed when it is
     back), and `pane-socket lost host=..` then `pane-socket back host=..` (a pane's socket to its host dropped;
     the pane reconnects itself, and is logged once however often it has to ask).
@@ -121,17 +126,35 @@ dotnet test Tests\SessionDeck.Tests.csproj
     live page shows nothing when two rules each cause the same thing (try each on a fresh page); adding
     five lines in a row measures "a line after a line", not "a line after a tool call" (take each out
     again); a made-up conversation had no formula in it, so no fixture showed any of this.
-- **Never read the deck's window through UI Automation, and do not start its browser without
-  `--disable-renderer-accessibility`** (`DeckBrowser.BrowserArguments`; the `PageAccessibility` setting turns
-  it back on for someone who needs a screen reader). The first UI Automation client to walk the window makes
-  Chromium build an accessibility tree for the page, and keep it for as long as the deck runs. Measured
-  2026-11-24 on a copy of a real deck page (36 chats): a tab switch 69 ms without the tree, 744 to 1,125 ms
-  with it; on the page as it was that morning 14 keys in 100 took 50 ms or more with it (worst 331 ms), none
-  without. It was turned on by a script of ours looking for the Update button (`AutomationElement.FromHandle`
-  then `FindFirst(Descendants)`), the evening before the sluggishness was reported. The flag wins over a
-  forced tree (`--force-renderer-accessibility` beside it: 69 ms). Nothing in the page can see whether the
-  tree is on: a `tab-switch` whose `frame=` runs to hundreds of milliseconds with no `page-frame` beside it
-  is the sign. An update is applied by the deck itself (`AutoRestartOnUpdate`); nothing has to press a button.
+- **Never read the deck's window through UI Automation.** The first UI Automation client to touch the
+  window makes the embedded browser build an accessibility tree for the page and keep it for as long as the
+  deck runs, and every tab switch then pays for it after layout. An update is applied by the deck itself
+  (`AutoRestartOnUpdate`); nothing has to press a button. What is known, all from 2026-11-24:
+  - On a copy of a real deck page in headless Edge (36 chats) with the tree forced on: a tab switch 69 ms
+    without it, 500 to 1,100 ms with it.
+  - On the real app (v0.5.118, a second machine, four fixture chats of 12,742 elements, WebView2
+    158.0.4370.33): switches 80 to 100 ms; with a client attached that does no more than read the focused
+    element's name and control type, 340 to 440 ms (`switch-parts render=230..340`); still slow after the
+    client was killed; fast again in a fresh process. Rig: `C:\Temp\chatlab\dell-rig\` on the machine this
+    was written on.
+  - **No browser switch stops it on WebView2 158**, each tried with that client attached:
+    `--disable-renderer-accessibility` (v0.5.116 shipped it believing upstream Chromium's source, which says
+    it drops every mode a platform client asks for; here native APIs, web contents and extended properties
+    still came on, and it was taken out again), `--disable-platform-accessibility-integration` (the client
+    then sees an unnamed element, but web-contents mode still comes on and the cost stays),
+    `--disable-features=UiaProvider`, and `--force-renderer-accessibility=form-controls|basic|on-screen`
+    (none pins the mode; on-screen is the cheapest tree, still two to three times slower than none).
+  - `aria-hidden` on every conversation does not take the cost away (the copy with the tree forced on:
+    490 ms against 542).
+  - On the deck this was found on, something turns it on at a moment focus goes into a chat's message box
+    (see `switch-parts` above); which program was not found. The other end of the deck's UI Automation pipe
+    is held by a process that cannot be opened from an ordinary one (`C:\Temp\chatlab\pipe-owner.ps1`).
+    On the second machine (Windows 10) none of these turned it on: the touch keyboard program running, the
+    touch keyboard shown with the box focused, the emoji panel, the screen-snip overlay.
+  - Nothing in the page can see whether the tree is on. The sign is `switch-parts` with `render` far above
+    the long frames listed.
+  - Not tried: hosting the browser without a window of its own (`WebView2CompositionControl`), which leaves
+    no path into the page for a client unless the app hands one out.
 - DWM investigation is opt-in and documented in `docs/dwm-diagnostics.md`. The diagnostic launcher
   separates Mica from recurring work, records one-second DWM/app telemetry, and exits only the test app
   if the known sustained-DWM-CPU/resident-growth signature appears. Never enable that logging normally.
