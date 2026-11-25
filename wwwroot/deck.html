@@ -17,11 +17,16 @@
   .xterm .xterm-scrollable-element > .scrollbar.vertical { width: 10px !important; }
   .xterm .xterm-scrollable-element > .scrollbar.vertical > .slider { width: 6px !important; left: 2px !important; border-radius: 3px; }
   /* z-index 1 makes each pane its own stacking context, so xterm's layered internals cannot paint over a slide-out. */
-  .pane { position: absolute; top: 0; bottom: 0; left: 0; width: 100%; box-sizing: border-box; background: var(--bg, rgba(12,12,12,0.96)); visibility: hidden; z-index: 1; }
+  /* A pane behind another tab is moved out of sight, not hidden. `visibility` is inherited, so hiding one pane and
+     showing another has every element of both styled again; and once anything has asked the window for an
+     accessibility object the browser keeps a tree of the page for good and reworks both panes' part of it on every
+     switch. On a copy of a real deck page: 942 ms a switch with that tree and 91 ms without, against 82 and 37 this
+     way. `opacity: 0` and `clip-path` do not do it (644 and 673 with the tree). */
+  .pane { position: absolute; top: 0; bottom: 0; left: 0; width: 100%; box-sizing: border-box; background: var(--bg, rgba(12,12,12,0.96)); transform: translateX(-300vw); z-index: 1; }
   /* The inset lives on xterm's own element: the fit addon subtracts that element's padding when it
      counts rows, but not the parent's, so padding on .pane gave one row too many and clipped the last. */
   .pane .xterm { padding: 6px 0 0 8px; }
-  .pane.shown { visibility: visible; }
+  .pane.shown { transform: none; }
   .divider { position: absolute; top: 0; bottom: 0; width: 7px; margin-left: -3px; cursor: col-resize; z-index: 5; }
     .divider::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px; background: var(--fg3, #8a8d93); opacity: 0.45; }
   .divider:hover::after, body.dragging .divider::after { opacity: 0.9; }
@@ -637,6 +642,7 @@
     empty.classList.toggle('hidden', shownIds.size > 0 || groups.some(g => g.kind === 'prs'));
     const f = groups[focused] && groups[focused].id ? panes.get(groups[focused].id) : null;
     document.title = f ? `terminal port=${f.port}` : 'terminal';
+    giveBackFocus();
   }
 
   const INNER = '(100% - var(--edge, 0px))';
@@ -834,6 +840,19 @@
   }
 
   window.addEventListener('focus', focusShown);
+  // A pane out of sight still holds the keyboard if it had it when it was moved away, and can take it (Tab past the
+  // last control of the one shown); the browser no longer drops it as it did for a hidden pane. Whatever is typed
+  // there goes where nobody can see it, so the keyboard is given to the pane shown, or to nothing.
+  function focusOutOfSight() {
+    const active = document.activeElement, pane = active && active.closest ? active.closest('.pane') : null;
+    return !!pane && !pane.classList.contains('shown');
+  }
+  function giveBackFocus() {
+    if (!focusOutOfSight()) return;
+    focusShown();
+    if (focusOutOfSight()) document.activeElement.blur();
+  }
+  document.addEventListener('focusin', giveBackFocus);
 
   function take(m) {
     switch (m.type) {

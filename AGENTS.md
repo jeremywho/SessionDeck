@@ -156,8 +156,8 @@ dotnet test Tests\SessionDeck.Tests.csproj
     again); a made-up conversation had no formula in it, so no fixture showed any of this.
 - **Never read the deck's window through UI Automation.** The first UI Automation client to touch the
   window makes the embedded browser build an accessibility tree for the page and keep it for as long as the
-  deck runs, and every tab switch then pays for it after layout. An update is applied by the deck itself
-  (`AutoRestartOnUpdate`); nothing has to press a button. What is known, all from 2026-11-24:
+  deck runs, and every tab switch then pays for it after layout. An update is applied when the person clicks
+  the title-bar button (`App.ApplyUpdate`; the app never restarts itself): never press it for them through automation. What is known, all from 2026-11-24:
   - On a copy of a real deck page in headless Edge (36 chats) with the tree forced on: a tab switch 69 ms
     without it, 500 to 1,100 ms with it.
   - On the real app (v0.5.118, a second machine, four fixture chats of 12,742 elements, WebView2
@@ -174,6 +174,18 @@ dotnet test Tests\SessionDeck.Tests.csproj
     (none pins the mode; on-screen is the cheapest tree, still two to three times slower than none).
   - `aria-hidden` on every conversation does not take the cost away (the copy with the tree forced on:
     490 ms against 542).
+  - **What does take it away: a pane behind another tab is moved out of sight (`transform: translateX(-300vw)`
+    in `deck.html`), never hidden with `visibility`** (found by the council of 2026-11-24). `visibility` is
+    inherited, so hiding one pane and showing another styles every element of both again and, with a tree
+    on, has the browser rework both panes' part of it; the cost follows the two panes, not just the one
+    shown. On the copy of a real deck page (36 chats): with the tree 942 ms a switch as `visibility`, 58 to
+    86 ms moved away; without it 91 ms and 21 to 37 ms. `opacity: 0` and `clip-path` do not do it (644 and
+    673 with the tree). The pane test "a pane behind another tab is moved out of sight" guards it.
+    A pane out of sight can hold the keyboard, which a hidden one could not: `giveBackFocus` (run on
+    `focusin` and at the end of `layout()`) gives it to the pane shown, or to nothing, so nothing typed goes
+    where it cannot be seen. `C:\Temp\chatlab\away-check.mjs` on the machine this was written on checks
+    placement in one and two columns, a terminal's size, the slide-out and both focus cases; the commit
+    before the focus fix fails it.
   - **The client was the deck itself** (stopped in v0.5.119, the code removed in v0.5.120). A background
     thread asked every 15 to 60 s for the window each session's terminal is in: the first ancestor process
     with a visible titled window, read through UI Automation for its tabs (a walk of every descendant). A

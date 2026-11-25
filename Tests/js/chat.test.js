@@ -1618,3 +1618,29 @@ test('the gist of a thought is its first sentence, short enough for one line and
   assert.equal(thoughtGist(undefined), '');
   const long = thoughtGist('word '.repeat(80));
   assert.ok(long.length <= 120 && long.endsWith('…'), long);});
+
+test('a pane behind another tab is moved out of sight, never hidden with visibility', () => {
+  // `visibility` is inherited: showing one pane and hiding another has every element of both styled again, and
+  // with an accessibility tree on the browser reworks both subtrees as well (942 ms a switch against 82).
+  const fs = require('node:fs'), path = require('node:path');
+  const deck = fs.readFileSync(path.join(__dirname, '../../wwwroot/deck.html'), 'utf8');
+  const style = deck.replace(/\/\*[\s\S]*?\*\//g, '');
+  const rule = selector => {
+    const at = style.split('\n').findIndex(line => line.trim().startsWith(selector + ' {'));
+    assert.ok(at >= 0, 'no rule for ' + selector);
+    return style.split('\n')[at];
+  };
+  assert.doesNotMatch(rule('.pane'), /visibility/);
+  assert.doesNotMatch(rule('.pane.shown'), /visibility/);
+  assert.match(rule('.pane'), /transform:\s*translateX\(-\d+vw\)/);
+  assert.match(rule('.pane.shown'), /transform:\s*none/);
+  // Out of sight is not out of reach of the keyboard: focus that lands in such a pane, or is left in one moved away,
+  // is given to the pane shown (or to nothing).
+  assert.match(deck, /function giveBackFocus\(\) \{\s*if \(!focusOutOfSight\(\)\) return;\s*focusShown\(\);\s*if \(focusOutOfSight\(\)\) document\.activeElement\.blur\(\);/);
+  assert.match(deck, /document\.addEventListener\('focusin', giveBackFocus\);/);
+  const layoutBody = deck.slice(deck.indexOf('function layout()'), deck.indexOf('const INNER'));
+  assert.match(layoutBody, /giveBackFocus\(\);\s*\}\s*$/);
+  // And a chat is told it is behind another tab by the page, not by asking the browser whether it can be seen.
+  const chat = fs.readFileSync(path.join(__dirname, '../../wwwroot/chat.js'), 'utf8');
+  assert.match(chat, /if \(onTimer && \(away\(\) \|\|/);
+});

@@ -1409,7 +1409,7 @@
     // frame is a stall for the one being read. A hidden pane is worded when it is come back to.
     function retime(onTimer) {
       if (closed && model.ended === null) return;
-      if (onTimer && typeof el.checkVisibility === 'function' && !el.checkVisibility({ visibilityProperty: true })) return;
+      if (onTimer && (away() || (typeof el.checkVisibility === 'function' && !el.checkVisibility({ visibilityProperty: true })))) return;
       const moved = paintTail();
       for (const item of model.items) {
         if (item.kind !== 'time') continue;
