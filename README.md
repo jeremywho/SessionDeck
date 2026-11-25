@@ -64,9 +64,7 @@ effort**, which trails the model in dimmer text (**◆ Sol ultra**); Claude Code
 transcript, so Claude pills show the model alone. Hover the pill for the full model id.
 
 **Hover a row's Idle column** for the rest — model, context tokens, status, last tool, folder,
-provider/PID/Id/version (and the API-error text when it's in that state). Sessions whose terminal sits on a **different
-virtual desktop** get a small colored pip at the row's left edge — one color per desktop, the
-current desktop shows none (hover it for "Desktop N"). A session running **subagents** shows a small
+provider/PID/Id/version (and the API-error text when it's in that state). A session running **subagents** shows a small
 **⚙ N** badge after its name — how many are working right now (hover for the total spawned this
 session). Headless **Codex** work a Claude session started — the codex plugin's "Codex Companion Task"
 second opinions, and `codex exec` runs — counts into that same badge rather than appearing as rows of
@@ -205,9 +203,10 @@ the window's position/size is remembered on close, so it reopens where you left 
   screen reader, but also tools that only look at the focused control) makes the embedded browser keep an
   accessibility tree for the page until Session Deck is restarted, and each tab switch then costs a few
   hundred milliseconds more. Until v0.5.119 Session Deck did this to itself about a minute after it
-  started or restarted a session. Restarting Session Deck clears it; nothing prevents another program
-  from doing it yet.
-- Slow background scans and Windows UI Automation sweeps are recorded in the bounded
+  started or restarted a session; since v0.5.120 it has no background UI Automation at all (it reads
+  another terminal's tabs only when you ask it to focus a session there). Restarting Session Deck clears
+  it; nothing prevents another program from doing it yet.
+- Slow background scans are recorded in the bounded
   `%TEMP%\sessiondeck-performance.log` for troubleshooting.
 - `--list` / `--windows` headless modes dump the session list / focus mapping to `%TEMP%`.
 
@@ -341,7 +340,6 @@ started last week can be the one live in front of you.
 - `SessionInfo.cs` — data model. `SessionRow.cs` — observable row VM (derives the display state).
 - `SessionState.cs` — the display states (incl. **Error**) + the Claude-status → state mapping.
 - `WindowActivator.cs` / `Native.cs` / `TabSelector.cs` — focus + Windows Terminal tab selection.
-- `VirtualDesktop.cs` — which virtual desktop a window is on (drives the per-row desktop pip).
 - `Installer.cs` / `Updater.cs` — per-user self-install to LocalAppData + `gh`-based auto-update.
 - `Themes/Dark.xaml`, `Themes/Light.xaml` — design-token brushes, swapped on theme toggle.
 - `SessionRegistry.cs` / `SavedSession.cs` — persist the live set for crash/reboot restore.

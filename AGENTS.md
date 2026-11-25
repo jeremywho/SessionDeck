@@ -20,7 +20,7 @@ dotnet test Tests\SessionDeck.Tests.csproj
 - It's a **tray app with no console** — failures are silent. After a launch, check
   `%TEMP%\sessiondeck-error.log`.
 - Slow recurring work is written sparingly to `%TEMP%\sessiondeck-performance.log`:
-  session scans at 1s+, UI application at 250ms+, and Codex probes/UIA sweeps at 2s+. The file rotates
+  session scans at 1s+, UI application at 250ms+, and Codex probes at 2s+. The file rotates
   at 1MB. Keep this thresholded; logging every pass would itself become background I/O.
 - The deck's page reports on itself there too (`PageWatch`, the block under `post` in `deck.html`). Every pane
   shares the page's one thread, so a stall anywhere is a stall in all of them:
@@ -146,15 +146,16 @@ dotnet test Tests\SessionDeck.Tests.csproj
     (none pins the mode; on-screen is the cheapest tree, still two to three times slower than none).
   - `aria-hidden` on every conversation does not take the cost away (the copy with the tree forced on:
     490 ms against 542).
-  - **The client was the deck itself** (fixed in v0.5.119). `SessionsWindow.StartDesktopResolver` asks
-    `WindowActivator.ResolveWindows` every 15 to 60 s for the window each session's terminal is in: the first
-    ancestor process with a visible titled window, read through UI Automation for its tabs
-    (`TabSelector.EnumerateTabs`, a walk of every descendant). A host the running deck started is its child,
-    so that window was the deck's own and the walk went into its page. Hosts taken over from an earlier
-    run are not children, which is why a deck was fast after an update until the first new or restarted
-    session, and why one run of two hours with neither never turned. `ResolveWindows`, `Activate` and
-    `DebugPick` now map a session hosted by this process to this window without UI Automation
-    (`WindowActivatorTests`). Shown on the second machine: the build before went from 81-133 ms to
+  - **The client was the deck itself** (stopped in v0.5.119, the code removed in v0.5.120). A background
+    thread asked every 15 to 60 s for the window each session's terminal is in: the first ancestor process
+    with a visible titled window, read through UI Automation for its tabs (a walk of every descendant). A
+    host the running deck started is its child, so that window was the deck's own and the walk went into
+    its page. Hosts taken over from an earlier run are not children, which is why a deck was fast after an
+    update until the first new or restarted session, and why one run of two hours with neither never
+    turned. v0.5.119 mapped a session hosted by this process to this window without UI Automation;
+    v0.5.120 took the thread out, with the row marker it fed, since it covered only sessions the deck
+    hosts. `Activate` and `DebugPick` keep the same guard. Do not add a recurring UI Automation read of
+    any window back. Shown on the second machine: the build before went from 81-133 ms to
     237-406 ms about a minute after one "Restart session", with both ends of `UIA_PIPE_<deck>_*` held by
     the deck and 1.17 million accessibility calls counted by the browser; the same build with no restart
     stayed fast; the fixed build with the restart stayed at 50-138 ms with no pipe and no mode.
@@ -197,9 +198,10 @@ dotnet test Tests\SessionDeck.Tests.csproj
    snapshots run on a thread-pool thread with no overlapping passes; only the completed snapshot is
    applied on the WPF dispatcher. Do not reintroduce session-file-triggered full scans: busy Claude
    heartbeats can sustain a rewrite stream and previously drove nearly eight scans per second.
-6. A background **MTA thread** tags each row with its virtual desktop via `VirtualDesktop` +
-   `WindowActivator.ResolveWindows`. The UIA-heavy sweep runs only while visible, skips active session
-   scans, normally waits 15s, and backs off to 30–60s after slow UIA or discovery passes.
+6. Nothing reads other windows in the background. Until v0.5.120 a thread tagged each row with the virtual
+   desktop of its terminal's window through UI Automation; every row is a session in the deck's own
+   window, so it could only ever read that (see "Never read the deck's window through UI Automation").
+   `WindowActivator.Activate` still reads another terminal's tabs, once, when asked to focus a session there.
 7. `CodexScanner.Scan()` appends live Codex sessions to the same list (see below). Rows are told apart
    only by the provider mark in the model pill — sort, focus, columns and tooltips are all shared.
 
@@ -1009,7 +1011,7 @@ choppy, with compositor load only partially recovering after the app exited.
 - **`IsAlive`** matches process name `StartsWith("claude")`, because Claude Code's self-update renames
   the running `claude.exe` → `claude.exe.old.<ts>` mid-session.
 - Everything here reads **undocumented** Claude Code / Codex files; parsing is isolated in
-  `SessionScanner` and `CodexScanner` (+ `VirtualDesktop` for the registry desktop list), so a schema
+  `SessionScanner` and `CodexScanner`, so a schema
   change is a one-file fix.
 - **Restore is per-provider, and the two invocations barely rhyme.** Claude gets
   `claude --resume <id> --name <name>`; Codex gets `codex resume <id>` — a *subcommand*, not a flag, and

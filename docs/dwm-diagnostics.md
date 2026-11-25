@@ -32,7 +32,7 @@ Modes:
 - `Full`: normal Mica and normal background work, with telemetry and the guard enabled.
 
 Each run writes a one-second TSV under `%TEMP%\SessionDeck-Dwm`. Event rows correlate startup,
-window visibility, session scans, UI application, Codex probes, and virtual-desktop UIA sweeps with DWM
+window visibility, session scans, UI application and Codex probes with DWM
 and app CPU, resident/private memory, handle/thread counts, and app GDI/USER objects.
 
 The fail-safe exits only the diagnostic app (exit code 86) if either measured bad-state signature appears

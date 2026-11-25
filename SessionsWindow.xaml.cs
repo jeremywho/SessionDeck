@@ -20,7 +20,6 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     CredentialsWatcher? _credentialsWatcher;
     readonly SingleFlight _usagePoll;
     volatile SessionInfo[] _sessionsSnapshot = Array.Empty<SessionInfo>();
-    volatile bool _windowVisible;        // read by the desktop-resolver thread
     ContextMenu _columnsMenu = new();
 
     public ObservableCollection<SessionRow> Rows { get; } = new();
@@ -38,7 +37,6 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
     string _accountTip = "";
     string? _accountUuid;               // last account seen; null until the first reading
     int _scanRunning;                   // one background discovery pass at a time
-    long _lastScanMs;                   // adaptive input for the UIA desktop resolver
 
     /// <summary>
     /// How long after our last successful poll the numbers stop being presentable as current.
@@ -64,7 +62,6 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         Loaded += (_, _) => DwmDiagnostics.Mark("window-loaded", $"backdrop={WindowBackdropType}; size={ActualWidth:0}x{ActualHeight:0}; rows={Rows.Count}");
         IsVisibleChanged += (_, _) =>
         {
-            _windowVisible = IsVisible;
             _prs?.OnVisibilityChanged(IsVisible);
             DwmDiagnostics.Mark("window-visible", IsVisible.ToString());
         };
@@ -170,8 +167,6 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             _timer.Start();
             StartRegistryWatcher();
             StartCodexProbe();
-            if (!ExperimentOptions.DisableDesktopUia)
-                StartDesktopResolver();
             StartUsagePolling();
             StartAccountWatcher();
             _prs.Start();
@@ -183,7 +178,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         RequestRefresh();
         DwmDiagnostics.Mark("window-config",
             $"backdrop={WindowBackdropType}; animations=false; " +
-            $"backgroundWork={!DwmDiagnosticOptions.DisableBackgroundWork}; desktopUia={!ExperimentOptions.DisableDesktopUia}");
+            $"backgroundWork={!DwmDiagnosticOptions.DisableBackgroundWork}");
     }
 
     readonly DispatcherTimer _layoutSave = new() { Interval = TimeSpan.FromMilliseconds(500) };
@@ -364,83 +359,6 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             }
         }) { IsBackground = true, Name = "codex-probe" };
         t.Start();
-    }
-
-    // --- virtual-desktop resolver: tag each row with the desktop its terminal window is on ---
-
-    /// <summary>
-    /// Background MTA loop: map each session to its terminal window (UI Automation) and that window's
-    /// virtual desktop, then tag the rows. Throttled — desktop moves are rare — and off the UI thread
-    /// because the resolution is UIA-heavy. Background thread, so it dies with the process.
-    /// <para>MTA on purpose, and load-bearing: UIA client calls belong on an MTA thread, and this
-    /// loop used to run STA while sleeping between passes — an STA that never pumps messages, which
-    /// both violates COM's pumping contract and gives a stalled UIA/COM call no way to ever
-    /// complete. Skipped entirely while the window is hidden: the desktop pips this feeds aren't
-    /// visible, and the UIA sweep is the app's most expensive recurring touch of other processes.</para>
-    /// </summary>
-    void StartDesktopResolver()
-    {
-        var t = new System.Threading.Thread(() =>
-        {
-            int delayMs = 15000;
-            while (true)
-            {
-                System.Threading.Thread.Sleep(delayMs);
-                try
-                {
-                    var snap = _sessionsSnapshot;
-                    if (_windowVisible && snap.Length > 0 &&
-                        System.Threading.Volatile.Read(ref _scanRunning) == 0)
-                    {
-                        var timer = Stopwatch.StartNew();
-                        var map = ResolveDesktops(snap);
-                        timer.Stop();
-                        IsolationTelemetry.UiaSweep(timer.ElapsedMilliseconds, snap.Length, map.Count);
-                        delayMs = DesktopResolverDelayMs(timer.ElapsedMilliseconds,
-                            System.Threading.Interlocked.Read(ref _lastScanMs));
-                        if (DwmDiagnosticOptions.Enabled || timer.ElapsedMilliseconds >= 2000)
-                            PerformanceLog.Write($"desktop-uia {timer.ElapsedMilliseconds}ms sessions={snap.Length} next={delayMs}ms");
-                        DwmDiagnostics.Mark("desktop-uia", $"elapsedMs={timer.ElapsedMilliseconds}; sessions={snap.Length}; nextMs={delayMs}");
-                        Dispatcher.InvokeAsync(() => ApplyDesktops(map));
-                    }
-                    else delayMs = 5000; // hidden, empty, or scanning: cheap retry without touching UIA
-                }
-                catch (Exception ex)
-                {
-                    DwmDiagnostics.Mark("desktop-uia-error", ex.GetType().Name + ": " + ex.Message);
-                }
-            }
-        }) { IsBackground = true, Name = "vd-resolver" };
-        t.Start();
-    }
-
-    internal static int DesktopResolverDelayMs(long uiaMs, long scanMs) =>
-        uiaMs >= 5000 || scanMs >= 3000 ? 60000 :
-        uiaMs >= 2000 || scanMs >= 1000 ? 30000 : 15000;
-
-    static Dictionary<string, (int Index, bool Current)> ResolveDesktops(SessionInfo[] sessions)
-    {
-        var result = new Dictionary<string, (int, bool)>();
-        var windows = WindowActivator.ResolveWindows(sessions);
-        if (windows.Count == 0) return result;
-        var (order, current) = VirtualDesktop.Layout();
-        foreach (var kv in windows)
-        {
-            var g = VirtualDesktop.DesktopOf(kv.Value);
-            if (g == Guid.Empty) continue;
-            result[kv.Key] = (order.IndexOf(g), g == current);
-        }
-        return result;
-    }
-
-    void ApplyDesktops(Dictionary<string, (int Index, bool Current)> map)
-    {
-        if (ExperimentOptions.FreezeGrid) return;
-        foreach (var row in Rows)
-        {
-            if (map.TryGetValue(row.SessionId, out var d)) row.SetDesktop(d.Index, d.Current);
-            else row.SetDesktop(-1, true);
-        }
     }
 
     // --- Content zoom: Ctrl + mouse wheel (like a browser), Ctrl+0 resets. ---
@@ -1032,7 +950,6 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             var scan = await System.Threading.Tasks.Task.Run(() =>
             {
                 var result = SessionPipeline.Scan();
-                System.Threading.Interlocked.Exchange(ref _lastScanMs, result.ElapsedMs);
                 NoteScan(result.ElapsedMs);
                 return result;
             });

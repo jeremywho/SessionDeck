@@ -19,7 +19,8 @@ internal static class WindowActivator
         if (hostPid == 0 || !byPid.TryGetValue(hostPid, out var windows) || windows.Count == 0)
             return false;
 
-        // Never our own window through UI Automation (ResolveWindows says why): bringing it forward is all there is.
+        // Never our own window through UI Automation: its browser then keeps an accessibility tree for the page
+        // until the app exits, and every tab switch costs some 200 ms more (AGENTS.md).
         if (hostPid == Environment.ProcessId) { ForceForeground(windows[0].Hwnd); return true; }
 
         var hwnds = windows.Select(w => w.Hwnd).ToList();
@@ -160,55 +161,6 @@ internal static class WindowActivator
         IntPtr bt = MatchByTitle(windows, candidates);
         if (bt != IntPtr.Zero) return $"window-title match (hwnd {bt.ToInt64()})";
         return windows.Count == 1 ? $"single window (hwnd {windows[0].Hwnd.ToInt64()})" : "(no match)";
-    }
-
-    /// <summary>
-    /// Batch-resolve each session to the top-level window hosting its tab — one UIA pass over all the
-    /// host windows, not one per session. Returns sessionId -> window hwnd. Used by the desktop resolver.
-    /// </summary>
-    public static Dictionary<string, IntPtr> ResolveWindows(IReadOnlyCollection<SessionInfo> sessions) =>
-        sessions.Count == 0 ? new() : ResolveWindows(sessions, Native.TopWindowsByPid(), Native.BuildParentMap(), Environment.ProcessId, TabSelector.EnumerateTabs);
-
-    internal static Dictionary<string, IntPtr> ResolveWindows(IReadOnlyCollection<SessionInfo> sessions,
-        Dictionary<int, List<(IntPtr Hwnd, string Title)>> byPid, Dictionary<int, int> parents, int ownPid,
-        Func<IEnumerable<IntPtr>, List<(IntPtr Hwnd, string Norm)>> enumerateTabs)
-    {
-        var result = new Dictionary<string, IntPtr>();
-        var hostWindows = new HashSet<IntPtr>();
-        var perSession = new Dictionary<string, List<(IntPtr Hwnd, string Title)>>();
-        foreach (var s in sessions)
-        {
-            int host = FindHostPid(s.Pid, byPid, parents);
-            if (host != 0 && byPid.TryGetValue(host, out var ws))
-            {
-                // A session this app hosts is in this app's window, and that is known without asking. Reading our
-                // own window through UI Automation makes its browser keep an accessibility tree for the page until
-                // the app exits, and every tab switch then costs some 200 ms more (AGENTS.md).
-                if (host == ownPid) { result[s.SessionId] = ws[0].Hwnd; continue; }
-                perSession[s.SessionId] = ws;
-                foreach (var w in ws) hostWindows.Add(w.Hwnd);
-            }
-        }
-        if (hostWindows.Count == 0) return result;
-
-        var tabs = enumerateTabs(hostWindows);
-        foreach (var s in sessions)
-        {
-            if (!perSession.TryGetValue(s.SessionId, out var ws)) continue;
-            var cands = Candidates(s);
-            IntPtr hwnd = MatchTab(tabs, cands);
-            if (hwnd == IntPtr.Zero) hwnd = MatchByTitle(ws, cands);
-            if (hwnd == IntPtr.Zero && ws.Count == 1) hwnd = ws[0].Hwnd;
-            if (hwnd != IntPtr.Zero) result[s.SessionId] = hwnd;
-        }
-        return result;
-    }
-
-    static IntPtr MatchTab(List<(IntPtr Hwnd, string Norm)> tabs, List<string> cands)
-    {
-        foreach (var c in cands) foreach (var t in tabs) if (t.Norm == c) return t.Hwnd;
-        foreach (var c in cands) foreach (var t in tabs) if (t.Norm.Contains(c) || c.Contains(t.Norm)) return t.Hwnd;
-        return IntPtr.Zero;
     }
 
     /// <summary>SetForegroundWindow with the AttachThreadInput dance to bypass focus-stealing limits.</summary>

@@ -84,29 +84,3 @@ internal sealed class ProviderColorConverter : IValueConverter
     public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
         => Binding.DoNothing;
 }
-
-/// <summary>Virtual-desktop index -> a subtle dot color (non-status hues). -1 => transparent (no dot).</summary>
-internal sealed class DesktopColorConverter : IValueConverter
-{
-    static readonly Brush[] Palette =
-    {
-        Frozen(0x33, 0xC4, 0xC4),  // teal
-        Frozen(0xA7, 0x7C, 0xE8),  // purple
-        Frozen(0xE8, 0x7C, 0xB0),  // pink
-        Frozen(0xD8, 0x6A, 0xD8),  // magenta
-    };
-
-    static Brush Frozen(byte r, byte g, byte b)
-    {
-        var brush = new SolidColorBrush(Color.FromRgb(r, g, b));
-        brush.Freeze();   // free thread-safety + no per-instance change tracking
-        return brush;
-    }
-    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
-    {
-        int i = value is int n ? n : -1;
-        return i < 0 ? Brushes.Transparent : Palette[i % Palette.Length];
-    }
-    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
-        => Binding.DoNothing;
-}

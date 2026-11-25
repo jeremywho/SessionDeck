@@ -75,12 +75,6 @@ internal static class IsolationTelemetry
         }
     }
 
-    internal static void UiaSweep(long elapsedMs, int sessions, int resolved)
-    {
-        if (_writer == null) return;
-        lock (Gate) WriteLocked("terminal-uia", $"elapsedMs={elapsedMs};sessions={sessions};resolved={resolved}");
-    }
-
     internal static void CodexProbe(long elapsedMs, CodexProbeStats stats)
     {
         if (_writer == null) return;

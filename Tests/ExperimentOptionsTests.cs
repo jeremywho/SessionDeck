@@ -9,7 +9,6 @@ public class ExperimentOptionsTests
     {
         string[] names =
         {
-            ExperimentOptions.DisableDesktopUiaVariable,
             ExperimentOptions.FreezeGridVariable,
             ExperimentOptions.LogPathVariable,
         };
@@ -17,7 +16,6 @@ public class ExperimentOptionsTests
 
         try
         {
-            Environment.SetEnvironmentVariable(ExperimentOptions.DisableDesktopUiaVariable, null);
             Environment.SetEnvironmentVariable(ExperimentOptions.FreezeGridVariable, null);
             Environment.SetEnvironmentVariable(ExperimentOptions.LogPathVariable, @"C:\Temp\monitor.tsv");
 

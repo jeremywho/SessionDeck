@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('Normal', 'NoDesktopUia', 'FrozenGrid')]
+    [ValidateSet('Normal', 'FrozenGrid')]
     [string] $Mode = 'Normal'
 )
 
@@ -22,7 +22,6 @@ $start = [System.Diagnostics.ProcessStartInfo]::new($exe)
 $start.WorkingDirectory = $repo
 $start.UseShellExecute = $false
 $start.Environment['SD_NO_INSTALL'] = '1'
-$start.Environment.Remove('SD_EXPERIMENT_DISABLE_DESKTOP_UIA') | Out-Null
 $start.Environment.Remove('SD_EXPERIMENT_FREEZE_GRID') | Out-Null
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $logDir = Join-Path $env:TEMP 'SessionDeck-Isolation'
@@ -32,15 +31,14 @@ $healthPath = Join-Path $logDir "$stamp-$($Mode.ToLowerInvariant())-health.csv"
 $start.Environment['SD_EXPERIMENT_LOG'] = $logPath
 
 switch ($Mode) {
-    'NoDesktopUia' { $start.Environment['SD_EXPERIMENT_DISABLE_DESKTOP_UIA'] = '1' }
     'FrozenGrid' { $start.Environment['SD_EXPERIMENT_FREEZE_GRID'] = '1' }
 }
 
 Write-Host "Starting instrumented Claude Session Monitor: $Mode"
 Write-Host "Telemetry: $logPath"
 Write-Host "Health telemetry: $healthPath"
-Write-Host 'Normal: production behavior. NoDesktopUia: live grid, no recurring Terminal accessibility sweep.'
-Write-Host 'FrozenGrid: recurring scanners and Terminal accessibility sweep remain active; grid rows stop changing after initial population.'
+Write-Host 'Normal: production behavior.'
+Write-Host 'FrozenGrid: recurring scanners remain active; grid rows stop changing after initial population.'
 Write-Host 'Exit from the tray menu when the observation is complete.'
 
 $process = [System.Diagnostics.Process]::Start($start)

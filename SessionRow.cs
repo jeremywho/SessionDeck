@@ -280,13 +280,6 @@ internal sealed class SessionRow : INotifyPropertyChanged
 
     readonly bool _hosted;
 
-    // --- virtual desktop (set by the throttled resolver, independent of the status scan) ---
-    int _desktopIndex = -1;       // 0 = Desktop 1, 1 = Desktop 2, …; -1 = unknown
-    bool _onCurrentDesktop = true;
-    public int DesktopIndex => _desktopIndex;
-    public bool OnOtherDesktop => _desktopIndex >= 0 && !_onCurrentDesktop;
-    public string DesktopLabel => _desktopIndex >= 0 ? $"Desktop {_desktopIndex + 1}" : "";
-
     /// <summary>What a group membership is keyed on: the conversation running in the pane once known, else the host.</summary>
     public string GroupKey => LiveSessionId.Length > 0 ? LiveSessionId : Host.Id;
 
@@ -309,18 +302,6 @@ internal sealed class SessionRow : INotifyPropertyChanged
         if (h == null) return;
         h(this, new PropertyChangedEventArgs(nameof(GroupOrder)));
         h(this, new PropertyChangedEventArgs(nameof(GroupName)));
-    }
-
-    public void SetDesktop(int index, bool onCurrent)
-    {
-        if (_desktopIndex == index && _onCurrentDesktop == onCurrent) return;
-        _desktopIndex = index; _onCurrentDesktop = onCurrent;
-        var h = PropertyChanged;
-        if (h == null) return;
-        h(this, new PropertyChangedEventArgs(nameof(DesktopIndex)));
-        h(this, new PropertyChangedEventArgs(nameof(OnOtherDesktop)));
-        h(this, new PropertyChangedEventArgs(nameof(DesktopLabel)));
-        h(this, new PropertyChangedEventArgs(nameof(RowTooltip)));
     }
 
     // --- background work this session has in flight ---
@@ -383,7 +364,6 @@ internal sealed class SessionRow : INotifyPropertyChanged
                     // Nothing restarts it by itself: a restart ends an agent's timers and subagents, and is the person's to choose.
                     : "Deck updated: this chat can show different things here and on the phone until it restarts · right-click to restart now"
                 : "Deck updated: this pane cannot open on the phone until it restarts · restarts when idle, or right-click to restart now");
-            if (OnOtherDesktop) lines.Add($"On {DesktopLabel}");
             if (_s.SubagentsActive > 0) lines.Add($"Subagents: {_s.SubagentsActive} working / {_s.SubagentsTotal} this session");
             if (_s.ApiError && _s.ErrorText.Length > 0) lines.Add(_s.ErrorText);
             return string.Join("\n", lines);
