@@ -17,15 +17,15 @@ internal sealed class AxWatch
     internal const string ModesHistogram = "Accessibility.ModeFlag", ApisHistogram = "Accessibility.WinAPIs";
 
     internal const int AskEveryMs = 5000, CallsEveryMs = 60000, ApisNamed = 8;
-    internal const int RequestsAtFirst = 10, RequestEveryMs = 60000;
+    internal const int RequestsAtFirst = 10, RequestEveryMs = 60000, StartupMs = 5000;
 
     bool _asked;
     long _askedAt;
     string? _modesSaid;
     long _callsSaid, _saidAt;
     bool _unavailableSaid;
-    int _requests;
-    long _requestSaidAt;
+    int _requests, _requestsSaid;
+    long _firstRequestAt, _requestSaidAt;
 
     /// <summary>
     /// Whether a report from the page is one to ask the browser about: a switch slow enough to be taken apart, or
@@ -84,13 +84,16 @@ internal sealed class AxWatch
     }
 
     /// <summary>
-    /// Counts one request for an accessibility object and says whether it is worth a line: the first ten of a
-    /// run, then one a minute. The count so far is handed back for the line.
+    /// Counts one request for an accessibility object and says whether it is worth a line: the first of a run,
+    /// then the first ten made once the window is up, then one a minute. The count so far is handed back.
     /// </summary>
     internal bool Request(long nowMs, out int count)
     {
         count = ++_requests;
-        if (count > RequestsAtFirst && nowMs - _requestSaidAt < RequestEveryMs) return false;
+        if (count == 1) { _firstRequestAt = nowMs; return true; }
+        // Windows asks a new window ten times over as it is made; those are counted and not said.
+        if (nowMs - _firstRequestAt < StartupMs) return false;
+        if (++_requestsSaid > RequestsAtFirst && nowMs - _requestSaidAt < RequestEveryMs) return false;
         _requestSaidAt = nowMs;
         return true;
     }

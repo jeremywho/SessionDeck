@@ -81,11 +81,11 @@ dotnet test Tests\SessionDeck.Tests.csproj
   - `ax-request objid=OBJID_CLIENT foreground=<process> n=71`: a `WM_GETOBJECT` reached the deck's top-level
     window (a hook in `SessionsWindow`, which leaves the message to WPF): something asked it for an
     accessibility object. `UiaRootObjectId` is UI Automation, `OBJID_CLIENT`/`OBJID_WINDOW` the older
-    interface (MSAA), -12 the class-name question that comes with it. The first ten of a run, then one a
-    minute; `n` counts them all, so its growth between lines is the rate. `foreground` is whose window had
-    the foreground, which is not who asked (the message does not say). On the second machine ten arrived as
-    the window was made, with no client, and used up the first ten; a request made of the browser's own
-    windows never comes here.
+    interface (MSAA), -12 the class-name question that comes with it. The first of a run, then the first
+    ten made once the window has been up five seconds, then one a minute; `n` counts them all, so its growth
+    between lines is the rate. (Windows asks a new window about ten times as it is made, with no client:
+    those are counted and not said.) `foreground` is whose window had the foreground, which is not who asked
+    (the message does not say). A request made of the browser's own windows never comes here.
   - What the two showed on the second machine (2026-11-24, v0.5.120 plus these, WebView2 158, four fixture
     chats): no client, switches 73-119 ms, `page-ax modes=- apis=- calls=0`. A UI Automation client:
     336-424 ms, `modes=0,1,3 .. calls=910`. **A client of the older interface that asked once and exited**

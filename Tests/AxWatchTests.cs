@@ -127,21 +127,27 @@ public class AxWatchTests
         Assert.Equal(prompts, Prompts(json));
 
     [Fact]
-    public void The_first_ten_requests_are_said_then_one_a_minute_and_all_are_counted()
+    public void The_first_ten_requests_once_the_window_is_up_are_said_then_one_a_minute_and_all_are_counted()
     {
-        for (int i = 1; i <= AxWatch.RequestsAtFirst; i++)
-        {
-            Assert.True(_watch.Request(1_000 + i, out int n));
-            Assert.Equal(i, n);
-        }
-        Assert.False(_watch.Request(1_011, out int eleventh));
+        // As the window is made Windows asks ten times in a fifth of a second: the first is said, the rest counted.
+        Assert.True(_watch.Request(1_000, out int first));
+        Assert.Equal(1, first);
+        for (int i = 2; i <= 10; i++) Assert.False(_watch.Request(1_000 + i * 20, out _));
+        Assert.False(_watch.Request(1_000 + AxWatch.StartupMs - 1, out int eleventh));
         Assert.Equal(11, eleventh);
-        Assert.False(_watch.Request(61_009, out _));
-        Assert.True(_watch.Request(61_010, out int thirteenth));
-        Assert.Equal(13, thirteenth);
-        Assert.False(_watch.Request(61_011, out _));
-        Assert.True(_watch.Request(121_010, out int fifteenth));
-        Assert.Equal(15, fifteenth);
+
+        long up = 1_000 + AxWatch.StartupMs;
+        for (int i = 0; i < AxWatch.RequestsAtFirst; i++)
+        {
+            Assert.True(_watch.Request(up + i, out int n));
+            Assert.Equal(12 + i, n);
+        }
+        long last = up + AxWatch.RequestsAtFirst - 1;
+        Assert.False(_watch.Request(last + 1, out _));
+        Assert.False(_watch.Request(last + AxWatch.RequestEveryMs - 1, out _));
+        Assert.True(_watch.Request(last + AxWatch.RequestEveryMs, out int later));
+        Assert.Equal(24, later);
+        Assert.False(_watch.Request(last + AxWatch.RequestEveryMs + 1, out _));
     }
 
     [Theory]
