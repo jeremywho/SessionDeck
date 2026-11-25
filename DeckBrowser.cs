@@ -28,6 +28,7 @@ internal sealed class DeckBrowser : Grid
     WebView2? _web;
     bool _ready;
     readonly PageWatch _watch = new();
+    readonly AxWatch _ax = new();
     bool _dark;
     readonly Queue<object> _pending = new();
     readonly TextBlock _status = new()
@@ -145,6 +146,7 @@ internal sealed class DeckBrowser : Grid
                 case "pace":
                 case "visibility":
                     if (_watch.Line(root, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()) is { } watched) PerformanceLog.Write(watched);
+                    if (AxWatch.Prompts(root)) AskAccessibility();
                     return;
                 case "disconnected":
                 case "connected":
@@ -162,6 +164,20 @@ internal sealed class DeckBrowser : Grid
             Dispatch(root, Message, PageMessage);
         }
         catch (Exception ex) { App.LogError(ex); }
+    }
+
+    async void AskAccessibility()
+    {
+        if (_web?.CoreWebView2 is not { } core || !_ax.ShouldAsk(NowMs)) return;
+        string? line;
+        try
+        {
+            string modes = await core.CallDevToolsProtocolMethodAsync("Browser.getHistograms", AxWatch.Question(AxWatch.ModesHistogram));
+            string apis = await core.CallDevToolsProtocolMethodAsync("Browser.getHistograms", AxWatch.Question(AxWatch.ApisHistogram));
+            line = _ax.PageLine(modes, apis, NowMs);
+        }
+        catch (Exception ex) { line = _ax.Unavailable(ex.Message); }
+        if (line != null) PerformanceLog.Write(line);
     }
 
     internal static void Dispatch(JsonElement root, Action<string, string, JsonElement>? host, Action<string, JsonElement>? page)

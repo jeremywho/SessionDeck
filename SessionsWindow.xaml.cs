@@ -59,6 +59,7 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
         SessionsGrid.UnloadingRow += (_, _) => IsolationTelemetry.RowUnloaded();
         DataContext = this;
         SourceInitialized += (_, _) => DwmDiagnostics.Mark("window-source", $"backdrop={WindowBackdropType}; hwnd={new System.Windows.Interop.WindowInteropHelper(this).Handle}");
+        SourceInitialized += (_, _) => System.Windows.Interop.HwndSource.FromHwnd(new System.Windows.Interop.WindowInteropHelper(this).Handle)?.AddHook(NoteAccessibilityRequest);
         Loaded += (_, _) => DwmDiagnostics.Mark("window-loaded", $"backdrop={WindowBackdropType}; size={ActualWidth:0}x{ActualHeight:0}; rows={Rows.Count}");
         IsVisibleChanged += (_, _) =>
         {
@@ -359,6 +360,27 @@ internal partial class SessionsWindow : Wpf.Ui.Controls.FluentWindow
             }
         }) { IsBackground = true, Name = "codex-probe" };
         t.Start();
+    }
+
+    readonly AxWatch _axRequests = new();
+
+    /// <summary>
+    /// Notes, for the performance log, that something asked this window for an accessibility object. The message
+    /// is left for WPF to answer as it would have.
+    /// </summary>
+    IntPtr NoteAccessibilityRequest(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        const int WM_GETOBJECT = 0x003D;
+        if (msg != WM_GETOBJECT || !_axRequests.Request(Environment.TickCount64, out int count)) return IntPtr.Zero;
+        long objectId = lParam.ToInt64();
+        Native.GetWindowThreadProcessId(Native.GetForegroundWindow(), out uint foreground);
+        System.Threading.ThreadPool.QueueUserWorkItem(_ =>
+        {
+            string name = "";
+            try { using var process = Process.GetProcessById((int)foreground); name = process.ProcessName; } catch { }
+            PerformanceLog.Write(AxWatch.RequestLine(objectId, name, count));
+        });
+        return IntPtr.Zero;
     }
 
     // --- Content zoom: Ctrl + mouse wheel (like a browser), Ctrl+0 resets. ---

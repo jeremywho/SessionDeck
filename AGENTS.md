@@ -65,6 +65,34 @@ dotnet test Tests\SessionDeck.Tests.csproj
     from then on every switch costs a fixed 170 to 195 ms of `render` whatever the size of the chat
     (`frames=-`). One run of two hours and 2,600 keys never turned. It is not a matter of the version: an
     earlier note here said "slow since v0.5.115", which was the timing of restarts.
+  - `page-ax modes=0,1,3 apis=18:211 139:206 2:69 .. calls=910`: whether the page has an accessibility tree,
+    from the browser's own counts (`AxWatch`; `Browser.getHistograms` over
+    `CoreWebView2.CallDevToolsProtocolMethodAsync`, for `Accessibility.ModeFlag` and `Accessibility.WinAPIs`).
+    Asked only when the page reports a `switch-parts` or a `page-stall` with `ran=-`, at most every 5 s; no
+    timer. A line is written for the first answer of a run, when the set of modes changes, and at most once a
+    minute while `calls` grows. `modes=-` is no tree (`modes=- apis=- calls=0` is the healthy reading, and
+    shows the question was answered). Modes: 0 native APIs, 1 web contents (the tree: this is what costs),
+    2 inline text boxes, 3 extended properties, 4 HTML, 11 screen reader. `apis=` is the eight kinds of call
+    made most into the page's accessibility objects, as Chromium's `UMA_API_*` number and a count
+    (`ui/accessibility/platform/ax_platform_node_win.h`: 2 location, 9 child, 10 child count, 17 name,
+    18 parent, 19 role, 21 state, 139 QueryService; 97 property value, 98 provider options and 158 and up are
+    UI Automation's own). It does not say which interface the client used: a UI Automation client shows
+    mostly the low numbers too. `page-ax unavailable=..` (once) is the browser refusing the question.
+  - `ax-request objid=OBJID_CLIENT foreground=<process> n=71`: a `WM_GETOBJECT` reached the deck's top-level
+    window (a hook in `SessionsWindow`, which leaves the message to WPF): something asked it for an
+    accessibility object. `UiaRootObjectId` is UI Automation, `OBJID_CLIENT`/`OBJID_WINDOW` the older
+    interface (MSAA), -12 the class-name question that comes with it. The first ten of a run, then one a
+    minute; `n` counts them all, so its growth between lines is the rate. `foreground` is whose window had
+    the foreground, which is not who asked (the message does not say). On the second machine ten arrived as
+    the window was made, with no client, and used up the first ten; a request made of the browser's own
+    windows never comes here.
+  - What the two showed on the second machine (2026-11-24, v0.5.120 plus these, WebView2 158, four fixture
+    chats): no client, switches 73-119 ms, `page-ax modes=- apis=- calls=0`. A UI Automation client:
+    336-424 ms, `modes=0,1,3 .. calls=910`. **A client of the older interface that asked once and exited**
+    (`AccessibleObjectFromWindow(OBJID_CLIENT)` on the deck's window and the three `Chrome_*` windows under
+    it, name and child count of each: 16 calls): 294-368 ms from then on, `modes=0,1 apis=139:4 18:3 10:2
+    17:2 .. calls=16`, and no `UIA_PIPE_*` at any point. So a slow deck with no UI Automation pipe is what
+    one such call leaves behind. Rig: `C:\Temp\chatlab\dell-rig\run5.sh` on the machine this was written on.
   - `page-visibility hidden|visible` (a hidden page is given no frames, and draws what it missed when it is
     back), and `pane-socket lost host=..` then `pane-socket back host=..` (a pane's socket to its host dropped;
     the pane reconnects itself, and is logged once however often it has to ask).
