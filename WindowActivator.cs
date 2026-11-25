@@ -19,6 +19,9 @@ internal static class WindowActivator
         if (hostPid == 0 || !byPid.TryGetValue(hostPid, out var windows) || windows.Count == 0)
             return false;
 
+        // Never our own window through UI Automation (ResolveWindows says why): bringing it forward is all there is.
+        if (hostPid == Environment.ProcessId) { ForceForeground(windows[0].Hwnd); return true; }
+
         var hwnds = windows.Select(w => w.Hwnd).ToList();
 
         // Best: ask the session's own console what its title is, and find the tab wearing it. This is
@@ -137,6 +140,7 @@ internal static class WindowActivator
         int hostPid = FindHostPid(s.Pid, byPid);
         if (hostPid == 0 || !byPid.TryGetValue(hostPid, out var windows) || windows.Count == 0)
             return "(no host window)";
+        if (hostPid == Environment.ProcessId) return $"this app's own window (hwnd {windows[0].Hwnd.ToInt64()})";
 
         string? live = ConsoleTitle.Read(s.Pid);
         if (!string.IsNullOrWhiteSpace(live))
@@ -162,14 +166,14 @@ internal static class WindowActivator
     /// Batch-resolve each session to the top-level window hosting its tab — one UIA pass over all the
     /// host windows, not one per session. Returns sessionId -> window hwnd. Used by the desktop resolver.
     /// </summary>
-    public static Dictionary<string, IntPtr> ResolveWindows(IReadOnlyCollection<SessionInfo> sessions)
+    public static Dictionary<string, IntPtr> ResolveWindows(IReadOnlyCollection<SessionInfo> sessions) =>
+        sessions.Count == 0 ? new() : ResolveWindows(sessions, Native.TopWindowsByPid(), Native.BuildParentMap(), Environment.ProcessId, TabSelector.EnumerateTabs);
+
+    internal static Dictionary<string, IntPtr> ResolveWindows(IReadOnlyCollection<SessionInfo> sessions,
+        Dictionary<int, List<(IntPtr Hwnd, string Title)>> byPid, Dictionary<int, int> parents, int ownPid,
+        Func<IEnumerable<IntPtr>, List<(IntPtr Hwnd, string Norm)>> enumerateTabs)
     {
         var result = new Dictionary<string, IntPtr>();
-        if (sessions.Count == 0) return result;
-
-        var byPid = Native.TopWindowsByPid();
-        var parents = Native.BuildParentMap();
-
         var hostWindows = new HashSet<IntPtr>();
         var perSession = new Dictionary<string, List<(IntPtr Hwnd, string Title)>>();
         foreach (var s in sessions)
@@ -177,13 +181,17 @@ internal static class WindowActivator
             int host = FindHostPid(s.Pid, byPid, parents);
             if (host != 0 && byPid.TryGetValue(host, out var ws))
             {
+                // A session this app hosts is in this app's window, and that is known without asking. Reading our
+                // own window through UI Automation makes its browser keep an accessibility tree for the page until
+                // the app exits, and every tab switch then costs some 200 ms more (AGENTS.md).
+                if (host == ownPid) { result[s.SessionId] = ws[0].Hwnd; continue; }
                 perSession[s.SessionId] = ws;
                 foreach (var w in ws) hostWindows.Add(w.Hwnd);
             }
         }
         if (hostWindows.Count == 0) return result;
 
-        var tabs = TabSelector.EnumerateTabs(hostWindows);
+        var tabs = enumerateTabs(hostWindows);
         foreach (var s in sessions)
         {
             if (!perSession.TryGetValue(s.SessionId, out var ws)) continue;

@@ -204,7 +204,9 @@ the window's position/size is remembered on close, so it reopens where you left 
 - A known cause of slow tab switches: any program that reads the deck's window through UI Automation (a
   screen reader, but also tools that only look at the focused control) makes the embedded browser keep an
   accessibility tree for the page until Session Deck is restarted, and each tab switch then costs a few
-  hundred milliseconds more. Restarting Session Deck clears it. No setting prevents it yet.
+  hundred milliseconds more. Until v0.5.119 Session Deck did this to itself about a minute after it
+  started or restarted a session. Restarting Session Deck clears it; nothing prevents another program
+  from doing it yet.
 - Slow background scans and Windows UI Automation sweeps are recorded in the bounded
   `%TEMP%\sessiondeck-performance.log` for troubleshooting.
 - `--list` / `--windows` headless modes dump the session list / focus mapping to `%TEMP%`.

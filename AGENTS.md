@@ -146,15 +146,27 @@ dotnet test Tests\SessionDeck.Tests.csproj
     (none pins the mode; on-screen is the cheapest tree, still two to three times slower than none).
   - `aria-hidden` on every conversation does not take the cost away (the copy with the tree forced on:
     490 ms against 542).
-  - On the deck this was found on, something turns it on at a moment focus goes into a chat's message box
-    (see `switch-parts` above); which program was not found. The other end of the deck's UI Automation pipe
-    is held by a process that cannot be opened from an ordinary one (`C:\Temp\chatlab\pipe-owner.ps1`).
-    On the second machine (Windows 10) none of these turned it on: the touch keyboard program running, the
+  - **The client was the deck itself** (fixed in v0.5.119). `SessionsWindow.StartDesktopResolver` asks
+    `WindowActivator.ResolveWindows` every 15 to 60 s for the window each session's terminal is in: the first
+    ancestor process with a visible titled window, read through UI Automation for its tabs
+    (`TabSelector.EnumerateTabs`, a walk of every descendant). A host the running deck started is its child,
+    so that window was the deck's own and the walk went into its page. Hosts taken over from an earlier
+    run are not children, which is why a deck was fast after an update until the first new or restarted
+    session, and why one run of two hours with neither never turned. `ResolveWindows`, `Activate` and
+    `DebugPick` now map a session hosted by this process to this window without UI Automation
+    (`WindowActivatorTests`). Shown on the second machine: the build before went from 81-133 ms to
+    237-406 ms about a minute after one "Restart session", with both ends of `UIA_PIPE_<deck>_*` held by
+    the deck and 1.17 million accessibility calls counted by the browser; the same build with no restart
+    stayed fast; the fixed build with the restart stayed at 50-138 ms with no pipe and no mode.
+    `C:\Temp\chatlab\pipe-owner.ps1` (run elevated) says who holds each end: the deck alone means a
+    self-read, a second process means an outside client.
+  - On the second machine (Windows 10) none of these turned it on: the touch keyboard program running, the
     touch keyboard shown with the box focused, the emoji panel, the screen-snip overlay.
   - Nothing in the page can see whether the tree is on. The sign is `switch-parts` with `render` far above
     the long frames listed.
-  - Not tried: hosting the browser without a window of its own (`WebView2CompositionControl`), which leaves
-    no path into the page for a client unless the app hands one out.
+  - An outside client still does it (the fixed build with a client attached: 350-438 ms). Not tried against
+    that: hosting the browser without a window of its own (`WebView2CompositionControl`), which leaves no
+    path into the page for a client unless the app hands one out.
 - DWM investigation is opt-in and documented in `docs/dwm-diagnostics.md`. The diagnostic launcher
   separates Mica from recurring work, records one-second DWM/app telemetry, and exits only the test app
   if the known sustained-DWM-CPU/resident-growth signature appears. Never enable that logging normally.
