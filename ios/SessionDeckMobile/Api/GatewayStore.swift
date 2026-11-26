@@ -264,6 +264,15 @@ final class GatewayStore: ObservableObject {
 
     // MARK: events feed
 
+    enum AfterFeed: Equatable { case retry, relay }
+
+    /// The events feed has ended: go round by the relay only when the phone was on the home network and that no longer
+    /// answers; otherwise try the same way again.
+    nonisolated static func afterFeedEnded(on pairing: Pairing, relay: Pairing?, homeAnswers: Bool) -> AfterFeed {
+        guard let relay, pairing != relay, !homeAnswers else { return .retry }
+        return .relay
+    }
+
     /// Drop the backoff and try the gateway again now.
     func reconnectNow() async {
         startEvents()
@@ -279,13 +288,20 @@ final class GatewayStore: ObservableObject {
                 let started = Date()
                 await self.runEvents(pairing)
                 if Task.isCancelled { return }
-                // The home network went away (the phone left the house): go round by the relay without waiting out the backoff.
-                if let relay = self.relayPairing, pairing != relay {
+                // The feed also ends each time iOS suspends the app (a quick look at another app does it), not only
+                // when the phone leaves the house. A change of path reloads every open chat page, which drops the
+                // reader's place, so the home network is asked first.
+                let relay = self.relayPairing
+                let onHome = relay.map { pairing != $0 } ?? false
+                let homeAnswers = onHome ? await self.answers(pairing) : false
+                if Task.isCancelled { return }
+                if let relay, Self.afterFeedEnded(on: pairing, relay: relay, homeAnswers: homeAnswers) == .relay {
                     LaunchOptions.log("path: lan feed failed, falling back to the relay")
                     self.pairing = relay
                     attempt = 0
                     continue
                 }
+                if onHome { LaunchOptions.log("path: lan feed ended, the home network still answers") }
                 if Date().timeIntervalSince(started) > 15 { attempt = 0 }
                 let delay = min(30.0, 0.5 * pow(2.0, Double(min(attempt, 6))))
                 attempt += 1

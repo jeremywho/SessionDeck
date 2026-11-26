@@ -64,6 +64,17 @@ final class ModelsTests: XCTestCase {
         XCTAssertNil(GatewayStore.relay(url: "https://x", key: ""))
     }
 
+    /// The feed ends whenever iOS suspends the app, and a change of path reloads every open chat page: the phone
+    /// leaves the home network only when it no longer answers.
+    @MainActor func testAnEndedFeedGoesRoundByTheRelayOnlyWhenTheHomeNetworkNoLongerAnswers() {
+        let relay = GatewayStore.relay(url: "https://sessiondeck.0a.gg", key: "k")!
+        let home = GatewayStore.lan(base: "http://192.168.0.57:7420", key: "k")!
+        XCTAssertEqual(GatewayStore.afterFeedEnded(on: home, relay: relay, homeAnswers: true), .retry)
+        XCTAssertEqual(GatewayStore.afterFeedEnded(on: home, relay: relay, homeAnswers: false), .relay)
+        XCTAssertEqual(GatewayStore.afterFeedEnded(on: relay, relay: relay, homeAnswers: false), .retry)
+        XCTAssertEqual(GatewayStore.afterFeedEnded(on: home, relay: nil, homeAnswers: false), .retry)
+    }
+
     let sample = """
     {"type":"sessions","sessions":[{"hostId":"h1","sessionId":"s1","provider":"Claude","name":"alpha","modelChip":"Opus 5","effort":"high","state":"Completed","stateSinceMs":1793300000000,"subagents":0,"group":"tr","groupOrder":1,"sortPriority":3,"cwd":"C:\\\\x","hostExited":false,"mobileReady":true},{"hostId":"h2","sessionId":"","provider":"Shell","name":"Terminal","modelChip":"","effort":"","state":"Idle","stateSinceMs":0,"subagents":0,"group":"","groupOrder":0,"sortPriority":8,"cwd":"","hostExited":false,"mobileReady":false}]}
     """
